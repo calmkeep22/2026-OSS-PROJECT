@@ -24,11 +24,14 @@ import org.ossproject.accessibility.infrastructure.speech.SpeechAdapterFactory;
 import org.ossproject.finance.model.*;
 import org.ossproject.application.usecase.OrderUseCase;
 import org.ossproject.application.usecase.PortfolioUseCase;
+import org.ossproject.desktop.chart.AccessibleChartController;
+import org.ossproject.desktop.chart.AccessibleChartView;
 import org.ossproject.desktop.presentation.Formatters;
 import org.ossproject.fake.FakeStockQueryAdapter;
 import org.ossproject.mocktrading.InMemoryMockTradingAdapter;
 import org.ossproject.anomaly.AnomalyAlert;
 import org.ossproject.anomaly.RuleBasedAnomalyDetector;
+import org.ossproject.sonification.infrastructure.sound.PcmGraphSonificationAdapter;
 
 import java.math.BigDecimal;
 import java.util.EnumMap;
@@ -37,7 +40,7 @@ import java.util.concurrent.CompletableFuture;
 
 public final class DesktopApplication extends Application {
     private enum Screen {
-        DASHBOARD("대시보드"), STOCKS("종목"), ACCOUNT("계좌"), ANOMALY("이상 감지"),
+        DASHBOARD("대시보드"), STOCKS("종목"), ACCOUNT("계좌"), RADIO("청각 차트"), ANOMALY("이상 감지"),
         PATTERNS("유사 패턴"), NEWS("뉴스 · 챗봇"), SETTINGS("음성 · 설정");
         private final String label;
         Screen(String label) { this.label = label; }
@@ -51,6 +54,8 @@ public final class DesktopApplication extends Application {
     private final SpeechPort speechPort = SpeechAdapterFactory.create();
     private final SpeechQueue speechQueue = new SpeechQueue(speechPort, defaultSpeechOptions());
     private final SoundPort soundPort = new ToneSoundAdapter();
+    private AccessibleChartController accessibleChartController;
+    private AccessibleChartView accessibleChartView;
     private final Label status = new Label("준비됨");
     private final StackPane screenHost = new StackPane();
     private final Map<Screen, Button> navigationButtons = new EnumMap<>(Screen.class);
@@ -76,8 +81,23 @@ public final class DesktopApplication extends Application {
         root.setLeft(createSidebar());
         root.setCenter(screenHost);
         root.setBottom(createStatusBar());
+        accessibleChartController = new AccessibleChartController(
+                stockAdapter,
+                new PcmGraphSonificationAdapter(),
+                (text, key) -> announce(text, SpeechPriority.USER_REQUEST, key),
+                status::setText);
+        accessibleChartView = new AccessibleChartView(accessibleChartController);
         speechQueue.addListener(new SpeechListener() {
+            @Override public void onStarted(SpeechRequest request) {
+                accessibleChartController.setSpeechActive(true);
+            }
+
+            @Override public void onCompleted(SpeechRequest request) {
+                accessibleChartController.setSpeechActive(false);
+            }
+
             @Override public void onFailed(SpeechRequest request, RuntimeException error) {
+                accessibleChartController.setSpeechActive(false);
                 Platform.runLater(() -> {
                     status.setText("음성 출력 실패: " + error.getMessage());
                     play(SoundCue.ERROR);
@@ -85,6 +105,7 @@ public final class DesktopApplication extends Application {
             }
 
             @Override public void onInterrupted(SpeechRequest request) {
+                accessibleChartController.setSpeechActive(false);
                 Platform.runLater(() -> status.setText("음성 안내 중단: " + request.text()));
             }
         });
@@ -97,6 +118,8 @@ public final class DesktopApplication extends Application {
                 () -> navigate(Screen.ACCOUNT));
         scene.getAccelerators().put(new KeyCodeCombination(KeyCode.S, KeyCombination.ALT_DOWN),
                 () -> navigate(Screen.SETTINGS));
+        scene.getAccelerators().put(new KeyCodeCombination(KeyCode.R, KeyCombination.ALT_DOWN),
+                () -> navigate(Screen.RADIO));
 
         navigate(Screen.DASHBOARD);
         stage.setTitle("접근성 투자 정보 도구 - 모의주문 모드");
@@ -120,7 +143,7 @@ public final class DesktopApplication extends Application {
             nav.getChildren().add(button);
         }
         Region grow = new Region(); VBox.setVgrow(grow, Priority.ALWAYS);
-        Label help = new Label("키보드 안내\nAlt+D 대시보드\nAlt+A 계좌\nAlt+S 설정");
+        Label help = new Label("키보드 안내\nAlt+D 대시보드\nAlt+A 계좌\nAlt+R 청각 차트\nAlt+S 설정");
         help.getStyleClass().add("keyboard-help");
         VBox sidebar = new VBox(14, product, mode, nav, grow, help);
         sidebar.getStyleClass().add("sidebar");
@@ -135,6 +158,7 @@ public final class DesktopApplication extends Application {
         Node content = switch (screen) {
             case DASHBOARD -> createDashboard();
             case ACCOUNT -> createAccountScreen();
+            case RADIO -> accessibleChartView.root();
             case SETTINGS -> createSettingsScreen();
             case ANOMALY -> createAnomalyScreen();
             case STOCKS -> createStockScreen();
@@ -158,10 +182,11 @@ public final class DesktopApplication extends Application {
         GridPane grid = new GridPane(); grid.setHgap(20); grid.setVgap(20);
         addFeature(grid, 0, 0, "종목", "관심 종목 · 시세", Screen.STOCKS);
         addFeature(grid, 1, 0, "계좌", "자산 현황 · 모의주문", Screen.ACCOUNT);
-        addFeature(grid, 2, 0, "이상 감지", "가격 · 거래량 알림", Screen.ANOMALY);
-        addFeature(grid, 0, 1, "유사 패턴", "차트 패턴 추천", Screen.PATTERNS);
-        addFeature(grid, 1, 1, "뉴스 · 챗봇", "AI 브리핑", Screen.NEWS);
-        addFeature(grid, 2, 1, "음성 · 설정", "음성 안내 · 모드 전환", Screen.SETTINGS);
+        addFeature(grid, 2, 0, "청각 차트", "그래프 요약 · 연속음 탐색", Screen.RADIO);
+        addFeature(grid, 0, 1, "이상 감지", "가격 · 거래량 알림", Screen.ANOMALY);
+        addFeature(grid, 1, 1, "유사 패턴", "차트 패턴 추천", Screen.PATTERNS);
+        addFeature(grid, 2, 1, "뉴스 · 챗봇", "AI 브리핑", Screen.NEWS);
+        addFeature(grid, 0, 2, "음성 · 설정", "음성 안내 · 모드 전환", Screen.SETTINGS);
         for (int i = 0; i < 3; i++) {
             ColumnConstraints column = new ColumnConstraints(); column.setPercentWidth(33.333); grid.getColumnConstraints().add(column);
         }
@@ -448,7 +473,12 @@ public final class DesktopApplication extends Application {
     }
 
     private void announce(String text, SpeechPriority priority, String key) {
-        if (speechEnabled) speechQueue.announce(new SpeechRequest(text, priority, key));
+        announce(text, priority, key, SpeechMergePolicy.KEEP_FIRST);
+    }
+    private void announce(String text, SpeechPriority priority, String key, SpeechMergePolicy mergePolicy) {
+        if (speechEnabled && !speechQueue.isClosed()) {
+            speechQueue.announce(new SpeechRequest(text, priority, key, mergePolicy));
+        }
     }
     private void play(SoundCue cue) { if (soundEnabled) soundPort.play(cue); }
     private void toggleClass(String name, boolean enabled) {
@@ -456,6 +486,10 @@ public final class DesktopApplication extends Application {
         if (!enabled) root.getStyleClass().remove(name);
     }
 
-    @Override public void stop() { speechQueue.close(); soundPort.close(); }
+    @Override public void stop() {
+        if (accessibleChartController != null) accessibleChartController.close();
+        speechQueue.close();
+        soundPort.close();
+    }
     public static void main(String[] args) { launch(args); }
 }

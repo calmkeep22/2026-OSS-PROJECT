@@ -7,6 +7,7 @@ include(
     ":modules:mock-trading",
     ":modules:anomaly-detection",
     ":modules:accessibility",
+    ":modules:sonification",
     ":modules:fake-adapters",
     ":modules:broker-api",
     ":modules:kiwoom-adapter",

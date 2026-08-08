@@ -17,6 +17,7 @@
 - 우선순위·최신값 교체·중복 허용·중단 정책과 최대 용량이 적용된 TTS 큐
 - Windows·macOS·Linux TTS 어댑터, 음성 목록 조회와 비지원 환경의 무음 대체 구현
 - 주문·연결·이상 감지·성공·경고·오류를 구분하는 Sonification 상태음
+- 차트 요약, 12초 압축 재생, 지점별 키보드 탐색과 실시간 모니터링을 제공하는 청각 차트
 - 주문 금액과 포트폴리오 계산 단위 테스트
 
 ## 모듈 구조
@@ -40,6 +41,9 @@ modules/anomaly-detection
 modules/accessibility
   플랫폼 독립 TTS Port, 제한된 우선순위 큐, OS별 어댑터, 상태음
 
+modules/sonification
+  그래프 요약, 자동·고정 음역, 재생·탐색 상태, 연속 PCM pitch glide
+
 modules/fake-adapters
   UI 독립 개발용 Fake 종목·일봉 데이터
 ```
@@ -51,7 +55,8 @@ desktop-javafx ─┬─> application ──> finance-domain
                 ├─> mock-trading ─> application
                 ├─> fake-adapters -> application
                 ├─> anomaly-detection -> finance-domain
-                └─> accessibility
+                ├─> accessibility
+                └─> sonification
 ```
 
 `finance-domain`과 `application`은 JavaFX를 참조하지 않습니다. 개발자 A의 구현이 준비되면
@@ -82,11 +87,22 @@ Windows PowerShell:
 
 - `Alt+D`: 대시보드
 - `Alt+A`: 계좌와 모의주문
+- `Alt+R`: 청각 차트
 - `Alt+S`: 접근성 설정
 - `Tab` / `Shift+Tab`: 컨트롤 간 이동
 - 방향키: 표 행 또는 선택 항목 탐색
 - `Enter`: 기본 버튼 실행
 - `Escape`: 주문 재확인 취소
+
+청각 차트의 가격 지점 목록에서는 다음 키를 사용할 수 있습니다.
+
+- `Space`: 전체 그래프 재생 또는 일시정지
+- `←` / `→`: 이전·다음 가격 지점의 음높이 미리듣기
+- `Ctrl+←` / `Ctrl+→`: 세 가격 지점씩 이동
+- `Home` / `End`: 첫 지점·마지막 지점 이동
+- `Enter`: 선택한 지점의 날짜·가격·등락률 듣기
+- `S`: 차트 전체 요약 듣기
+- `R`: 처음부터 다시 재생
 
 음성 안내와 상태음은 설정 화면에서 각각 켜고 끌 수 있습니다.
 TTS나 오디오 장치를 사용할 수 없어도 동일한 정보는 항상 화면의 텍스트로 제공됩니다.
