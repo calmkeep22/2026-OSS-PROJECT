@@ -8,5 +8,9 @@ include(
     ":modules:anomaly-detection",
     ":modules:accessibility",
     ":modules:sonification",
-    ":modules:fake-adapters"
+    ":modules:fake-adapters",
+    ":modules:broker-api",
+    ":modules:kiwoom-adapter",
+    ":modules:persistence-sqlite",
+    ":modules:windows-secret-store"
 )

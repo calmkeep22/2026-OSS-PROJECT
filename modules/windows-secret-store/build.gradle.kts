@@ -1,7 +1,7 @@
 plugins { `java-library` }
 java { toolchain { languageVersion = JavaLanguageVersion.of(17) } }
 dependencies {
-    api(project(":modules:finance-domain"))
+    implementation("net.java.dev.jna:jna-platform:5.15.0")
 
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
