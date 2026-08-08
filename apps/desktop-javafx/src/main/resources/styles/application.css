@@ -1,0 +1,43 @@
+.app-root { -fx-font-family: "Pretendard", "Malgun Gothic", "Segoe UI", sans-serif; -fx-font-size: 15px; -fx-background-color: #f9fafb; }
+.screen-content { -fx-background-color: #f9fafb; }
+.sidebar { -fx-background-color: #f3f5f7; -fx-border-color: #d1d6db; -fx-border-width: 0 1 0 0; }
+.sidebar-title { -fx-font-size: 24px; -fx-font-weight: 700; -fx-text-fill: #191f28; }
+.nav-button { -fx-background-color: transparent; -fx-text-fill: #4e5968; -fx-alignment: center-left; -fx-padding: 12 14; -fx-font-weight: 600; -fx-cursor: hand; }
+.nav-button:hover { -fx-background-color: #e8edf5; }
+.nav-button:selected { -fx-background-color: #e8efff; -fx-text-fill: #2457e6; -fx-border-color: #3d6aff; -fx-border-width: 0 0 0 4; }
+.keyboard-help { -fx-background-color: #ffffff; -fx-border-color: #d1d6db; -fx-border-radius: 8; -fx-background-radius: 8; -fx-padding: 12; -fx-text-fill: #4e5968; }
+.title { -fx-font-size: 30px; -fx-font-weight: 700; -fx-text-fill: #191f28; }
+.section-title { -fx-font-size: 22px; -fx-font-weight: 700; -fx-text-fill: #191f28; }
+.mode-badge { -fx-background-color: #fff3cd; -fx-text-fill: #664d03; -fx-padding: 6 10; -fx-background-radius: 6; }
+.market-card { -fx-padding: 24; -fx-border-width: 2; -fx-border-radius: 14; -fx-background-radius: 14; -fx-background-color: white; }
+.market-up { -fx-background-color: #fcebeb; -fx-border-color: #e24b4a; }
+.market-up .label { -fx-text-fill: #791f1f; }
+.market-flat { -fx-border-color: #d1d6db; }
+.market-down { -fx-background-color: #e6f1fb; -fx-border-color: #378add; }
+.market-down .label { -fx-text-fill: #0c447c; }
+.card-title { -fx-font-size: 20px; -fx-font-weight: 700; }
+.stock-price { -fx-font-size: 28px; -fx-font-weight: 700; -fx-text-fill: #791f1f; }
+.feature-card { -fx-background-color: white; -fx-border-color: #d1d6db; -fx-border-width: 2; -fx-border-radius: 14; -fx-background-radius: 14; -fx-padding: 24; -fx-min-height: 150; -fx-cursor: hand; }
+.feature-card:hover, .feature-card:focused { -fx-border-color: #3d6aff; -fx-border-width: 3; }
+.feature-title { -fx-font-size: 21px; -fx-font-weight: 700; -fx-text-fill: #191f28; }
+.feature-detail { -fx-text-fill: #8b95a1; }
+.safety-note { -fx-background-color: #e7f1ff; -fx-padding: 12; -fx-border-color: #0d6efd; -fx-border-width: 0 0 0 4; }
+.anomaly-high { -fx-background-color: #fff7e6; -fx-border-color: #f5a623; -fx-border-width: 2; -fx-border-radius: 12; -fx-background-radius: 12; -fx-padding: 22; -fx-font-weight: 700; }
+.settings-card { -fx-background-color: white; -fx-border-color: #d1d6db; -fx-border-radius: 14; -fx-background-radius: 14; -fx-padding: 8; }
+.setting-toggle { -fx-padding: 16; -fx-max-width: infinity; -fx-border-color: #e5e8eb; -fx-border-width: 0 0 1 0; }
+.status-bar { -fx-background-color: #e9ecef; -fx-border-color: #adb5bd; -fx-border-width: 1 0 0 0; }
+.button:focused, .text-field:focused, .combo-box:focused, .spinner:focused, .table-view:focused,
+.list-view:focused, .check-box:focused { -fx-border-color: #005fcc; -fx-border-width: 3; -fx-border-insets: -2; }
+.large-text { -fx-font-size: 18px; }
+.large-text .title { -fx-font-size: 36px; }
+.large-text .section-title { -fx-font-size: 26px; }
+.large-text .sidebar-title { -fx-font-size: 27px; }
+.high-contrast { -fx-base: #000000; -fx-background: #000000; -fx-control-inner-background: #000000; -fx-text-fill: #ffffff; }
+.high-contrast .screen-content, .high-contrast .sidebar, .high-contrast .market-card,
+.high-contrast .feature-card, .high-contrast .settings-card { -fx-background-color: #000000; -fx-border-color: #ffffff; }
+.high-contrast .label, .high-contrast .check-box, .high-contrast .feature-title,
+.high-contrast .title, .high-contrast .section-title, .high-contrast .sidebar-title { -fx-text-fill: #ffffff; }
+.high-contrast .nav-button:selected { -fx-text-fill: #ffff00; -fx-border-color: #ffff00; }
+.high-contrast .button:focused, .high-contrast .text-field:focused, .high-contrast .combo-box:focused,
+.high-contrast .spinner:focused, .high-contrast .table-view:focused, .high-contrast .list-view:focused,
+.high-contrast .check-box:focused { -fx-border-color: #ffff00; }
