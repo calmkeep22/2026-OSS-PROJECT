@@ -23,6 +23,8 @@
 .feature-detail { -fx-text-fill: #8b95a1; }
 .safety-note { -fx-background-color: #e7f1ff; -fx-padding: 12; -fx-border-color: #0d6efd; -fx-border-width: 0 0 0 4; }
 .anomaly-high { -fx-background-color: #fff7e6; -fx-border-color: #f5a623; -fx-border-width: 2; -fx-border-radius: 12; -fx-background-radius: 12; -fx-padding: 22; -fx-font-weight: 700; }
+.radio-status { -fx-background-color: #eef4ff; -fx-border-color: #3d6aff; -fx-border-width: 2; -fx-border-radius: 12; -fx-background-radius: 12; -fx-padding: 18; -fx-font-weight: 700; }
+.chart-summary { -fx-background-color: #ffffff; -fx-border-color: #8b95a1; -fx-border-width: 2; -fx-border-radius: 12; -fx-background-radius: 12; -fx-padding: 18; }
 .settings-card { -fx-background-color: white; -fx-border-color: #d1d6db; -fx-border-radius: 14; -fx-background-radius: 14; -fx-padding: 8; }
 .setting-toggle { -fx-padding: 16; -fx-max-width: infinity; -fx-border-color: #e5e8eb; -fx-border-width: 0 0 1 0; }
 .status-bar { -fx-background-color: #e9ecef; -fx-border-color: #adb5bd; -fx-border-width: 1 0 0 0; }
@@ -34,7 +36,8 @@
 .large-text .sidebar-title { -fx-font-size: 27px; }
 .high-contrast { -fx-base: #000000; -fx-background: #000000; -fx-control-inner-background: #000000; -fx-text-fill: #ffffff; }
 .high-contrast .screen-content, .high-contrast .sidebar, .high-contrast .market-card,
-.high-contrast .feature-card, .high-contrast .settings-card { -fx-background-color: #000000; -fx-border-color: #ffffff; }
+.high-contrast .feature-card, .high-contrast .settings-card, .high-contrast .radio-status,
+.high-contrast .chart-summary { -fx-background-color: #000000; -fx-border-color: #ffffff; }
 .high-contrast .label, .high-contrast .check-box, .high-contrast .feature-title,
 .high-contrast .title, .high-contrast .section-title, .high-contrast .sidebar-title { -fx-text-fill: #ffffff; }
 .high-contrast .nav-button:selected { -fx-text-fill: #ffff00; -fx-border-color: #ffff00; }

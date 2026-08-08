@@ -24,5 +24,6 @@ dependencies {
     implementation(project(":modules:mock-trading"))
     implementation(project(":modules:anomaly-detection"))
     implementation(project(":modules:accessibility"))
+    implementation(project(":modules:sonification"))
     implementation(project(":modules:fake-adapters"))
 }
