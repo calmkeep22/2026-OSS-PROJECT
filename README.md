@@ -67,6 +67,15 @@ desktop-javafx ─┬─> application ──> finance-domain
 - JDK 17
 - Windows, macOS 또는 Linux
 
+## 팀 개발 계약
+
+금융·키움 연동과 UI·접근성 계층 사이의 책임, 공개 Port, 이벤트, 주문 안전 정책은
+[금융·접근성 통합 계약서](docs/A-B-INTEGRATION-CONTRACT.md)를 기준으로 합의합니다.
+인터페이스별 메서드·입출력·구현 규칙은
+[A/B 인터페이스별 구현 명세](docs/A-B-INTERFACE-SPEC.md)에 정리되어 있습니다.
+현재 코드 기준 완료·보완·신규 작업과 A/B 구현 순서는
+[A/B 현재 구현 상태와 인터페이스 작업 명세](docs/A-B-CURRENT-IMPLEMENTATION-PLAN.md)를 확인합니다.
+
 Gradle은 별도 설치할 필요가 없습니다.
 
 ## 실행
@@ -75,6 +84,22 @@ Windows PowerShell:
 
 ```powershell
 .\gradlew.bat :apps:desktop-javafx:run
+```
+
+### Windows 배포본
+
+JRE를 포함한 포터블 앱 이미지는 별도 설치 도구 없이 생성할 수 있습니다.
+
+```powershell
+.\gradlew.bat :apps:desktop-javafx:packagePortable
+```
+
+결과는 `apps/desktop-javafx/build/package/portable/OpenStockAccess`에 생성됩니다.
+
+`.exe` 설치 프로그램은 WiX Toolset을 설치한 Windows에서 생성합니다.
+
+```powershell
+.\gradlew.bat :apps:desktop-javafx:packageWindowsInstaller
 ```
 
 테스트:
