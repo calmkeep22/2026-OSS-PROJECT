@@ -1,13 +1,17 @@
 package org.ossproject.kiwoom.stream;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.ossproject.application.port.ConnectionListener;
 import org.ossproject.application.port.ConnectionState;
 import org.ossproject.application.port.MarketDataStreamPort;
 import org.ossproject.application.port.QuoteListener;
 import org.ossproject.broker.resilience.RetryPolicy;
 import org.ossproject.finance.model.Quote;
+import org.ossproject.kiwoom.KiwoomJsonMapper;
+import org.ossproject.kiwoom.KiwoomProperties;
 
 import java.net.URI;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -45,8 +49,19 @@ public final class KiwoomMarketDataStream implements MarketDataStreamPort {
     private int reconnectAttempt;
     private boolean closedByUser;
 
-    public KiwoomMarketDataStream(URI uri, WebSocketConnector connector, StreamProtocol protocol,
-                                  ReconnectScheduler scheduler, RetryPolicy reconnectPolicy) {
+    /** Creates a production stream while keeping transport and protocol details internal. */
+    public KiwoomMarketDataStream(KiwoomProperties properties) {
+        this(properties.webSocketUrl(),
+                new JdkWebSocketConnector(),
+                new JsonStreamProtocol(
+                        new KiwoomJsonMapper(new ObjectMapper(), properties, Clock.systemDefaultZone()),
+                        properties),
+                ReconnectScheduler.daemon(),
+                RetryPolicy.defaults());
+    }
+
+    KiwoomMarketDataStream(URI uri, WebSocketConnector connector, StreamProtocol protocol,
+                           ReconnectScheduler scheduler, RetryPolicy reconnectPolicy) {
         if (uri == null) {
             throw new IllegalArgumentException("스트림 주소는 필수입니다.");
         }

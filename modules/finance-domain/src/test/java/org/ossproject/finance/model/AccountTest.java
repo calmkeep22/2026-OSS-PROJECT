@@ -115,16 +115,14 @@ class AccountTest {
     }
 
     @Test
-    @DisplayName("기존 PortfolioSnapshot 으로 변환된다")
-    void convertsToSnapshot() {
+    @DisplayName("계좌이 화면에 필요한 보유종목과 잔고를 직접 제공한다")
+    void exposesPositionsAndBalance() {
         Account account = Account.of("12345678901", new BigDecimal("1000000"))
                 .withPosition(Position.of("005930", "삼성전자", 10, new BigDecimal("70000")));
 
-        PortfolioSnapshot snapshot = account.toSnapshot();
-
-        assertEquals(1, snapshot.holdings().size());
-        assertEquals("삼성전자", snapshot.holdings().get(0).name());
-        assertEquals(0, new BigDecimal("1000000").compareTo(snapshot.cash()));
+        assertEquals(1, account.positions().size());
+        assertEquals("삼성전자", account.positions().get(0).name());
+        assertEquals(0, new BigDecimal("1000000").compareTo(account.balance().cash()));
     }
 
     @Test

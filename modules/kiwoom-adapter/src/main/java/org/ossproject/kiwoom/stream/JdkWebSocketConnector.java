@@ -18,7 +18,7 @@ import java.util.concurrent.TimeoutException;
  * <p>텍스트 프레임은 여러 조각으로 나뉘어 올 수 있으므로 {@code last} 플래그가 설 때까지
  * 모아서 한 번에 전달한다. 이 처리를 빠뜨리면 긴 시세 메시지가 잘려 파싱에 실패한다.
  */
-public final class JdkWebSocketConnector implements WebSocketConnector {
+final class JdkWebSocketConnector implements WebSocketConnector {
 
     private final HttpClient client;
     private final Duration connectTimeout;

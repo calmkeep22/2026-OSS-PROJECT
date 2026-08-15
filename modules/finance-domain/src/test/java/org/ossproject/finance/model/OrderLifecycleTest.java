@@ -112,15 +112,13 @@ class OrderLifecycleTest {
     }
 
     @Test
-    @DisplayName("기존 OrderRequest 를 지정가 OrderCommand 로 변환한다")
-    void convertsLegacyRequest() {
-        OrderRequest request = new OrderRequest("005930", "삼성전자", OrderSide.BUY,
+    @DisplayName("지정가 OrderCommand를 생성한다")
+    void createsLimitOrderCommand() {
+        OrderCommand command = OrderCommand.limit("005930", "삼성전자", OrderSide.BUY,
                 3, new BigDecimal("70000"));
-
-        OrderCommand command = OrderCommand.from(request);
 
         assertEquals(OrderType.LIMIT, command.type());
         assertEquals(3L, command.quantity());
-        assertEquals(0, request.estimatedAmount().compareTo(command.estimatedAmount(null)));
+        assertEquals(0, new BigDecimal("210000").compareTo(command.estimatedAmount(null)));
     }
 }

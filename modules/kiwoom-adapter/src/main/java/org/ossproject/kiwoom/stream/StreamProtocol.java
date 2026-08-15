@@ -12,7 +12,7 @@ import java.util.Optional;
  * 재연결·구독 복원 같은 어려운 부분은 {@link KiwoomMarketDataStream} 이 담당하고,
  * 형식만 여기서 갈아 끼운다.
  */
-public interface StreamProtocol {
+interface StreamProtocol {
 
     /** 구독 요청 메시지. */
     String subscribeMessage(Collection<String> symbols);

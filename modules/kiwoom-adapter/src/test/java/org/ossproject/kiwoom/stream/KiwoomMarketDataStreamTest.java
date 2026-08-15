@@ -5,6 +5,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.ossproject.application.port.ConnectionState;
+import org.ossproject.application.contract.MarketDataStreamPortContract;
+import org.ossproject.application.port.MarketDataStreamPort;
 import org.ossproject.broker.BrokerTransientException;
 import org.ossproject.broker.resilience.RetryPolicy;
 import org.ossproject.finance.model.Quote;
@@ -26,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class KiwoomMarketDataStreamTest {
+class KiwoomMarketDataStreamTest extends MarketDataStreamPortContract {
 
     private static final Clock CLOCK =
             Clock.fixed(Instant.parse("2026-08-08T01:00:00Z"), ZoneId.of("Asia/Seoul"));
@@ -123,6 +125,11 @@ class KiwoomMarketDataStreamTest {
         states = new ArrayList<>();
         stream.addQuoteListener(quotes::add);
         stream.addConnectionListener((state, detail) -> states.add(state));
+    }
+
+    @Override
+    protected MarketDataStreamPort createStream() {
+        return stream;
     }
 
     @Test

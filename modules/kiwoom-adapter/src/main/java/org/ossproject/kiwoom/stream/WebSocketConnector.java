@@ -8,7 +8,7 @@ import java.net.URI;
  * <p>테스트에서 실제 네트워크 없이 재연결 동작을 검증하기 위해 분리했다.
  */
 @FunctionalInterface
-public interface WebSocketConnector {
+interface WebSocketConnector {
 
     /**
      * 연결을 만든다.

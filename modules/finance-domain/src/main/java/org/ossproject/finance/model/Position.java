@@ -6,8 +6,7 @@ import java.math.RoundingMode;
 /**
  * 보유 종목. 매도 주문으로 묶인 수량을 따로 관리한다.
  *
- * <p>기존 {@link Holding} 은 화면 표시용 값 객체라 그대로 두고, 주문 처리 계층은 이 타입을
- * 사용한다. {@link #toHolding()} 으로 변환한다.
+ * <p>This is the single holding model shared by account views and order processing.
  */
 public record Position(
         String symbol,
@@ -120,11 +119,6 @@ public record Position(
             throw new IllegalArgumentException("현재가는 0 이상이어야 합니다.");
         }
         return new Position(symbol, name, quantity, lockedQuantity, averagePrice, price);
-    }
-
-    /** 화면 표시용 {@link Holding} 으로 변환한다. */
-    public Holding toHolding() {
-        return new Holding(symbol, name, quantity, averagePrice, currentPrice);
     }
 
     private static void requirePositive(long amount) {
