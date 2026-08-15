@@ -1,7 +1,8 @@
-package org.ossproject.sonification.infrastructure.sound;
+package org.ossproject.sonification.javasound;
 
 import org.ossproject.sonification.model.GraphAudioFrame;
 import org.ossproject.sonification.port.SonificationOutputListener;
+import org.ossproject.sonification.port.SonificationOverflowPolicy;
 import org.ossproject.sonification.port.SonificationPort;
 
 import javax.sound.sampled.AudioFormat;
@@ -21,6 +22,7 @@ public final class PcmGraphSonificationAdapter implements SonificationPort {
     private static final System.Logger LOGGER = System.getLogger(PcmGraphSonificationAdapter.class.getName());
     private static final float SAMPLE_RATE = 16_000f;
     private static final int MAX_PENDING_FRAMES = 2;
+
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicLong generation = new AtomicLong();
     private final CopyOnWriteArrayList<SonificationOutputListener> listeners = new CopyOnWriteArrayList<>();
@@ -31,10 +33,12 @@ public final class PcmGraphSonificationAdapter implements SonificationPort {
         thread.setDaemon(true);
         return thread;
     }, new ThreadPoolExecutor.AbortPolicy());
+
     private volatile SourceDataLine activeLine;
     private volatile double volume = 0.65;
     private double phase;
 
+    /** Creates a PCM adapter that opens the system's default compatible Java Sound output line. */
     public PcmGraphSonificationAdapter() {
         this(AudioSystem::getSourceDataLine);
     }
@@ -45,32 +49,43 @@ public final class PcmGraphSonificationAdapter implements SonificationPort {
 
     @Override public void play(GraphAudioFrame frame) {
         Objects.requireNonNull(frame, "frame");
-        if (closed.get()) throw new IllegalStateException("PcmGraphSonificationAdapter is already closed");
-        long requestedGeneration = generation.get();
-        Runnable playback = () -> playSafely(frame, requestedGeneration);
+        ensureOpen();
+        FramePlayback playback = new FramePlayback(frame, generation.get());
         try {
             executor.execute(playback);
         } catch (RejectedExecutionException full) {
-            if (closed.get()) throw new IllegalStateException("PcmGraphSonificationAdapter is already closed", full);
-            executor.getQueue().poll();
+            if (closed.get()) {
+                throw new IllegalStateException("PcmGraphSonificationAdapter is already closed", full);
+            }
+            Runnable discarded = executor.getQueue().poll();
+            if (discarded instanceof FramePlayback dropped) {
+                notifyFrameDropped(dropped.frame);
+            }
             try {
                 executor.execute(playback);
             } catch (RejectedExecutionException rejected) {
+                if (closed.get()) {
+                    throw new IllegalStateException("PcmGraphSonificationAdapter is already closed", rejected);
+                }
                 throw new IllegalStateException("Graph sonification frame queue is unavailable", rejected);
             }
         }
     }
 
     @Override public void setVolume(double volume) {
-        if (closed.get()) throw new IllegalStateException("PcmGraphSonificationAdapter is already closed");
+        ensureOpen();
         if (!Double.isFinite(volume) || volume < 0 || volume > 1) {
             throw new IllegalArgumentException("volume must be between zero and one");
         }
         this.volume = volume;
     }
 
+    @Override public SonificationOverflowPolicy overflowPolicy() {
+        return SonificationOverflowPolicy.DROP_OLDEST;
+    }
+
     @Override public void addOutputListener(SonificationOutputListener listener) {
-        if (closed.get()) throw new IllegalStateException("PcmGraphSonificationAdapter is already closed");
+        ensureOpen();
         listeners.add(Objects.requireNonNull(listener, "listener"));
     }
 
@@ -107,6 +122,17 @@ public final class PcmGraphSonificationAdapter implements SonificationPort {
         }
     }
 
+    private void notifyFrameDropped(GraphAudioFrame frame) {
+        for (SonificationOutputListener listener : listeners) {
+            try {
+                listener.onFrameDropped(frame);
+            } catch (RuntimeException listenerFailure) {
+                LOGGER.log(System.Logger.Level.WARNING,
+                        "Sonification output listener failed", listenerFailure);
+            }
+        }
+    }
+
     private void notifyPlaybackFailed(GraphAudioFrame frame, RuntimeException failure) {
         for (SonificationOutputListener listener : listeners) {
             try {
@@ -121,14 +147,14 @@ public final class PcmGraphSonificationAdapter implements SonificationPort {
     private byte[] render(GraphAudioFrame frame) {
         int sampleCount = Math.max(1, Math.round(SAMPLE_RATE * frame.duration().toMillis() / 1_000f));
         byte[] bytes = new byte[sampleCount * 2];
-        for (int i = 0; i < sampleCount; i++) {
-            double progress = sampleCount == 1 ? 1 : i / (double) (sampleCount - 1);
+        for (int index = 0; index < sampleCount; index++) {
+            double progress = sampleCount == 1 ? 1 : index / (double) (sampleCount - 1);
             double frequency = interpolateFrequency(frame, progress);
             phase += 2 * Math.PI * frequency / SAMPLE_RATE;
             if (phase > Math.PI * 2) phase -= Math.PI * 2;
             short sample = (short) (Math.sin(phase) * 4_800 * volume);
-            bytes[i * 2] = (byte) sample;
-            bytes[i * 2 + 1] = (byte) (sample >>> 8);
+            bytes[index * 2] = (byte) sample;
+            bytes[index * 2 + 1] = (byte) (sample >>> 8);
         }
         return bytes;
     }
@@ -154,10 +180,31 @@ public final class PcmGraphSonificationAdapter implements SonificationPort {
         if (line != null) line.close();
     }
 
+    private void ensureOpen() {
+        if (closed.get()) {
+            throw new IllegalStateException("PcmGraphSonificationAdapter is already closed");
+        }
+    }
+
     @Override public void close() {
         if (!closed.compareAndSet(false, true)) return;
         stop();
         executor.shutdownNow();
+        listeners.clear();
+    }
+
+    private final class FramePlayback implements Runnable {
+        private final GraphAudioFrame frame;
+        private final long requestedGeneration;
+
+        private FramePlayback(GraphAudioFrame frame, long requestedGeneration) {
+            this.frame = frame;
+            this.requestedGeneration = requestedGeneration;
+        }
+
+        @Override public void run() {
+            playSafely(frame, requestedGeneration);
+        }
     }
 
     @FunctionalInterface

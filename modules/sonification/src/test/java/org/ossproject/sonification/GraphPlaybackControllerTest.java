@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.ossproject.sonification.model.GraphAudioFrame;
 import org.ossproject.sonification.model.GraphValueScale;
 import org.ossproject.sonification.model.TimeSeriesSample;
+import org.ossproject.sonification.port.SonificationOverflowPolicy;
 import org.ossproject.sonification.port.SonificationPort;
 
 import java.time.Duration;
@@ -116,5 +117,7 @@ class GraphPlaybackControllerTest {
         @Override public void play(GraphAudioFrame frame) { frames.add(frame); }
         @Override public void stop() {}
         @Override public void setVolume(double volume) {}
+        @Override public SonificationOverflowPolicy overflowPolicy() { return SonificationOverflowPolicy.DROP_OLDEST; }
+        @Override public void close() {}
     }
 }

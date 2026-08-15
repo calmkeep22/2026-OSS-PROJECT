@@ -8,6 +8,7 @@ include(
     ":modules:anomaly-detection",
     ":modules:accessibility",
     ":modules:sonification",
+    ":modules:sonification-java-sound",
     ":modules:fake-adapters",
     ":modules:broker-api",
     ":modules:kiwoom-adapter",

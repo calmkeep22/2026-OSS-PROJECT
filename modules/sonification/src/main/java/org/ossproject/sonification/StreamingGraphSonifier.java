@@ -23,17 +23,36 @@ public final class StreamingGraphSonifier implements AutoCloseable {
     private final AtomicBoolean closed = new AtomicBoolean();
     private final SonificationPort sonificationPort;
     private final GraphSonificationConfig config;
-    private final SonificationOutputListener outputListener = this::handleOutputFailure;
+    private final SonificationOutputListener outputListener = new SonificationOutputListener() {
+        @Override public void onPlaybackFailed(GraphAudioFrame frame, RuntimeException error) {
+            handleOutputFailure(frame, error);
+        }
+
+        @Override public void onFrameDropped(GraphAudioFrame frame) {
+            handleFrameDropped(frame);
+        }
+    };
     private boolean running;
     private String streamKey;
     private GraphValueScale scale;
     private double previousFrequency;
     private Instant previousTimestamp;
 
+    /**
+     * Borrows an exclusive output port; the caller remains responsible for closing the port.
+     *
+     * @param sonificationPort exclusive output port
+     */
     public StreamingGraphSonifier(SonificationPort sonificationPort) {
         this(sonificationPort, GraphSonificationConfig.DEFAULT);
     }
 
+    /**
+     * Borrows an exclusive output port; the caller remains responsible for closing the port.
+     *
+     * @param sonificationPort exclusive output port
+     * @param config graph-to-frequency mapping configuration
+     */
     public StreamingGraphSonifier(SonificationPort sonificationPort, GraphSonificationConfig config) {
         this.sonificationPort = Objects.requireNonNull(sonificationPort, "sonificationPort");
         this.config = Objects.requireNonNull(config, "config");
@@ -144,6 +163,10 @@ public final class StreamingGraphSonifier implements AutoCloseable {
         if (!closed.get()) notifyListeners(listener -> listener.onPlaybackFailed(frame, error));
     }
 
+    private void handleFrameDropped(GraphAudioFrame frame) {
+        if (!closed.get()) notifyListeners(listener -> listener.onFrameDropped(frame));
+    }
+
     private void notifyListeners(Consumer<GraphSonificationListener> action) {
         for (GraphSonificationListener listener : listeners) {
             try {
@@ -164,6 +187,6 @@ public final class StreamingGraphSonifier implements AutoCloseable {
             previousTimestamp = null;
         }
         sonificationPort.removeOutputListener(outputListener);
-        sonificationPort.close();
+        sonificationPort.stop();
     }
 }
