@@ -386,19 +386,20 @@ public interface SecretStore extends AutoCloseable {
     void delete(String alias);
     boolean contains(String alias);
     Set<String> aliases();
-    boolean isHardwareBacked();
+    SecretProtectionLevel protectionLevel();
+    default boolean isAvailable() {
+        return protectionLevel().isAvailable();
+    }
     String description();
     @Override void close();
 }
 ~~~
 
-다만 modules/application의 연결 서비스가 windows-secret-store에 역으로 의존하면 안 된다.
-따라서 같은 메서드를 가진 CredentialStorePort 계약을 modules/application에 두고,
-windows-secret-store의 FileSecretStore가 이를 구현하도록 보완한다. 기존 SecretStore는
-마이그레이션 기간에 CredentialStorePort를 확장해도 된다.
-
-B는 파일 경로나 DPAPI 클래스를 직접 다루지 않고 composition root에서 구현체를 연결한다.
-로드한 char 배열은 사용 직후 0으로 덮어쓴다.
+같은 메서드를 가진 중복 CredentialStorePort는 만들지 않는다. B의 ViewModel은
+secret-store-api의 SecretStore에만 의존하고, DesktopServices 조립 루트가
+windows-secret-store 구현을 선택한다. B는 파일 경로나 DPAPI 클래스를 직접 다루지 않고,
+로드한 char 배열은 사용 직후 0으로 덮어쓴다. Windows DPAPI는 하드웨어 키 사용을
+보장하지 않으므로 보호 수준은 OS_USER_PROTECTED로 기록한다.
 
 ### A-13. 시장 탐색 조회 Port — 2차 신규
 
@@ -547,7 +548,7 @@ public interface MarketDiscoveryApplicationPort {
 ScannerViewModel의 고정 ScannerItem 목록과 시장·조건·수급·미국주식 화면의 샘플 행을 이
 포트 결과로 교체한다.
 
-### B-7. DesktopStateRepository — 완료, 모델 보완
+### B-7. DesktopStateRepository — 완료
 
 현재 계약:
 
@@ -558,9 +559,9 @@ public interface DesktopStateRepository {
 }
 ~~~
 
-properties 구현과 원자적 저장은 유지한다. 다음 수정에서 List<List<String>>을
-WatchlistItem, AlertRule, JournalEntry 같은 record 목록으로 바꾼다. 손상된 파일은 안전한
-기본값으로 복구하고 비밀정보는 저장하지 않는다.
+properties 구현과 원자적 저장을 유지하면서 WatchlistItem, AlertRule, JournalEntry record
+목록으로 변경했다. format.version 1의 문자열 행을 읽어 typed 모델로 변환하고, 잘못된 행은
+건너뛰며 전체 파일이 손상되면 안전한 초기 상태로 복구한다. 비밀정보는 저장하지 않는다.
 
 ### B-8. WatchlistRepository — 신규
 
@@ -576,7 +577,7 @@ public interface WatchlistRepository {
 현재 WatchlistViewModel의 추가·수정·삭제 동작은 완료되어 있다. 저장 모델을 문자열 행에서
 typed record로 바꾼 뒤 이 포트에 연결한다.
 
-### B-9. AccessibilityPreferencesRepository — 신규
+### B-9. AccessibilityPreferencesRepository — 완료
 
 ~~~java
 public interface AccessibilityPreferencesRepository {
@@ -585,10 +586,11 @@ public interface AccessibilityPreferencesRepository {
 }
 ~~~
 
-현재 DesktopStateSnapshot 안의 큰 글자, 고대비, 음성, 키보드 안내 설정을 이 모델로
-이동한다. 값이 없거나 손상돼도 null 대신 안전한 기본값을 반환한다.
+DesktopStateSnapshot 안의 큰 글자, 고대비, 음성, 키보드 안내 설정을 전용 모델과 properties
+저장소로 이동했다. 기존 UI 상태 파일의 설정도 마이그레이션하며 값이 없거나 손상돼도 null
+대신 안전한 기본값을 반환한다.
 
-### B-10. SonificationPreferencesRepository — 신규
+### B-10. SonificationPreferencesRepository — 완료
 
 ~~~java
 public interface SonificationPreferencesRepository {
@@ -597,8 +599,9 @@ public interface SonificationPreferencesRepository {
 }
 ~~~
 
-그래프 음량, 자동/고정 음역, 재생 속도, 기준점 안내 간격을 저장한다. 그래프 매핑과 오디오
-출력 알고리즘은 sonification 모듈에 계속 둔다.
+그래프 음량, 자동/기준점 음역, 퍼센트 범위와 재생 속도를 저장한다. AccessibleChartController의
+설정 변경을 저장소에 연결했다. 그래프 매핑·분석·재생 제어는 `sonification` 코어에,
+Java Sound PCM 출력은 `sonification-java-sound` 어댑터에 분리했다.
 
 ### B-11. SpeechPort, SoundPort, SonificationPort — 완료
 
@@ -616,7 +619,7 @@ OS별 TTS 차이는 SpeechAdapterFactory가 선택하고, 우선순위·중복 �
 - Screen과 DesktopScreenController: 완료
 - Connection/Search/Watchlist/Scanner 화면 View 분리: 완료
 - StockSearch/StockDetail/Watchlist/Scanner ViewModel: 완료, 실제 Application Port 연결 필요
-- DesktopSession과 로컬 자동 저장: 완료, typed 모델 보완 필요
+- DesktopSession과 로컬 자동 저장: typed 모델과 설정 저장소 분리까지 완료
 - 나머지 화면의 View/ViewModel 분리: 진행 필요
 - 내비게이션용 별도 공개 인터페이스: 만들지 않음
 
@@ -639,7 +642,7 @@ Navigator 같은 공개 Port를 추가하면 추상화만 늘어나므로 필요
 | 계좌 | AccountApplicationPort | AccountQueryPort, AccountSnapshotRepository | 모의 데이터 |
 | 알림 | TradingApplicationListener, SpeechQueue | BrokerTradingStreamPort | 샘플+로컬 |
 | 청각 차트 | MarketApplicationPort, SonificationPort | CandleQueryPort, MarketDataStreamPort | Fake 데이터로 동작 |
-| 설정 | 접근성·Sonification 설정 Repository | 없음 | 로컬 저장 동작 |
+| 설정 | 접근성·Sonification 설정 Repository | 없음 | typed 로컬 저장 완료 |
 | 대시보드 | 위 Application Port들의 읽기 조합 | 해당 조회 Port | 샘플 중심 |
 
 ## 9. 지금 코드에서 바로 고쳐야 하는 지점
@@ -648,7 +651,7 @@ Navigator 같은 공개 Port를 추가하면 추상화만 늘어나므로 필요
 2. ScannerViewModel 안의 ScannerItem 목록을 제거하고 MarketDiscoveryApplicationPort를 주입한다.
 3. ConnectionViewModel의 성공 문구만 바꾸는 데모 메서드를 BrokerConnectionApplicationPort 호출로 바꾼다.
 4. StockDetailViewModel이 표시 문자열을 숫자로 역파싱하고 임의 가격을 만드는 로직을 제거한다.
-5. DesktopSession의 List<List<String>>을 typed record로 바꾼다.
+5. DesktopSession의 List<List<String>>을 typed record로 변경했다. (완료)
 6. DesktopApplication은 composition root 역할만 남기고 나머지 화면 생성 코드를 View 클래스로 옮긴다.
 7. JavaFX가 InMemoryMockTradingAdapter와 FakeStockQueryAdapter를 직접 사용하는 부분은
    Application Port 구현을 주입하도록 바꾼다. 단, composition root에서 mock/live 구현을
