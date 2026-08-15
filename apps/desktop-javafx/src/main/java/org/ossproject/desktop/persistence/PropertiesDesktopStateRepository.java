@@ -1,22 +1,24 @@
 package org.ossproject.desktop.persistence;
 
+import org.ossproject.desktop.state.AlertRule;
+import org.ossproject.desktop.state.JournalEntry;
+import org.ossproject.desktop.state.WatchlistItem;
 import org.ossproject.desktop.viewmodel.StockSelection;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Properties;
+import java.util.function.Function;
 
-/**
- * UI 상태를 사용자 로컬 properties 파일에 원자적으로 저장한다.
- * App Key·Secret·토큰은 이 저장소에 절대 기록하지 않는다.
- */
+/** 데스크톱 화면 상태를 사용자 로컬 properties 파일에 원자적으로 저장한다. */
 public final class PropertiesDesktopStateRepository implements DesktopStateRepository {
+    private static final String FORMAT_VERSION = "2";
     private final Path file;
 
     public PropertiesDesktopStateRepository(Path file) {
@@ -24,76 +26,75 @@ public final class PropertiesDesktopStateRepository implements DesktopStateRepos
     }
 
     @Override public Optional<DesktopStateSnapshot> load() {
-        if (!Files.isRegularFile(file)) return Optional.empty();
-        Properties properties = new Properties();
-        try (InputStream input = Files.newInputStream(file)) {
-            properties.load(input);
-            return Optional.of(new DesktopStateSnapshot(
-                    decodeList(properties.getProperty("watchlist.groups")),
-                    decodeRows(properties.getProperty("watchlist.rows")),
-                    decodeRows(properties.getProperty("alert.rules")),
-                    decodeList(properties.getProperty("notifications")),
-                    decodeRows(properties.getProperty("journal.rows")),
-                    decodeSelection(properties.getProperty("selected.stock")),
-                    bool(properties, "setting.speech", false),
-                    bool(properties, "setting.sound", true),
-                    bool(properties, "setting.keyboard", true),
-                    bool(properties, "setting.reducedMotion", true),
-                    bool(properties, "setting.largeText", true),
-                    bool(properties, "setting.highContrast", false),
-                    properties.getProperty("setting.density", "표준"),
-                    properties.getProperty("setting.voice", ""),
-                    decimal(properties, "setting.speechRate", 1.0),
-                    integer(properties, "setting.speechVolume", 100),
-                    bool(properties, "setting.preventDuplicateOrders", true),
-                    integer(properties, "setting.maxSubscriptions", 160)));
-        } catch (RuntimeException | IOException invalid) {
-            return Optional.empty();
-        }
+        return AtomicPropertiesFile.load(file).flatMap(this::decode);
     }
 
     @Override public void save(DesktopStateSnapshot snapshot) {
         Objects.requireNonNull(snapshot, "snapshot");
         Properties properties = new Properties();
-        properties.setProperty("format.version", "1");
+        properties.setProperty("format.version", FORMAT_VERSION);
         properties.setProperty("watchlist.groups", encodeList(snapshot.watchlistGroups()));
-        properties.setProperty("watchlist.rows", encodeRows(snapshot.watchlistRows()));
-        properties.setProperty("alert.rules", encodeRows(snapshot.alertRules()));
+        properties.setProperty("watchlist.rows", encodeRows(snapshot.watchlistItems(), item -> List.of(
+                item.group(), item.securityName(), item.displayPrice(), item.displayChange(),
+                item.displayVolume(), item.alertText())));
+        properties.setProperty("alert.rules", encodeRows(snapshot.alertRules(), rule -> List.of(
+                rule.securityName(), rule.condition(), rule.threshold(), Boolean.toString(rule.enabled()))));
         properties.setProperty("notifications", encodeList(snapshot.notifications()));
-        properties.setProperty("journal.rows", encodeRows(snapshot.journalRows()));
+        properties.setProperty("journal.rows", encodeRows(snapshot.journalEntries(), entry -> List.of(
+                entry.date(), entry.securityName(), entry.buyAmount(), entry.sellAmount(), entry.profitLoss(),
+                entry.memo(), entry.tags())));
         properties.setProperty("selected.stock", encodeList(List.of(
                 snapshot.selectedStock().market(), snapshot.selectedStock().symbol(), snapshot.selectedStock().name(),
-                snapshot.selectedStock().exchange(), snapshot.selectedStock().displayPrice(), snapshot.selectedStock().displayChange())));
-        properties.setProperty("setting.speech", Boolean.toString(snapshot.speechEnabled()));
-        properties.setProperty("setting.sound", Boolean.toString(snapshot.soundEnabled()));
-        properties.setProperty("setting.keyboard", Boolean.toString(snapshot.keyboardGuidanceEnabled()));
-        properties.setProperty("setting.reducedMotion", Boolean.toString(snapshot.reducedMotionEnabled()));
-        properties.setProperty("setting.largeText", Boolean.toString(snapshot.largeTextEnabled()));
-        properties.setProperty("setting.highContrast", Boolean.toString(snapshot.highContrastEnabled()));
-        properties.setProperty("setting.density", snapshot.informationDensity());
-        properties.setProperty("setting.voice", snapshot.voiceName());
-        properties.setProperty("setting.speechRate", Double.toString(snapshot.speechRate()));
-        properties.setProperty("setting.speechVolume", Integer.toString(snapshot.speechVolume()));
+                snapshot.selectedStock().exchange(), snapshot.selectedStock().displayPrice(),
+                snapshot.selectedStock().displayChange())));
         properties.setProperty("setting.preventDuplicateOrders", Boolean.toString(snapshot.preventDuplicateOrders()));
         properties.setProperty("setting.maxSubscriptions", Integer.toString(snapshot.maxSubscriptions()));
+        AtomicPropertiesFile.save(file, properties, "OpenStock Access UI state - no credentials");
+    }
+
+    private Optional<DesktopStateSnapshot> decode(Properties properties) {
         try {
-            Path parent = file.getParent(); if (parent != null) Files.createDirectories(parent);
-            Path temporary = file.resolveSibling(file.getFileName() + ".tmp");
-            try (OutputStream output = Files.newOutputStream(temporary)) {
-                properties.store(output, "OpenStock Access UI state - no credentials");
-            }
-            try {
-                Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException ignored) {
-                Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
-            }
-        } catch (IOException error) {
-            throw new IllegalStateException("UI 상태를 저장하지 못했습니다: " + file, error);
+            return Optional.of(new DesktopStateSnapshot(
+                    decodeList(properties.getProperty("watchlist.groups")),
+                    decodeRows(properties.getProperty("watchlist.rows"), this::watchlistItem),
+                    decodeRows(properties.getProperty("alert.rules"), this::alertRule),
+                    decodeList(properties.getProperty("notifications")),
+                    decodeRows(properties.getProperty("journal.rows"), this::journalEntry),
+                    decodeSelection(properties.getProperty("selected.stock")),
+                    bool(properties, "setting.preventDuplicateOrders", true),
+                    integer(properties, "setting.maxSubscriptions", 160)));
+        } catch (RuntimeException invalid) {
+            return Optional.empty();
         }
     }
 
+    private Optional<WatchlistItem> watchlistItem(List<String> fields) {
+        if (fields.size() != 6) return Optional.empty();
+        return safe(() -> new WatchlistItem(
+                fields.get(0), fields.get(1), fields.get(2), fields.get(3), fields.get(4), fields.get(5)));
+    }
+
+    private Optional<AlertRule> alertRule(List<String> fields) {
+        if (fields.size() != 4) return Optional.empty();
+        boolean enabled = "true".equalsIgnoreCase(fields.get(3)) || "활성".equals(fields.get(3));
+        return safe(() -> new AlertRule(fields.get(0), fields.get(1), fields.get(2), enabled));
+    }
+
+    private Optional<JournalEntry> journalEntry(List<String> fields) {
+        if (fields.size() != 7) return Optional.empty();
+        return safe(() -> new JournalEntry(
+                fields.get(0), fields.get(1), fields.get(2), fields.get(3), fields.get(4), fields.get(5), fields.get(6)));
+    }
+
+    private <T> Optional<T> safe(java.util.function.Supplier<T> supplier) {
+        try { return Optional.of(supplier.get()); }
+        catch (IllegalArgumentException invalid) { return Optional.empty(); }
+    }
+
     private boolean bool(Properties properties, String key, boolean fallback) {
-        return Boolean.parseBoolean(properties.getProperty(key, Boolean.toString(fallback)));
+        String value = properties.getProperty(key);
+        return "true".equalsIgnoreCase(value) || "false".equalsIgnoreCase(value)
+                ? Boolean.parseBoolean(value) : fallback;
     }
 
     private int integer(Properties properties, String key, int fallback) {
@@ -101,23 +102,24 @@ public final class PropertiesDesktopStateRepository implements DesktopStateRepos
         catch (NumberFormatException ignored) { return fallback; }
     }
 
-    private double decimal(Properties properties, String key, double fallback) {
-        try { return Double.parseDouble(properties.getProperty(key, Double.toString(fallback))); }
-        catch (NumberFormatException ignored) { return fallback; }
+    private <T> String encodeRows(List<T> rows, Function<T, List<String>> mapper) {
+        return rows.stream().map(mapper).map(this::encodeList)
+                .reduce((left, right) -> left + ";" + right).orElse("");
     }
 
-    private String encodeRows(List<List<String>> rows) {
-        return rows.stream().map(this::encodeList).reduce((left, right) -> left + ";" + right).orElse("");
-    }
-
-    private List<List<String>> decodeRows(String value) {
+    private <T> List<T> decodeRows(String value, Function<List<String>, Optional<T>> mapper) {
         if (value == null || value.isBlank()) return List.of();
-        return Arrays.stream(value.split(";", -1)).map(this::decodeList).toList();
+        List<T> decoded = new ArrayList<>();
+        for (String encodedRow : value.split(";", -1)) {
+            mapper.apply(decodeList(encodedRow)).ifPresent(decoded::add);
+        }
+        return List.copyOf(decoded);
     }
 
     private String encodeList(List<String> values) {
         Base64.Encoder encoder = Base64.getUrlEncoder().withoutPadding();
-        return values.stream().map(value -> encoder.encodeToString(value.getBytes(StandardCharsets.UTF_8)))
+        return values.stream()
+                .map(value -> encoder.encodeToString(value.getBytes(StandardCharsets.UTF_8)))
                 .reduce((left, right) -> left + "," + right).orElse("");
     }
 
@@ -130,7 +132,8 @@ public final class PropertiesDesktopStateRepository implements DesktopStateRepos
 
     private StockSelection decodeSelection(String value) {
         List<String> fields = decodeList(value);
-        return fields.size() == 6 ? new StockSelection(fields.get(0), fields.get(1), fields.get(2), fields.get(3), fields.get(4), fields.get(5))
+        return fields.size() == 6
+                ? new StockSelection(fields.get(0), fields.get(1), fields.get(2), fields.get(3), fields.get(4), fields.get(5))
                 : StockSelection.samsungElectronics();
     }
 }

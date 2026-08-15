@@ -1,11 +1,11 @@
 package org.ossproject.desktop.viewmodel;
 
+import org.ossproject.application.port.CandleQueryPort;
 import org.ossproject.application.port.StockQueryPort;
 import org.ossproject.finance.model.*;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 
@@ -33,10 +33,13 @@ public final class StockDetailViewModel {
 
     private final DesktopSession session;
     private final StockQueryPort stockQuery;
+    private final CandleQueryPort candleQuery;
 
-    public StockDetailViewModel(DesktopSession session, StockQueryPort stockQuery) {
+    public StockDetailViewModel(DesktopSession session, StockQueryPort stockQuery,
+                                CandleQueryPort candleQuery) {
         this.session = Objects.requireNonNull(session, "session");
         this.stockQuery = Objects.requireNonNull(stockQuery, "stockQuery");
+        this.candleQuery = Objects.requireNonNull(candleQuery, "candleQuery");
     }
 
     public StockSelection selection() { return session.selectedStock(); }
@@ -55,7 +58,8 @@ public final class StockDetailViewModel {
                 current.multiply(new BigDecimal("0.986")).setScale(scale, RoundingMode.HALF_UP),
                 current.multiply(new BigDecimal("1.018")).setScale(scale, RoundingMode.HALF_UP),
                 current.multiply(new BigDecimal("0.972")).setScale(scale, RoundingMode.HALF_UP),
-                selected.overseas() ? 42_381_210L : 18_450_230L, Instant.now());
+                selected.overseas() ? 42_381_210L : 18_450_230L,
+                stockQuery.getDetail(selected.symbol()).updatedAt());
     }
 
     public List<PricePoint> history(PricePeriod period) {
@@ -74,7 +78,17 @@ public final class StockDetailViewModel {
     }
 
     private List<PricePoint> history(PricePeriod period, BigDecimal range) {
-        List<PricePoint> base = stockQuery.getPriceHistory(selection().symbol(), period);
+        int count = switch (period) {
+            case DAY -> 2;
+            case WEEK -> 7;
+            case MONTH -> 30;
+            case THREE_MONTHS -> 90;
+            case YEAR -> 365;
+        };
+        List<PricePoint> base = candleQuery.getCandles(
+                        selection().symbol(), CandleInterval.DAY, count).stream()
+                .map(candle -> candle.toPricePoint(java.time.ZoneId.of("Asia/Seoul")))
+                .toList();
         if (base.isEmpty()) return base;
         BigDecimal target = detail().currentPrice();
         BigDecimal factor = target.divide(base.get(base.size() - 1).close(), 10, RoundingMode.HALF_UP);

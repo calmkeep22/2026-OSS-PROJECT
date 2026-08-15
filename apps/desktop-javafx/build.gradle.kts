@@ -79,7 +79,10 @@ dependencies {
     implementation(project(":modules:anomaly-detection"))
     implementation(project(":modules:accessibility"))
     implementation(project(":modules:sonification"))
+    implementation(project(":modules:sonification-java-sound"))
     implementation(project(":modules:fake-adapters"))
+    implementation(project(":modules:secret-store-api"))
+    implementation(project(":modules:windows-secret-store"))
 
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")

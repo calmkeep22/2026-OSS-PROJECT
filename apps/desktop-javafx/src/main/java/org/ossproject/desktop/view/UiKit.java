@@ -11,6 +11,7 @@ import javafx.scene.layout.*;
 
 import java.util.List;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 /** 모든 화면이 공유하는 접근 가능한 JavaFX 컴포넌트 팩토리. */
 public final class UiKit {
@@ -119,6 +120,22 @@ public final class UiKit {
         ObservableList<ObservableList<String>> items = FXCollections.observableArrayList();
         rows.forEach(values -> items.add(FXCollections.observableArrayList(values)));
         return textTable(accessibleName, items, headers);
+    }
+
+    @SafeVarargs
+    public static <T> TableView<T> typedTable(String accessibleName, ObservableList<T> items,
+                                               TableColumn<T, String>... columns) {
+        TableView<T> table = new TableView<>(items);
+        table.setAccessibleText(accessibleName);
+        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        table.getColumns().setAll(columns);
+        return table;
+    }
+
+    public static <T> TableColumn<T, String> textColumn(String title, Function<T, String> value) {
+        TableColumn<T, String> column = new TableColumn<>(title);
+        column.setCellValueFactory(data -> new SimpleStringProperty(value.apply(data.getValue())));
+        return column;
     }
 
     @SuppressWarnings("unchecked")

@@ -3,6 +3,7 @@ package org.ossproject.desktop.viewmodel;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.collections.transformation.FilteredList;
+import org.ossproject.desktop.state.WatchlistItem;
 
 import java.util.Objects;
 
@@ -57,15 +58,15 @@ public final class StockSearchViewModel {
 
     public boolean addToWatchlist(StockSearchItem item) {
         Objects.requireNonNull(item, "item");
-        boolean exists = session.watchlistRows().stream()
-                .anyMatch(row -> row.get(1).equalsIgnoreCase(item.name()));
+        boolean exists = session.watchlistItems().stream()
+                .anyMatch(watchlistItem -> watchlistItem.securityName().equalsIgnoreCase(item.name()));
         if (exists) return false;
         String group = switch (item.market()) {
             case "미국" -> "미국 기술주";
             case "ETF" -> "배당주";
             default -> item.name().equals("NAVER") ? "AI" : "반도체";
         };
-        session.watchlistRows().add(FXCollections.observableArrayList(
+        session.watchlistItems().add(new WatchlistItem(
                 group, item.name(), item.price(), item.changeRate(), "0", "없음"));
         return true;
     }
