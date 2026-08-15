@@ -12,5 +12,7 @@ include(
     ":modules:broker-api",
     ":modules:kiwoom-adapter",
     ":modules:persistence-sqlite",
+    ":modules:secret-store-api",
+    ":modules:file-secret-store",
     ":modules:windows-secret-store"
 )

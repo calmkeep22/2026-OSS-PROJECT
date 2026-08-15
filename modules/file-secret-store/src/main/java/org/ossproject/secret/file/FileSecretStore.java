@@ -1,7 +1,12 @@
-package org.ossproject.secret;
+package org.ossproject.secret.file;
+
+import org.ossproject.secret.SecretBytes;
+import org.ossproject.secret.SecretProtectionLevel;
+import org.ossproject.secret.SecretStore;
+import org.ossproject.secret.SecretStoreException;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -12,18 +17,8 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
-/**
- * 암호화된 비밀 값을 파일로 보관한다.
- *
- * <p>암호화 자체는 {@link SecretCodec} 이 담당하고, 이 클래스는 파일 이름과 쓰기 안전성만
- * 책임진다. 저장은 임시 파일에 쓴 뒤 원자적으로 옮기므로, 저장 도중 프로그램이 죽어도
- * 기존 값이 반쯤 덮여 못 쓰게 되는 일은 없다.
- *
- * <p>별칭은 파일 이름이 되므로 문자를 제한한다. 경로 구분자나 상위 디렉터리 참조가 섞여
- * 엉뚱한 위치에 쓰이는 것을 막기 위해서다.
- */
+/** Persists encrypted secret values as atomically replaced files. */
 public final class FileSecretStore implements SecretStore {
-
     private static final Pattern ALLOWED_ALIAS = Pattern.compile("[a-zA-Z0-9._-]{1,64}");
     private static final String EXTENSION = ".secret";
 
@@ -31,18 +26,14 @@ public final class FileSecretStore implements SecretStore {
     private final SecretCodec codec;
 
     public FileSecretStore(Path directory, SecretCodec codec) {
-        if (directory == null) {
-            throw new IllegalArgumentException("저장 경로는 필수입니다.");
-        }
-        if (codec == null) {
-            throw new IllegalArgumentException("암호화 구현은 필수입니다.");
-        }
-        this.directory = directory;
+        if (directory == null) throw new IllegalArgumentException("Storage directory is required.");
+        if (codec == null) throw new IllegalArgumentException("Secret codec is required.");
+        this.directory = directory.toAbsolutePath().normalize();
         this.codec = codec;
         try {
-            Files.createDirectories(directory);
-        } catch (IOException e) {
-            throw new SecretStoreException("저장 경로를 만들지 못했습니다. " + directory, e);
+            Files.createDirectories(this.directory);
+        } catch (IOException error) {
+            throw new SecretStoreException("Could not create the secret storage directory.", error);
         }
     }
 
@@ -50,23 +41,20 @@ public final class FileSecretStore implements SecretStore {
     public void store(String alias, char[] secret) {
         requireAlias(alias);
         if (secret == null || secret.length == 0) {
-            throw new IllegalArgumentException("비밀 값은 비어 있을 수 없습니다.");
+            throw new IllegalArgumentException("Secret value must not be empty.");
         }
-
         byte[] plaintext = null;
         byte[] ciphertext = null;
         Path temporary = null;
         try {
             plaintext = SecretBytes.toBytes(secret);
             ciphertext = codec.encrypt(plaintext);
-
-            temporary = Files.createTempFile(directory, alias, ".tmp");
+            temporary = Files.createTempFile(directory, alias + "-", ".tmp");
             Files.write(temporary, ciphertext);
-            Files.move(temporary, fileFor(alias),
-                    StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            moveReplacing(temporary, fileFor(alias));
             temporary = null;
-        } catch (IOException e) {
-            throw new SecretStoreException("비밀 값 " + alias + " 을(를) 저장하지 못했습니다.", e);
+        } catch (IOException error) {
+            throw new SecretStoreException("Could not store secret alias: " + alias, error);
         } finally {
             SecretBytes.wipe(plaintext);
             SecretBytes.wipe(ciphertext);
@@ -78,18 +66,15 @@ public final class FileSecretStore implements SecretStore {
     public Optional<char[]> load(String alias) {
         requireAlias(alias);
         Path file = fileFor(alias);
-        if (!Files.exists(file)) {
-            return Optional.empty();
-        }
-
+        if (!Files.exists(file)) return Optional.empty();
         byte[] ciphertext = null;
         byte[] plaintext = null;
         try {
             ciphertext = Files.readAllBytes(file);
             plaintext = codec.decrypt(ciphertext);
             return Optional.of(SecretBytes.toChars(plaintext));
-        } catch (IOException e) {
-            throw new SecretStoreException("비밀 값 " + alias + " 을(를) 읽지 못했습니다.", e);
+        } catch (IOException error) {
+            throw new SecretStoreException("Could not load secret alias: " + alias, error);
         } finally {
             SecretBytes.wipe(ciphertext);
             SecretBytes.wipe(plaintext);
@@ -101,8 +86,8 @@ public final class FileSecretStore implements SecretStore {
         requireAlias(alias);
         try {
             Files.deleteIfExists(fileFor(alias));
-        } catch (IOException e) {
-            throw new SecretStoreException("비밀 값 " + alias + " 을(를) 지우지 못했습니다.", e);
+        } catch (IOException error) {
+            throw new SecretStoreException("Could not delete secret alias: " + alias, error);
         }
     }
 
@@ -115,33 +100,31 @@ public final class FileSecretStore implements SecretStore {
     @Override
     public Set<String> aliases() {
         try (Stream<Path> files = Files.list(directory)) {
-            Set<String> aliases = new LinkedHashSet<>();
+            Set<String> result = new LinkedHashSet<>();
             files.map(path -> path.getFileName().toString())
                     .filter(name -> name.endsWith(EXTENSION))
                     .map(name -> name.substring(0, name.length() - EXTENSION.length()))
                     .sorted()
-                    .forEach(aliases::add);
-            return Set.copyOf(aliases);
-        } catch (IOException e) {
-            throw new SecretStoreException("저장된 비밀 목록을 읽지 못했습니다.", e);
-        } catch (UncheckedIOException e) {
-            throw new SecretStoreException("저장된 비밀 목록을 읽지 못했습니다.", e);
+                    .forEach(result::add);
+            return Set.copyOf(result);
+        } catch (IOException error) {
+            throw new SecretStoreException("Could not list stored secret aliases.", error);
         }
     }
 
     @Override
-    public boolean isHardwareBacked() {
-        return codec.isHardwareBacked();
+    public SecretProtectionLevel protectionLevel() {
+        return codec.protectionLevel();
     }
 
     @Override
     public String description() {
-        return codec.description() + " · 저장 위치 " + directory;
+        return codec.description() + " · " + directory;
     }
 
     @Override
     public void close() {
-        // 파일 기반이라 열어 둔 자원이 없다.
+        // File-backed implementation owns no open resources between calls.
     }
 
     private Path fileFor(String alias) {
@@ -150,19 +133,24 @@ public final class FileSecretStore implements SecretStore {
 
     private static void requireAlias(String alias) {
         if (alias == null || !ALLOWED_ALIAS.matcher(alias).matches()) {
-            throw new IllegalArgumentException(
-                    "별칭은 영문, 숫자, 점, 밑줄, 붙임표만 쓸 수 있고 64자 이하여야 합니다. 입력값 " + alias);
+            throw new IllegalArgumentException("Alias must contain 1-64 letters, numbers, dots, dashes, or underscores.");
+        }
+    }
+
+    private static void moveReplacing(Path source, Path target) throws IOException {
+        try {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException unsupported) {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
         }
     }
 
     private static void deleteQuietly(Path path) {
-        if (path == null) {
-            return;
-        }
+        if (path == null) return;
         try {
             Files.deleteIfExists(path);
         } catch (IOException ignored) {
-            // 임시 파일 정리 실패는 원래 오류를 덮지 않는다.
+            // Best effort cleanup of a temporary file.
         }
     }
 }
