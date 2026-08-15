@@ -1,7 +1,7 @@
 package org.ossproject.kiwoom.stream;
 
 /** WebSocket 연결에서 올라오는 사건. */
-public interface WebSocketHandler {
+interface WebSocketHandler {
 
     void onMessage(String message);
 

@@ -51,9 +51,20 @@ public final class TradingUseCase {
         Account account = accountPort.getAccount();
         BigDecimal availableBefore = account.balance().available();
         // 매도 대금은 체결된 뒤에 들어오므로 접수 시점의 주문가능금액은 그대로다.
-        BigDecimal availableAfter = command.side() == OrderSide.BUY
-                ? availableBefore.subtract(estimatedAmount)
-                : availableBefore;
+        BigDecimal availableAfter = availableBefore;
+        if (command.side() == OrderSide.BUY) {
+            availableAfter = availableBefore.subtract(estimatedAmount);
+            if (availableAfter.signum() < 0) {
+                throw new IllegalArgumentException("주문 가능 현금이 부족합니다.");
+            }
+        } else {
+            long availableQuantity = account.position(command.symbol())
+                    .map(position -> position.availableQuantity())
+                    .orElse(0L);
+            if (availableQuantity < command.quantity()) {
+                throw new IllegalArgumentException("매도 가능 수량이 부족합니다.");
+            }
+        }
         return new TradePreview(command, referencePrice, estimatedAmount, availableBefore, availableAfter);
     }
 

@@ -64,7 +64,8 @@
 desktop-javafx ──> application ──> finance-domain
        │                 ▲
        ├─> accessibility │
-       └─> sonification  │
+       ├─> sonification  │
+       └─> sonification-java-sound ──> sonification
                          │
 kiwoom-adapter ──────────┤
 mock-trading ────────────┤
@@ -75,6 +76,8 @@ persistence-sqlite ──────┘
 - `application`은 JavaFX와 키움 구현 클래스를 참조하지 않는다.
 - `kiwoom-adapter`는 JavaFX, `SpeechPort`, `SonificationPort`를 참조하지 않는다.
 - `desktop-javafx`는 `KiwoomRestClient` 같은 어댑터를 화면 Controller에서 직접 호출하지 않는다.
+- `desktop-javafx` 화면은 Java Sound 구현을 직접 생성하지 않고 `DesktopServices`가
+  `sonification-java-sound` 어댑터를 조립한다.
 - A는 음성을 직접 출력하지 않고 의미 있는 도메인 이벤트를 발행한다.
 - B는 키움 TR 코드나 JSON 필드명을 해석하지 않는다.
 

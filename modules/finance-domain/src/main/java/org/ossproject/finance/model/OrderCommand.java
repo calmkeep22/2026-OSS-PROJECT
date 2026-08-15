@@ -6,9 +6,7 @@ import java.util.Optional;
 /**
  * 주문 접수 요청. 지정가와 시장가를 모두 표현한다.
  *
- * <p>기존 {@link OrderRequest} 는 지정가만 표현할 수 있어 그대로 두고,
- * 생명주기를 다루는 계층에서는 이 타입을 사용한다.
- * {@link #from(OrderRequest)} 로 상호 변환할 수 있다.
+ * <p>This is the single command type shared by the application and every trading adapter.
  */
 public record OrderCommand(
         String symbol,
@@ -51,15 +49,6 @@ public record OrderCommand(
     /** 시장가 주문을 만든다. */
     public static OrderCommand market(String symbol, String name, OrderSide side, long quantity) {
         return new OrderCommand(symbol, name, side, OrderType.MARKET, quantity, null);
-    }
-
-    /** 기존 {@link OrderRequest}(지정가) 를 변환한다. */
-    public static OrderCommand from(OrderRequest request) {
-        if (request == null) {
-            throw new IllegalArgumentException("주문 요청은 필수입니다.");
-        }
-        return limit(request.symbol(), request.name(), request.side(),
-                request.quantity(), request.limitPrice());
     }
 
     public Optional<BigDecimal> limitPriceIfPresent() {

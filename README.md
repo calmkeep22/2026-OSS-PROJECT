@@ -1,144 +1,137 @@
-# 2026 OSS Project
+# OpenStock Access
 
-시각장애인과 저시력 사용자를 고려한 접근 가능한 금융 데스크톱 애플리케이션입니다.
+시각장애인과 저시력 사용자가 키보드·스크린리더·음성·청각 차트를 이용해 주식 정보를 탐색하고 모의주문을 연습할 수 있는 Java 17 오픈소스 데스크톱 앱입니다.
 
-## 현재 구현 범위
+현재 기본 실행 모드는 모의투자입니다. 실제 키움 연동 코드는 별도 어댑터에 격리되어 있으며, 공식 API 명세와 운영 정책을 확정하기 전에는 실거래 주문을 전송하지 않습니다.
 
-개발자 B가 A의 금융 구현을 기다리지 않고 개발할 수 있도록 실제 구현과 Fake 구현을 Port로 분리했습니다.
+## 주요 기능
 
-- JavaFX 17 실행 골격
-- Gradle 멀티모듈과 단방향 의존성
-- Application Port와 Use Case
-- 독립된 모의주문 및 Fake 시세 어댑터
-- 키보드로 탐색 가능한 포트폴리오 표
-- 큰 글자 및 고대비 전환
-- 주문 입력, 미리보기, 명시적인 재확인, 모의주문 접수
-- 규칙 기반 가격·거래량 이상 감지
-- 우선순위·최신값 교체·중복 허용·중단 정책과 최대 용량이 적용된 TTS 큐
-- Windows·macOS·Linux TTS 어댑터, 음성 목록 조회와 비지원 환경의 무음 대체 구현
-- 주문·연결·이상 감지·성공·경고·오류를 구분하는 Sonification 상태음
-- 차트 요약, 12초 압축 재생, 지점별 키보드 탐색과 실시간 모니터링을 제공하는 청각 차트
-- 주문 금액과 포트폴리오 계산 단위 테스트
+- JavaFX 기반 키보드 탐색, 큰 글자, 고대비, 스크린리더용 텍스트
+- 우선순위·중복 병합·중단 정책이 있는 TTS 큐
+- 가격 그래프의 추세와 변화를 연속 음높이로 표현하는 sonification
+- 주문 미리보기와 명시적 재확인, 주문 한도·중복 주문 안전장치
+- 잔고·주문·체결 생명주기를 처리하는 모의주문 엔진
+- 가짜 시세/캔들/실시간 스트림과 키움 REST·WebSocket 어댑터
+- SQLite 금융 데이터와 Windows DPAPI 비밀 저장소
+- API 연결 화면에서 환경별 키움 자격증명 DPAPI 저장·재사용·삭제
 
 ## 모듈 구조
 
 ```text
 apps/desktop-javafx
-  JavaFX 화면, 키보드 탐색, 내비게이션, 구현체 조립
+  JavaFX 화면과 DesktopServices 조립 루트
 
 modules/finance-domain
-  종목, 가격, 계좌, 주문 도메인 모델
+  플랫폼 독립 금융 모델과 주문 상태 전이
 
 modules/application
-  Port 인터페이스와 Use Case
+  Use Case, Port, 주문 안전 정책, 공통 adapter contract test
 
 modules/mock-trading
-  인메모리 모의주문, 주문 검증, 모의 계좌
+  OrderLifecyclePort/AccountPort 기반 모의주문 엔진
 
-modules/anomaly-detection
-  가격 급등락과 거래량 급증 규칙
+modules/broker-api
+  증권사 공통 REST 계약과 오류·재시도 모델
 
-modules/accessibility
-  플랫폼 독립 TTS Port, 제한된 우선순위 큐, OS별 어댑터, 상태음
-
-modules/sonification
-  그래프 요약, 자동·고정 음역, 재생·탐색 상태, 연속 PCM pitch glide
+modules/kiwoom-adapter
+  키움 REST/WebSocket 구현
 
 modules/fake-adapters
-  UI 독립 개발용 Fake 종목·일봉 데이터
+  화면 개발용 시세·캔들·실시간 스트림 구현
+
+modules/persistence-sqlite
+  SQLite 영속화 구현
+
+modules/secret-store-api
+  비밀 저장소 공통 계약
+
+modules/file-secret-store
+  암호화 파일 저장 구현
+
+modules/windows-secret-store
+  Windows DPAPI 보호 구현
+
+modules/accessibility
+  TTS 큐, 음성/효과음 Port와 플랫폼 구현
+
+modules/sonification
+  프레임워크 독립 그래프 분석·매핑·재생·탐색과 출력 Port
+
+modules/sonification-java-sound
+  SonificationPort의 Java Sound PCM 출력 구현
+
+modules/anomaly-detection
+  규칙 기반 이상 탐지
 ```
 
-의존성은 다음 방향만 허용합니다.
+의존성은 UI와 인프라에서 안쪽의 `application`/`finance-domain`으로만 향합니다. 데스크톱 화면은 구체 어댑터를 직접 생성하지 않고 `DesktopServices` 조립 루트에서 주입받습니다.
+
+각 모듈의 공개 API, 의존성, 비목표는 해당 모듈의 `README.md`에 정리되어 있습니다.
+
+### 비밀 저장 모듈 사용
+
+비밀 저장 기능은 공통 계약, 파일 저장, Windows 보호 구현으로 분리되어 있습니다.
 
 ```text
-desktop-javafx ─┬─> application ──> finance-domain
-                ├─> mock-trading ─> application
-                ├─> fake-adapters -> application
-                ├─> anomaly-detection -> finance-domain
-                ├─> accessibility
-                └─> sonification
+secret-store-api ← file-secret-store ← windows-secret-store
+        ↑                              ↑
+   애플리케이션 코드              DesktopServices에서 선택
 ```
 
-`finance-domain`과 `application`은 JavaFX를 참조하지 않습니다. 개발자 A의 구현이 준비되면
-`PortfolioPort`, `OrderPort`, `StockQueryPort` 구현체를 추가하고 JavaFX 부트스트랩에서 교체합니다.
+Windows 앱에서는 `SecretStoreFactory`로 DPAPI 저장소를 만든 뒤 `SecretStore` 타입으로
+애플리케이션 코드에 주입합니다.
 
-## 요구 사항
+```java
+Path secretDirectory = Path.of(
+        System.getenv("LOCALAPPDATA"), "OpenStockAccess", "secrets");
 
-- JDK 17
-- Windows, macOS 또는 Linux
+try (SecretStore secrets = SecretStoreFactory.create(secretDirectory)) {
+    char[] value = obtainSecretFromUser();
+    try {
+        secrets.store("kiwoom.mock.credentials", value);
+    } finally {
+        SecretBytes.wipe(value);
+    }
+}
+```
 
-## 팀 개발 계약
-
-금융·키움 연동과 UI·접근성 계층 사이의 책임, 공개 Port, 이벤트, 주문 안전 정책은
-[금융·접근성 통합 계약서](docs/A-B-INTEGRATION-CONTRACT.md)를 기준으로 합의합니다.
-인터페이스별 메서드·입출력·구현 규칙은
-[A/B 인터페이스별 구현 명세](docs/A-B-INTERFACE-SPEC.md)에 정리되어 있습니다.
-현재 코드 기준 완료·보완·신규 작업과 A/B 구현 순서는
-[A/B 현재 구현 상태와 인터페이스 작업 명세](docs/A-B-CURRENT-IMPLEMENTATION-PLAN.md)를 확인합니다.
-
-Gradle은 별도 설치할 필요가 없습니다.
+모듈별 설치·호출 방법과 보안 계약은
+[`secret-store-api`](modules/secret-store-api/README.md),
+[`file-secret-store`](modules/file-secret-store/README.md),
+[`windows-secret-store`](modules/windows-secret-store/README.md) 문서를 참고하세요.
 
 ## 실행
+
+요구 사항: JDK 17. 별도의 전역 Gradle 설치는 필요하지 않습니다.
 
 Windows PowerShell:
 
 ```powershell
-.\gradlew.bat :apps:desktop-javafx:run
+./gradlew.bat :apps:desktop-javafx:run
 ```
 
-### Windows 배포본
-
-JRE를 포함한 포터블 앱 이미지는 별도 설치 도구 없이 생성할 수 있습니다.
+전체 검증:
 
 ```powershell
-.\gradlew.bat :apps:desktop-javafx:packagePortable
+./gradlew.bat clean test
 ```
 
-결과는 `apps/desktop-javafx/build/package/portable/OpenStockAccess`에 생성됩니다.
-
-`.exe` 설치 프로그램은 WiX Toolset을 설치한 Windows에서 생성합니다.
+Windows 휴대용 앱 이미지:
 
 ```powershell
-.\gradlew.bat :apps:desktop-javafx:packageWindowsInstaller
+./gradlew.bat :apps:desktop-javafx:packagePortable
 ```
-
-테스트:
-
-```powershell
-.\gradlew.bat test
-```
-
-## 키보드 단축키
-
-- `Alt+D`: 대시보드
-- `Alt+A`: 계좌와 모의주문
-- `Alt+R`: 청각 차트
-- `Alt+S`: 접근성 설정
-- `Tab` / `Shift+Tab`: 컨트롤 간 이동
-- 방향키: 표 행 또는 선택 항목 탐색
-- `Enter`: 기본 버튼 실행
-- `Escape`: 주문 재확인 취소
-
-청각 차트의 가격 지점 목록에서는 다음 키를 사용할 수 있습니다.
-
-- `Space`: 전체 그래프 재생 또는 일시정지
-- `←` / `→`: 이전·다음 가격 지점의 음높이 미리듣기
-- `Ctrl+←` / `Ctrl+→`: 세 가격 지점씩 이동
-- `Home` / `End`: 첫 지점·마지막 지점 이동
-- `Enter`: 선택한 지점의 날짜·가격·등락률 듣기
-- `S`: 차트 전체 요약 듣기
-- `R`: 처음부터 다시 재생
-
-음성 안내와 상태음은 설정 화면에서 각각 켜고 끌 수 있습니다.
-TTS나 오디오 장치를 사용할 수 없어도 동일한 정보는 항상 화면의 텍스트로 제공됩니다.
 
 ## 안전 원칙
 
-- 음성이나 단일 입력만으로 주문을 즉시 제출하지 않습니다.
-- 주문 제출 전에 종목, 매수·매도, 수량, 가격과 예상 금액을 다시 보여줍니다.
-- 상승·하락 및 이익·손실 상태를 색상만으로 표현하지 않습니다.
-- API 키, 토큰과 계좌 정보는 저장소에 커밋하지 않습니다.
+- 음성 명령만으로 주문을 즉시 제출하지 않습니다.
+- 종목·매수/매도·수량·가격·예상 금액을 다시 읽고 명시적 확인을 받습니다.
+- API 키와 토큰은 SQLite나 설정 파일에 평문으로 저장하지 않습니다.
+- DPAPI를 사용할 수 없는 환경에서는 평문 저장으로 대체하지 않고 실패합니다.
+- 색상이나 소리만으로 정보를 전달하지 않고 동등한 텍스트를 제공합니다.
+
+현재 구현된 경계는 [모듈 아키텍처](docs/MODULE-ARCHITECTURE.md)를 기준으로 합니다. 팀 간 향후 계약은 [통합 계약](docs/A-B-INTEGRATION-CONTRACT.md), [인터페이스 명세](docs/A-B-INTERFACE-SPEC.md), [현재 구현 계획](docs/A-B-CURRENT-IMPLEMENTATION-PLAN.md)에서 관리합니다.
 
 ## 라이선스
 
-[MIT](./LICENSE)
+[MIT](LICENSE)

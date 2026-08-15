@@ -10,7 +10,7 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>테스트가 실제로 기다리지 않아도 되도록 분리했다.
  */
-public interface ReconnectScheduler {
+interface ReconnectScheduler {
 
     void schedule(Duration delay, Runnable task);
 

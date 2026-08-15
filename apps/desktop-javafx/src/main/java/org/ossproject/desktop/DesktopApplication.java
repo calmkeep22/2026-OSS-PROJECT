@@ -23,20 +23,19 @@ import org.ossproject.accessibility.notification.*;
 import org.ossproject.accessibility.port.SoundPort;
 import org.ossproject.accessibility.port.SpeechPort;
 import org.ossproject.accessibility.port.SpeechVoiceProvider;
-import org.ossproject.accessibility.infrastructure.sound.ToneSoundAdapter;
-import org.ossproject.accessibility.infrastructure.speech.SpeechAdapterFactory;
+import org.ossproject.application.port.CandleQueryPort;
+import org.ossproject.application.port.StockQueryPort;
+import org.ossproject.application.usecase.TradingUseCase;
+import org.ossproject.desktop.composition.DesktopServices;
 import org.ossproject.finance.model.*;
-import org.ossproject.application.usecase.OrderUseCase;
-import org.ossproject.application.usecase.PortfolioUseCase;
 import org.ossproject.desktop.chart.AccessibleChartController;
 import org.ossproject.desktop.chart.AccessibleChartView;
 import org.ossproject.desktop.chart.CandlestickChartView;
 import org.ossproject.desktop.presentation.Formatters;
 import org.ossproject.desktop.navigation.Screen;
 import org.ossproject.desktop.controller.DesktopScreenController;
-import org.ossproject.fake.FakeStockQueryAdapter;
-import org.ossproject.mocktrading.InMemoryMockTradingAdapter;
-import org.ossproject.sonification.infrastructure.sound.PcmGraphSonificationAdapter;
+import org.ossproject.sonification.port.SonificationPort;
+import org.ossproject.secret.SecretStore;
 import org.ossproject.desktop.viewmodel.DesktopSession;
 import org.ossproject.desktop.viewmodel.StockSearchViewModel;
 import org.ossproject.desktop.viewmodel.ConnectionViewModel;
@@ -49,7 +48,12 @@ import org.ossproject.desktop.view.screen.WatchlistScreenView;
 import org.ossproject.desktop.view.screen.ScannerScreenView;
 import org.ossproject.desktop.persistence.DesktopStateRepository;
 import org.ossproject.desktop.persistence.DesktopStateSnapshot;
-import org.ossproject.desktop.persistence.PropertiesDesktopStateRepository;
+import org.ossproject.desktop.persistence.AccessibilityPreferencesRepository;
+import org.ossproject.desktop.persistence.SonificationPreferencesRepository;
+import org.ossproject.desktop.state.AccessibilityPreferences;
+import org.ossproject.desktop.state.AlertRule;
+import org.ossproject.desktop.state.JournalEntry;
+import org.ossproject.desktop.state.SonificationPreferences;
 import org.ossproject.desktop.accessibility.AccessibilityAudit;
 
 import java.math.BigDecimal;
@@ -63,13 +67,14 @@ import java.util.concurrent.CompletableFuture;
 import static org.ossproject.desktop.view.UiKit.*;
 
 public final class DesktopApplication extends Application {
-    private final InMemoryMockTradingAdapter tradingAdapter = new InMemoryMockTradingAdapter();
-    private final FakeStockQueryAdapter stockAdapter = new FakeStockQueryAdapter();
-    private final PortfolioUseCase portfolioUseCase = new PortfolioUseCase(tradingAdapter);
-    private final OrderUseCase orderUseCase = new OrderUseCase(tradingAdapter);
-    private final SpeechPort speechPort = SpeechAdapterFactory.create();
-    private final SpeechQueue speechQueue = new SpeechQueue(speechPort, defaultSpeechOptions());
-    private final SoundPort soundPort = new ToneSoundAdapter();
+    private final TradingUseCase tradingUseCase;
+    private final StockQueryPort stockAdapter;
+    private final CandleQueryPort candleAdapter;
+    private final SpeechPort speechPort;
+    private final SpeechQueue speechQueue;
+    private final SoundPort soundPort;
+    private final SonificationPort sonificationPort;
+    private final SecretStore secretStore;
     private AccessibleChartController accessibleChartController;
     private AccessibleChartView accessibleChartView;
     private final Label status = new Label("준비됨");
@@ -78,11 +83,13 @@ public final class DesktopApplication extends Application {
     private final Map<Screen, Button> navigationButtons = new EnumMap<>(Screen.class);
     private final DesktopSession session = new DesktopSession();
     private final StockSearchViewModel stockSearchViewModel = new StockSearchViewModel(session);
-    private final ConnectionViewModel connectionViewModel = new ConnectionViewModel();
+    private final ConnectionViewModel connectionViewModel;
     private final WatchlistViewModel watchlistViewModel = new WatchlistViewModel(session);
-    private final StockDetailViewModel stockDetailViewModel = new StockDetailViewModel(session, stockAdapter);
+    private final StockDetailViewModel stockDetailViewModel;
     private final ScannerViewModel scannerViewModel = new ScannerViewModel();
-    private final DesktopStateRepository stateRepository = new PropertiesDesktopStateRepository(stateFile());
+    private final DesktopStateRepository stateRepository;
+    private final AccessibilityPreferencesRepository accessibilityPreferencesRepository;
+    private final SonificationPreferencesRepository sonificationPreferencesRepository;
     private DesktopScreenController screenController;
     private PauseTransition persistenceDelay;
     private final TextField globalSearch = new TextField();
@@ -96,20 +103,26 @@ public final class DesktopApplication extends Application {
     private String informationDensity = "표준";
     private boolean preventDuplicateOrders = true;
     private int maxSubscriptions = 160;
+    private SonificationPreferences sonificationPreferences = SonificationPreferences.DEFAULT;
     private String pendingOrderPrice = "73500";
-    private static SpeechOptions defaultSpeechOptions() {
-        String os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
-        return os.contains("win")
-                ? SpeechOptions.DEFAULT.withVoiceName("Microsoft Heami Desktop")
-                : SpeechOptions.DEFAULT;
+    public DesktopApplication() {
+        this(DesktopServices.createDefault());
     }
 
-    private static java.nio.file.Path stateFile() {
-        String localAppData = System.getenv("LOCALAPPDATA");
-        java.nio.file.Path directory = localAppData == null || localAppData.isBlank()
-                ? java.nio.file.Path.of(System.getProperty("user.home"), ".openstock-access")
-                : java.nio.file.Path.of(localAppData, "OpenStockAccess");
-        return directory.resolve("ui-state.properties");
+    DesktopApplication(DesktopServices services) {
+        this.tradingUseCase = services.trading();
+        this.stockAdapter = services.stocks();
+        this.candleAdapter = services.candles();
+        this.speechPort = services.speech();
+        this.speechQueue = services.speechQueue();
+        this.soundPort = services.sounds();
+        this.sonificationPort = services.sonification();
+        this.secretStore = services.secrets();
+        this.stateRepository = services.stateRepository();
+        this.accessibilityPreferencesRepository = services.accessibilityPreferences();
+        this.sonificationPreferencesRepository = services.sonificationPreferences();
+        this.connectionViewModel = new ConnectionViewModel(secretStore);
+        this.stockDetailViewModel = new StockDetailViewModel(session, stockAdapter, candleAdapter);
     }
 
     @Override public void start(Stage stage) {
@@ -127,9 +140,15 @@ public final class DesktopApplication extends Application {
         root.setBottom(createStatusBar());
         accessibleChartController = new AccessibleChartController(
                 stockAdapter,
-                new PcmGraphSonificationAdapter(),
+                candleAdapter,
+                sonificationPort,
                 (text, key) -> announce(text, SpeechPriority.USER_REQUEST, key),
                 status::setText);
+        accessibleChartController.applyPreferences(sonificationPreferences);
+        accessibleChartController.setPreferencesListener(preferences -> {
+            sonificationPreferences = preferences;
+            scheduleStateSave();
+        });
         accessibleChartView = new AccessibleChartView(accessibleChartController);
         configureScreens();
         speechQueue.addListener(new SpeechListener() {
@@ -387,7 +406,7 @@ public final class DesktopApplication extends Application {
     }
 
     private ScrollPane createAccountScreen() {
-        PortfolioSnapshot snapshot = portfolioUseCase.loadPortfolio();
+        Account snapshot = tradingUseCase.account();
         Label title = heading("계좌");
         ComboBox<String> account = new ComboBox<>(FXCollections.observableArrayList("모의계좌 ****-1204", "미국주식 모의계좌 ****-7781"));
         account.setValue("모의계좌 ****-1204"); account.setAccessibleText("조회할 계좌 선택");
@@ -435,11 +454,18 @@ public final class DesktopApplication extends Application {
                 progressMetric("3개월 누적 수익률", 0.42, "+4.20%"),
                 progressMetric("1년 누적 수익률", 0.91, "+9.10%"));
         profit.setPadding(new Insets(20));
-        TableView<ObservableList<String>> journal = textTable("매매일지", session.journalRows(),
-                "날짜", "종목", "매수금액", "매도금액", "손익", "전략·메모", "태그");
+        TableView<JournalEntry> journal = typedTable("매매일지", session.journalEntries(),
+                textColumn("날짜", JournalEntry::date),
+                textColumn("종목", JournalEntry::securityName),
+                textColumn("매수금액", JournalEntry::buyAmount),
+                textColumn("매도금액", JournalEntry::sellAmount),
+                textColumn("손익", JournalEntry::profitLoss),
+                textColumn("전략·메모", JournalEntry::memo),
+                textColumn("태그", JournalEntry::tags));
         Button addJournal = new Button("일지 작성"); addJournal.setOnAction(event -> showJournalDialog(null));
         Button editJournal = new Button("선택 수정"); editJournal.setOnAction(event -> showJournalDialog(journal.getSelectionModel().getSelectedItem()));
-        Button deleteJournal = new Button("선택 삭제"); deleteJournal.setOnAction(event -> session.journalRows().remove(journal.getSelectionModel().getSelectedItem()));
+        Button deleteJournal = new Button("선택 삭제");
+        deleteJournal.setOnAction(event -> session.journalEntries().remove(journal.getSelectionModel().getSelectedItem()));
         Button attach = new Button("차트 화면 첨부"); attach.setOnAction(event -> status.setText("현재 차트 화면을 매매일지 첨부 대상으로 선택했습니다."));
         VBox journalPanel = new VBox(10, journal, wrappingRow(8, addJournal, editJournal, deleteJournal, attach));
         journalPanel.setPadding(new Insets(10));
@@ -946,14 +972,22 @@ public final class DesktopApplication extends Application {
         Button delete = new Button("선택 삭제"); delete.setOnAction(event -> session.notifications().remove(notifications.getSelectionModel().getSelectedItem()));
         VBox history = new VBox(10, notifications, wrappingRow(8, listen, markRead, delete)); history.setPadding(new Insets(10));
 
-        TableView<ObservableList<String>> rules = textTable("알림 규칙", session.alertRuleRows(), "종목", "조건", "기준", "상태");
+        TableView<AlertRule> rules = typedTable("알림 규칙", session.alertRules(),
+                textColumn("종목", AlertRule::securityName),
+                textColumn("조건", AlertRule::condition),
+                textColumn("기준", AlertRule::threshold),
+                textColumn("상태", AlertRule::statusText));
         Button addRule = new Button("알림 규칙 추가"); addRule.setOnAction(event -> showAlertRuleDialog(null));
         Button editRule = new Button("선택 수정"); editRule.setOnAction(event -> showAlertRuleDialog(rules.getSelectionModel().getSelectedItem()));
         Button toggleRule = new Button("활성·일시정지"); toggleRule.setOnAction(event -> {
-            ObservableList<String> selected = rules.getSelectionModel().getSelectedItem();
-            if (selected != null) { selected.set(3, selected.get(3).equals("활성") ? "일시정지" : "활성"); rules.refresh(); }
+            AlertRule selected = rules.getSelectionModel().getSelectedItem();
+            if (selected != null) {
+                int index = session.alertRules().indexOf(selected);
+                if (index >= 0) session.alertRules().set(index, selected.toggled());
+            }
         });
-        Button deleteRule = new Button("선택 삭제"); deleteRule.setOnAction(event -> session.alertRuleRows().remove(rules.getSelectionModel().getSelectedItem()));
+        Button deleteRule = new Button("선택 삭제");
+        deleteRule.setOnAction(event -> session.alertRules().remove(rules.getSelectionModel().getSelectedItem()));
         VBox rulePanel = new VBox(10, rules, wrappingRow(8, addRule, editRule, toggleRule, deleteRule)); rulePanel.setPadding(new Insets(10));
         TabPane tabs = new TabPane(tab("알림 기록", history), tab("알림 규칙", rulePanel));
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE); tabs.setPrefHeight(530);
@@ -965,10 +999,16 @@ public final class DesktopApplication extends Application {
         column.setCellValueFactory(data -> new SimpleStringProperty(mapper.apply(data.getValue()))); return column;
     }
 
-    private VBox createPortfolio(PortfolioSnapshot snapshot) {
+    private List<PricePoint> dailyPriceHistory(String symbol, int count) {
+        return candleAdapter.getCandles(symbol, CandleInterval.DAY, count).stream()
+                .map(candle -> candle.toPricePoint(java.time.ZoneId.of("Asia/Seoul")))
+                .toList();
+    }
+
+    private VBox createPortfolio(Account snapshot) {
         Label summary = new Label("총 평가금액 " + Formatters.won(snapshot.totalMarketValue())
-                + " · 주문 가능 현금 " + Formatters.won(snapshot.cash())); summary.setWrapText(true);
-        TableView<Holding> table = new TableView<>(FXCollections.observableArrayList(snapshot.holdings()));
+                + " · 주문 가능 현금 " + Formatters.won(snapshot.balance().available())); summary.setWrapText(true);
+        TableView<Position> table = new TableView<>(FXCollections.observableArrayList(snapshot.positions()));
         table.setAccessibleText("보유 종목 표"); table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
         table.getColumns().add(column("종목", h -> h.name() + ", 코드 " + h.symbol()));
         table.getColumns().add(column("수량", h -> h.quantity() + "주"));
@@ -980,8 +1020,8 @@ public final class DesktopApplication extends Application {
         return box;
     }
 
-    private TableColumn<Holding, String> column(String title, java.util.function.Function<Holding, String> mapper) {
-        TableColumn<Holding, String> column = new TableColumn<>(title);
+    private TableColumn<Position, String> column(String title, java.util.function.Function<Position, String> mapper) {
+        TableColumn<Position, String> column = new TableColumn<>(title);
         column.setCellValueFactory(data -> new SimpleStringProperty(mapper.apply(data.getValue()))); return column;
     }
 
@@ -1031,7 +1071,7 @@ public final class DesktopApplication extends Application {
         estimates.getStyleClass().add("estimate-box"); estimates.setPadding(new Insets(12));
         Button preview = new Button("주문 내용 검토"); preview.getStyleClass().add("primary-button"); preview.setDefaultButton(true);
         preview.setAccessibleHelp("주문을 제출하지 않고 재확인 창을 엽니다.");
-        preview.setOnAction(event -> previewOrder(symbol, name, side, quantity, price));
+        preview.setOnAction(event -> previewOrder(symbol, name, side, orderType, quantity, price));
         VBox box = new VBox(14, sectionHeading("모의주문 준비"), form, new Label("주문 비율"), ratios, estimates, preview);
         box.getStyleClass().add("panel-card"); box.setPadding(new Insets(20));
         return box;
@@ -1212,7 +1252,7 @@ public final class DesktopApplication extends Application {
     }
 
     private VBox createChartPreview(String accessibleName) {
-        List<PricePoint> points = stockAdapter.getPriceHistory("005930", PricePeriod.MONTH);
+        List<PricePoint> points = dailyPriceHistory("005930", 30);
         CandlestickChartView chart = new CandlestickChartView(points);
         chart.setAccessibleText(accessibleName + ". " + chart.getAccessibleText());
         CheckBox movingAverage = new CheckBox("이동평균"); movingAverage.setSelected(true);
@@ -1263,7 +1303,7 @@ public final class DesktopApplication extends Application {
     private void showProductDetail(String productType, String productName) {
         Dialog<ButtonType> dialog = new Dialog<>(); dialog.setTitle(productType + " 상세");
         dialog.setHeaderText(productName);
-        CandlestickChartView chart = new CandlestickChartView(stockAdapter.getPriceHistory("005930", PricePeriod.MONTH));
+        CandlestickChartView chart = new CandlestickChartView(dailyPriceHistory("005930", 30));
         TableView<ObservableList<String>> quote = textTable(productName + " 호가",
                 List.of(row("매도", "36,140원", "8,240"), row("매도", "36,130원", "12,410"),
                         row("매수", "36,120원", "9,820"), row("매수", "36,110원", "14,200")),
@@ -1332,13 +1372,13 @@ public final class DesktopApplication extends Application {
         });
     }
 
-    private void showAlertRuleDialog(ObservableList<String> existing) {
+    private void showAlertRuleDialog(AlertRule existing) {
         Dialog<ButtonType> dialog = new Dialog<>(); dialog.setTitle(existing == null ? "알림 규칙 추가" : "알림 규칙 수정");
-        TextField security = new TextField(existing == null ? "" : existing.get(0));
+        TextField security = new TextField(existing == null ? "" : existing.securityName());
         ComboBox<String> condition = new ComboBox<>(FXCollections.observableArrayList("가격 이상", "가격 이하", "등락률 이상", "거래량 급증", "VI", "조건검색 편입"));
-        condition.setValue(existing == null ? "가격 이상" : existing.get(1));
-        TextField threshold = new TextField(existing == null ? "" : existing.get(2));
-        CheckBox enabled = new CheckBox("규칙 활성화"); enabled.setSelected(existing == null || existing.get(3).equals("활성"));
+        condition.setValue(existing == null ? "가격 이상" : existing.condition());
+        TextField threshold = new TextField(existing == null ? "" : existing.threshold());
+        CheckBox enabled = new CheckBox("규칙 활성화"); enabled.setSelected(existing == null || existing.enabled());
         GridPane form = new GridPane(); form.setHgap(12); form.setVgap(10);
         addField(form, 0, "종목", security); addField(form, 1, "조건", condition); addField(form, 2, "기준", threshold);
         form.add(enabled, 0, 3, 2, 1); dialog.getDialogPane().setContent(form);
@@ -1348,21 +1388,25 @@ public final class DesktopApplication extends Application {
             if (security.getText().isBlank() || threshold.getText().isBlank()) {
                 showInformation("입력값을 확인하세요", "종목과 기준값은 필수입니다."); return;
             }
-            ObservableList<String> row = existing == null ? FXCollections.observableArrayList() : existing;
-            row.setAll(security.getText().trim(), condition.getValue(), threshold.getText().trim(), enabled.isSelected() ? "활성" : "일시정지");
-            if (existing == null) session.alertRuleRows().add(row);
+            AlertRule replacement = new AlertRule(
+                    security.getText(), condition.getValue(), threshold.getText(), enabled.isSelected());
+            if (existing == null) session.alertRules().add(replacement);
+            else {
+                int index = session.alertRules().indexOf(existing);
+                if (index >= 0) session.alertRules().set(index, replacement);
+            }
         });
     }
 
-    private void showJournalDialog(ObservableList<String> existing) {
+    private void showJournalDialog(JournalEntry existing) {
         Dialog<ButtonType> dialog = new Dialog<>(); dialog.setTitle(existing == null ? "매매일지 작성" : "매매일지 수정");
-        TextField date = new TextField(existing == null ? "08/10" : existing.get(0));
-        TextField security = new TextField(existing == null ? "" : existing.get(1));
-        TextField buy = new TextField(existing == null ? "0원" : existing.get(2));
-        TextField sell = new TextField(existing == null ? "0원" : existing.get(3));
-        TextField profit = new TextField(existing == null ? "0원" : existing.get(4));
-        TextArea strategy = new TextArea(existing == null ? "" : existing.get(5)); strategy.setPrefRowCount(3); strategy.setWrapText(true);
-        TextField tags = new TextField(existing == null ? "" : existing.get(6));
+        TextField date = new TextField(existing == null ? "08/10" : existing.date());
+        TextField security = new TextField(existing == null ? "" : existing.securityName());
+        TextField buy = new TextField(existing == null ? "0원" : existing.buyAmount());
+        TextField sell = new TextField(existing == null ? "0원" : existing.sellAmount());
+        TextField profit = new TextField(existing == null ? "0원" : existing.profitLoss());
+        TextArea strategy = new TextArea(existing == null ? "" : existing.memo()); strategy.setPrefRowCount(3); strategy.setWrapText(true);
+        TextField tags = new TextField(existing == null ? "" : existing.tags());
         GridPane form = new GridPane(); form.setHgap(12); form.setVgap(10);
         addField(form, 0, "날짜", date); addField(form, 1, "종목", security); addField(form, 2, "매수금액", buy);
         addField(form, 3, "매도금액", sell); addField(form, 4, "손익", profit); addField(form, 5, "전략·메모", strategy);
@@ -1373,10 +1417,13 @@ public final class DesktopApplication extends Application {
             if (date.getText().isBlank() || security.getText().isBlank()) {
                 showInformation("입력값을 확인하세요", "날짜와 종목은 필수입니다."); return;
             }
-            ObservableList<String> row = existing == null ? FXCollections.observableArrayList() : existing;
-            row.setAll(date.getText().trim(), security.getText().trim(), buy.getText().trim(), sell.getText().trim(),
-                    profit.getText().trim(), strategy.getText().trim(), tags.getText().trim());
-            if (existing == null) session.journalRows().add(0, row);
+            JournalEntry replacement = new JournalEntry(date.getText(), security.getText(), buy.getText(),
+                    sell.getText(), profit.getText(), strategy.getText(), tags.getText());
+            if (existing == null) session.journalEntries().add(0, replacement);
+            else {
+                int index = session.journalEntries().indexOf(existing);
+                if (index >= 0) session.journalEntries().set(index, replacement);
+            }
             status.setText(security.getText().trim() + " 매매일지를 저장했습니다.");
         });
     }
@@ -1547,23 +1594,28 @@ public final class DesktopApplication extends Application {
     }
 
     private void previewOrder(TextField symbol, TextField name, ComboBox<OrderSide> side,
-                              Spinner<Integer> quantity, TextField price) {
+                              ComboBox<OrderType> orderType, Spinner<Integer> quantity, TextField price) {
         try {
-            OrderRequest request = new OrderRequest(symbol.getText().trim(), name.getText().trim(), side.getValue(),
-                    quantity.getValue(), new BigDecimal(price.getText().replace(",", "").trim()));
-            OrderPreview result = orderUseCase.preview(request);
+            BigDecimal referencePrice = stockDetailViewModel.detail().currentPrice();
+            OrderCommand request = orderType.getValue() == OrderType.MARKET
+                    ? OrderCommand.market(symbol.getText().trim(), name.getText().trim(), side.getValue(),
+                            quantity.getValue())
+                    : OrderCommand.limit(symbol.getText().trim(), name.getText().trim(), side.getValue(),
+                            quantity.getValue(), new BigDecimal(price.getText().replace(",", "").trim()));
+            TradePreview result = tradingUseCase.preview(request, referencePrice);
             Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION);
             confirmation.setTitle("모의주문 재확인");
             confirmation.setHeaderText(request.name() + " " + request.quantity() + "주 " + request.side().displayName() + " 주문을 제출하시겠습니까?");
             confirmation.setContentText("종목 코드: " + request.symbol() + "\n지정가: " + Formatters.won(request.limitPrice())
                     + "\n예상 주문금액: " + Formatters.won(result.estimatedAmount())
-                    + "\n주문 후 예상 현금: " + Formatters.won(result.estimatedCashAfterOrder()) + "\n\n실제 주문이 아닌 모의주문입니다.");
+                    + "\n주문 후 예상 현금: " + Formatters.won(result.availableCashAfter()) + "\n\n실제 주문이 아닌 모의주문입니다.");
             ButtonType submit = new ButtonType("모의 " + request.side().displayName() + " 제출", ButtonBar.ButtonData.OK_DONE);
             confirmation.getButtonTypes().setAll(submit, ButtonType.CANCEL);
             confirmation.showAndWait().filter(submit::equals).ifPresent(button -> {
-                OrderReceipt receipt = orderUseCase.submitConfirmed(request);
-                status.setText(receipt.statusMessage() + " 주문번호 " + receipt.orderId());
-                announce(receipt.statusMessage(), SpeechPriority.ORDER, "order-" + receipt.orderId()); play(SoundCue.SUCCESS);
+                Order receipt = tradingUseCase.submitConfirmed(request, referencePrice);
+                String receiptMessage = receipt.describe();
+                status.setText(receiptMessage + " 주문번호 " + receipt.orderId());
+                announce(receiptMessage, SpeechPriority.ORDER, "order-" + receipt.orderId()); play(SoundCue.SUCCESS);
             });
         } catch (RuntimeException exception) {
             status.setText("주문 입력 오류: " + exception.getMessage());
@@ -1589,14 +1641,20 @@ public final class DesktopApplication extends Application {
     private void restoreLocalState() {
         stateRepository.load().ifPresent(snapshot -> {
             session.restore(snapshot);
-            speechEnabled = snapshot.speechEnabled(); soundEnabled = snapshot.soundEnabled();
-            keyboardGuidanceEnabled = snapshot.keyboardGuidanceEnabled();
-            reducedMotionEnabled = snapshot.reducedMotionEnabled(); largeTextEnabled = snapshot.largeTextEnabled();
-            highContrastEnabled = snapshot.highContrastEnabled(); informationDensity = snapshot.informationDensity();
-            preventDuplicateOrders = snapshot.preventDuplicateOrders(); maxSubscriptions = snapshot.maxSubscriptions();
-            String voice = snapshot.voiceName().isBlank() ? null : snapshot.voiceName();
-            speechQueue.setOptions(new SpeechOptions(snapshot.speechRate(), snapshot.speechVolume(), voice));
+            preventDuplicateOrders = snapshot.preventDuplicateOrders();
+            maxSubscriptions = snapshot.maxSubscriptions();
         });
+        AccessibilityPreferences accessibility = accessibilityPreferencesRepository.load();
+        speechEnabled = accessibility.speechEnabled();
+        soundEnabled = accessibility.soundEnabled();
+        keyboardGuidanceEnabled = accessibility.keyboardGuidanceEnabled();
+        reducedMotionEnabled = accessibility.reducedMotionEnabled();
+        largeTextEnabled = accessibility.largeTextEnabled();
+        highContrastEnabled = accessibility.highContrastEnabled();
+        informationDensity = accessibility.informationDensity();
+        String voice = accessibility.voiceName().isBlank() ? null : accessibility.voiceName();
+        speechQueue.setOptions(new SpeechOptions(accessibility.speechRate(), accessibility.speechVolume(), voice));
+        sonificationPreferences = sonificationPreferencesRepository.load();
     }
 
     private void scheduleStateSave() {
@@ -1612,19 +1670,19 @@ public final class DesktopApplication extends Application {
         try {
             SpeechOptions speech = speechQueue.options();
             stateRepository.save(new DesktopStateSnapshot(
-                    List.copyOf(session.watchlistGroups()), copyRows(session.watchlistRows()),
-                    copyRows(session.alertRuleRows()), List.copyOf(session.notifications()), copyRows(session.journalRows()),
-                    session.selectedStock(), speechEnabled, soundEnabled, keyboardGuidanceEnabled,
-                    reducedMotionEnabled, largeTextEnabled, highContrastEnabled, informationDensity,
-                    speech.voiceName() == null ? "" : speech.voiceName(), speech.rate(), speech.volume(),
+                    List.copyOf(session.watchlistGroups()), List.copyOf(session.watchlistItems()),
+                    List.copyOf(session.alertRules()), List.copyOf(session.notifications()),
+                    List.copyOf(session.journalEntries()), session.selectedStock(),
                     preventDuplicateOrders, maxSubscriptions));
+            accessibilityPreferencesRepository.save(new AccessibilityPreferences(
+                    speechEnabled, soundEnabled, keyboardGuidanceEnabled, reducedMotionEnabled,
+                    largeTextEnabled, highContrastEnabled, informationDensity,
+                    speech.voiceName() == null ? "" : speech.voiceName(), speech.rate(), speech.volume()));
+            sonificationPreferencesRepository.save(accessibleChartController == null
+                    ? sonificationPreferences : accessibleChartController.preferences());
         } catch (RuntimeException error) {
             if (status != null) status.setText("UI 설정 저장 실패: " + error.getMessage());
         }
-    }
-
-    private List<List<String>> copyRows(ObservableList<ObservableList<String>> rows) {
-        return rows.stream().map(List::copyOf).toList();
     }
 
     private void announce(String text, SpeechPriority priority, String key) {
@@ -1645,8 +1703,10 @@ public final class DesktopApplication extends Application {
         if (persistenceDelay != null) persistenceDelay.stop();
         saveLocalState();
         if (accessibleChartController != null) accessibleChartController.close();
+        sonificationPort.close();
         speechQueue.close();
         soundPort.close();
+        secretStore.close();
     }
     public static void main(String[] args) { launch(args); }
 }

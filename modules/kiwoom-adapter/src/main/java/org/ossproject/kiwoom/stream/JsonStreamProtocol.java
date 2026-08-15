@@ -20,7 +20,7 @@ import java.util.stream.Collectors;
  * 해석할 수 없는 메시지는 무시한다. 하트비트나 구독 응답 때문에 스트림이 끊기면 안 되기
  * 때문이다.
  */
-public final class JsonStreamProtocol implements StreamProtocol {
+final class JsonStreamProtocol implements StreamProtocol {
 
     private final KiwoomJsonMapper jsonMapper;
     private final KiwoomProperties properties;

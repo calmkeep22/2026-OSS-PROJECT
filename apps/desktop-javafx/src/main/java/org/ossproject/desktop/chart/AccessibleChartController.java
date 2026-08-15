@@ -9,15 +9,15 @@ import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import org.ossproject.application.port.StockQueryPort;
+import org.ossproject.application.port.CandleQueryPort;
 import org.ossproject.desktop.radio.FakeMarketRadioFeed;
-import org.ossproject.finance.model.PricePeriod;
+import org.ossproject.desktop.state.SonificationPreferences;
 import org.ossproject.finance.model.StockDetail;
 import org.ossproject.sonification.*;
 import org.ossproject.sonification.model.*;
 import org.ossproject.sonification.port.SonificationPort;
 
 import java.time.Duration;
-import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Objects;
@@ -32,6 +32,7 @@ public final class AccessibleChartController implements AutoCloseable {
     private static final double SPEECH_DUCKING_RATIO = 0.15;
 
     private final StockQueryPort stocks;
+    private final CandleQueryPort candles;
     private final SonificationPort audio;
     private final StreamingGraphSonifier sonifier;
     private final GraphPlaybackController playback;
@@ -55,11 +56,14 @@ public final class AccessibleChartController implements AutoCloseable {
     private double percentRange = 5.0;
     private volatile double volume = 0.8;
     private volatile boolean speechActive;
+    private Consumer<SonificationPreferences> preferencesListener = ignored -> { };
 
-    public AccessibleChartController(StockQueryPort stocks, SonificationPort audio,
+    public AccessibleChartController(StockQueryPort stocks, CandleQueryPort candles,
+                                     SonificationPort audio,
                                      ChartAnnouncementSink announcements,
                                      Consumer<String> applicationStatus) {
         this.stocks = Objects.requireNonNull(stocks, "stocks");
+        this.candles = Objects.requireNonNull(candles, "candles");
         this.audio = Objects.requireNonNull(audio, "audio");
         this.announcements = Objects.requireNonNull(announcements, "announcements");
         this.applicationStatus = Objects.requireNonNull(applicationStatus, "applicationStatus");
@@ -67,9 +71,10 @@ public final class AccessibleChartController implements AutoCloseable {
                 new GraphSonificationConfig(220, 440, 880, 5.0, Duration.ofSeconds(1)));
         this.playback = new GraphPlaybackController(sonifier);
         this.stock = this.stocks.getDetail(SYMBOL);
-        this.samples = this.stocks.getPriceHistory(SYMBOL, PricePeriod.MONTH).stream()
-                .map(point -> new TimeSeriesSample(SYMBOL, point.close().doubleValue(),
-                        point.date().atTime(LocalTime.of(15, 30)).atZone(ZoneId.systemDefault()).toInstant()))
+        this.samples = this.candles.getCandles(
+                        SYMBOL, org.ossproject.finance.model.CandleInterval.DAY, 30).stream()
+                .map(candle -> new TimeSeriesSample(
+                        SYMBOL, candle.close().doubleValue(), candle.timestamp()))
                 .toList();
         this.summary = GraphAnalyzer.summarize(samples);
         this.liveFeed = new FakeMarketRadioFeed(SYMBOL,
@@ -93,7 +98,24 @@ public final class AccessibleChartController implements AutoCloseable {
     public double percentRange() { return percentRange; }
     public double speed() { return playback.speed(); }
     public double volume() { return volume; }
+    public SonificationPreferences preferences() {
+        return new SonificationPreferences(scaleMode, percentRange, playback.speed(), volume);
+    }
     public String summaryText() { return text.summary(stock.name(), summary); }
+
+    public void applyPreferences(SonificationPreferences preferences) {
+        SonificationPreferences checked = Objects.requireNonNull(preferences, "preferences");
+        scaleMode = checked.scaleMode();
+        percentRange = checked.percentRange();
+        volume = checked.volume();
+        playback.setSpeed(checked.playbackSpeed());
+        reloadScale();
+        applyVolume();
+    }
+
+    public void setPreferencesListener(Consumer<SonificationPreferences> listener) {
+        preferencesListener = Objects.requireNonNull(listener, "listener");
+    }
 
     public void play() {
         liveFeed.stop();
@@ -115,13 +137,17 @@ public final class AccessibleChartController implements AutoCloseable {
         playback.seek(index);
     }
 
-    public void setSpeed(double speed) { playback.setSpeed(speed); }
+    public void setSpeed(double speed) {
+        playback.setSpeed(speed);
+        notifyPreferencesChanged();
+    }
 
     public void setScaleMode(GraphScaleMode mode) {
         GraphScaleMode checked = Objects.requireNonNull(mode, "mode");
         if (checked == scaleMode) return;
         scaleMode = checked;
         reloadScale();
+        notifyPreferencesChanged();
     }
 
     public void setPercentRange(double percentRange) {
@@ -131,6 +157,7 @@ public final class AccessibleChartController implements AutoCloseable {
         this.percentRange = percentRange;
         if (scaleMode == GraphScaleMode.PERCENT_FROM_REFERENCE) reloadScale();
         else refreshScaleDescription();
+        notifyPreferencesChanged();
     }
 
     public void setVolume(double volume) {
@@ -139,6 +166,7 @@ public final class AccessibleChartController implements AutoCloseable {
         }
         this.volume = volume;
         applyVolume();
+        notifyPreferencesChanged();
     }
 
     /** Lowers graph audio while TTS is speaking, then restores the user's configured volume. */
@@ -223,12 +251,25 @@ public final class AccessibleChartController implements AutoCloseable {
             @Override public void onPlaybackFailed(GraphAudioFrame frame, RuntimeException error) {
                 reportAudioFailure(error);
             }
+
+            @Override public void onFrameDropped(GraphAudioFrame frame) {
+                reportAudioDrop();
+            }
         });
     }
 
     private void reportAudioFailure(RuntimeException error) {
         runOnFxThread(() -> {
             String description = "청각 그래프 재생 실패: " + message(error);
+            if (liveFeed.isRunning()) liveStatus.set(description);
+            else playbackStatus.set(description);
+            applicationStatus.accept(description);
+        });
+    }
+
+    private void reportAudioDrop() {
+        runOnFxThread(() -> {
+            String description = "오디오 처리 지연으로 대기 중이던 이전 그래프 지점 하나를 생략했습니다.";
             if (liveFeed.isRunning()) liveStatus.set(description);
             else playbackStatus.set(description);
             applicationStatus.accept(description);
@@ -268,6 +309,10 @@ public final class AccessibleChartController implements AutoCloseable {
     private void applyVolume() {
         if (closed.get()) return;
         audio.setVolume(speechActive ? volume * SPEECH_DUCKING_RATIO : volume);
+    }
+
+    private void notifyPreferencesChanged() {
+        preferencesListener.accept(preferences());
     }
 
     private static void runOnFxThread(Runnable action) {

@@ -2,6 +2,7 @@ package org.ossproject.sonification;
 
 import org.junit.jupiter.api.Test;
 import org.ossproject.sonification.model.*;
+import org.ossproject.sonification.port.SonificationOverflowPolicy;
 import org.ossproject.sonification.port.SonificationPort;
 import org.ossproject.sonification.port.SonificationOutputListener;
 
@@ -77,10 +78,13 @@ class StreamingGraphSonifierTest {
         assertFalse(graph.isRunning());
         assertTrue(graph.accept(sample(6, 101)).isEmpty());
         graph.close();
-        assertTrue(port.closed);
+        assertFalse(port.closed);
+        assertTrue(port.stopCount > 0);
         assertThrows(IllegalStateException.class, () -> graph.start("005930"));
         assertThrows(IllegalStateException.class, () -> graph.accept(sample(7, 102)));
         assertDoesNotThrow(graph::close);
+        port.close();
+        assertTrue(port.closed);
     }
 
     @Test void reportsPlaybackFailureWithoutLosingTheMappedFrame() {
@@ -88,6 +92,8 @@ class StreamingGraphSonifierTest {
             @Override public void play(GraphAudioFrame frame) { throw new IllegalStateException("audio unavailable"); }
             @Override public void stop() {}
             @Override public void setVolume(double volume) {}
+            @Override public SonificationOverflowPolicy overflowPolicy() { return SonificationOverflowPolicy.DROP_OLDEST; }
+            @Override public void close() {}
         };
         AtomicInteger mapped = new AtomicInteger();
         AtomicInteger failed = new AtomicInteger();
@@ -123,6 +129,24 @@ class StreamingGraphSonifierTest {
         assertNull(port.listener);
     }
 
+    @Test void forwardsFramesDroppedByTheOutputQueue() {
+        AsyncFailingPort port = new AsyncFailingPort();
+        AtomicInteger dropped = new AtomicInteger();
+        try (StreamingGraphSonifier graph = new StreamingGraphSonifier(port)) {
+            graph.addListener(new GraphSonificationListener() {
+                @Override public void onFrameDropped(GraphAudioFrame frame) {
+                    dropped.incrementAndGet();
+                }
+            });
+            graph.start("005930");
+            GraphAudioFrame frame = graph.accept(sample(0, 100)).orElseThrow();
+
+            port.reportDropped(frame);
+
+            assertEquals(1, dropped.get());
+        }
+    }
+
     private static TimeSeriesSample sample(long second, double value) {
         return new TimeSeriesSample("005930", value, START.plusSeconds(second));
     }
@@ -130,9 +154,11 @@ class StreamingGraphSonifierTest {
     private static final class RecordingPort implements SonificationPort {
         private final List<GraphAudioFrame> frames = new CopyOnWriteArrayList<>();
         private boolean closed;
+        private int stopCount;
         @Override public void play(GraphAudioFrame frame) { frames.add(frame); }
-        @Override public void stop() {}
+        @Override public void stop() { stopCount++; }
         @Override public void setVolume(double volume) {}
+        @Override public SonificationOverflowPolicy overflowPolicy() { return SonificationOverflowPolicy.DROP_OLDEST; }
         @Override public void close() { closed = true; }
     }
 
@@ -141,12 +167,15 @@ class StreamingGraphSonifierTest {
         @Override public void play(GraphAudioFrame frame) {}
         @Override public void stop() {}
         @Override public void setVolume(double volume) {}
+        @Override public SonificationOverflowPolicy overflowPolicy() { return SonificationOverflowPolicy.DROP_OLDEST; }
         @Override public void addOutputListener(SonificationOutputListener listener) { this.listener = listener; }
         @Override public void removeOutputListener(SonificationOutputListener listener) {
             if (this.listener == listener) this.listener = null;
         }
+        @Override public void close() {}
         void reportFailure(GraphAudioFrame frame) {
             listener.onPlaybackFailed(frame, new IllegalStateException("async audio failure"));
         }
+        void reportDropped(GraphAudioFrame frame) { listener.onFrameDropped(frame); }
     }
 }

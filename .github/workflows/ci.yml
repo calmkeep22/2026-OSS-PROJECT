@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Verify module boundaries
+        run: ./gradlew verifyModuleBoundaries
+        if: runner.os != 'Windows'
+      - name: Verify module boundaries (Windows)
+        run: ./gradlew.bat verifyModuleBoundaries
+        if: runner.os == 'Windows'
+      - name: Test
+        run: ./gradlew clean test
+        if: runner.os != 'Windows'
+      - name: Test (Windows)
+        run: ./gradlew.bat clean test
+        if: runner.os == 'Windows'

@@ -89,12 +89,6 @@ public record Account(String accountNo, Balance balance, List<Position> position
                 .orElse(this);
     }
 
-    /** 기존 화면 계층이 쓰는 {@link PortfolioSnapshot} 으로 변환한다. */
-    public PortfolioSnapshot toSnapshot() {
-        return new PortfolioSnapshot(balance.cash(),
-                positions.stream().map(Position::toHolding).toList());
-    }
-
     /** 로그에 남길 때 쓰는 마스킹된 계좌번호. */
     public String maskedAccountNo() {
         return maskAccountNo(accountNo);

@@ -1,9 +1,10 @@
 plugins { `java-library` }
 java { toolchain { languageVersion = JavaLanguageVersion.of(17) } }
 dependencies {
-    implementation(project(":modules:application"))
-    implementation(project(":modules:finance-domain"))
+    api(project(":modules:application"))
+    api(project(":modules:finance-domain"))
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
+    testImplementation(testFixtures(project(":modules:application")))
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
