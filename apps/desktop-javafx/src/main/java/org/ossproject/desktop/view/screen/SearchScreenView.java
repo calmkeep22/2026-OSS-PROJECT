@@ -41,7 +41,10 @@ public final class SearchScreenView {
         TableView<StockSearchItem> results = createResultTable();
         Runnable filter = () -> {
             int count = viewModel.filter(query.getText(), market.getValue());
-            status.accept("검색 결과 " + count + "건을 표시했습니다.");
+            // 조회 실패와 "결과 없음"은 다른 상황이므로 다르게 읽어 준다.
+            status.accept(viewModel.lastError().isBlank()
+                    ? "검색 결과 " + count + "건을 표시했습니다."
+                    : viewModel.lastError());
         };
         Button search = primaryButton("검색", filter);
         query.setOnAction(event -> filter.run());
@@ -93,6 +96,9 @@ public final class SearchScreenView {
         table.getColumns().add(column("현재가", StockSearchItem::price));
         table.getColumns().add(column("등락률", StockSearchItem::changeRate));
         table.setPrefHeight(380);
+        table.getSelectionModel().selectedItemProperty().addListener((observable, previous, selected) -> {
+            if (selected != null) table.setAccessibleText(selected.accessibleDescription());
+        });
         return table;
     }
 

@@ -5,13 +5,21 @@ import org.ossproject.finance.model.Candle;
 import org.ossproject.finance.model.CandleInterval;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
-/** Deterministic in-memory candle source for UI development and tests. */
+/**
+ * Deterministic in-memory candle source for UI development and tests.
+ *
+ * <p>Prices come from {@link FakeSecurityUniverse}, so the last candle closes at the same price
+ * the detail screen shows. Screens therefore never need to rescale a series to make it agree
+ * with the quoted price.
+ */
 public final class FakeCandleQueryAdapter implements CandleQueryPort {
     private final Clock clock;
 
@@ -20,28 +28,31 @@ public final class FakeCandleQueryAdapter implements CandleQueryPort {
     }
 
     public FakeCandleQueryAdapter(Clock clock) {
-        this.clock = java.util.Objects.requireNonNull(clock, "clock");
+        this.clock = Objects.requireNonNull(clock, "clock");
     }
 
     @Override
     public List<Candle> getCandles(String symbol, CandleInterval interval, int count) {
-        if (symbol == null || symbol.isBlank()) throw new IllegalArgumentException("Symbol is required.");
         if (interval == null) throw new IllegalArgumentException("Candle interval is required.");
         if (count < 1 || count > 1_000) throw new IllegalArgumentException("Count must be between 1 and 1000.");
+        FakeSecurityUniverse.FakeSecurity security = FakeSecurityUniverse.find(symbol)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown security: " + symbol));
 
         Duration step = interval.approximateDuration();
-        Instant start = clock.instant().minus(step.multipliedBy(count));
+        Instant latest = clock.instant();
+        int scale = security.scale();
         List<Candle> candles = new ArrayList<>(count);
-        BigDecimal base = new BigDecimal("70000");
-        for (int index = 0; index < count; index++) {
-            BigDecimal open = base.add(BigDecimal.valueOf(index * 100L));
-            BigDecimal close = open.add(BigDecimal.valueOf(index % 2 == 0 ? 300 : -200));
-            candles.add(new Candle(start.plus(step.multipliedBy(index + 1L)), interval,
-                    open, open.max(close).add(BigDecimal.valueOf(100)),
-                    open.min(close).subtract(BigDecimal.valueOf(100)), close,
-                    10_000L + index * 1_000L));
+        for (int index = count - 1; index >= 0; index--) {
+            BigDecimal close = security.priceAt(index);
+            BigDecimal open = security.priceAt(index + 1);
+            BigDecimal high = open.max(close).multiply(BigDecimal.valueOf(1.004))
+                    .setScale(scale, RoundingMode.HALF_UP);
+            BigDecimal low = open.min(close).multiply(BigDecimal.valueOf(0.996))
+                    .setScale(scale, RoundingMode.HALF_UP);
+            candles.add(new Candle(latest.minus(step.multipliedBy(index)), interval,
+                    open, high.max(open.max(close)), low.min(open.min(close)), close,
+                    security.volume() / count + index * 100L));
         }
         return List.copyOf(candles);
     }
-
 }

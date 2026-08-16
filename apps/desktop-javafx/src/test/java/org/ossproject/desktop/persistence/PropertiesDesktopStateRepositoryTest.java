@@ -33,7 +33,7 @@ class PropertiesDesktopStateRepositoryTest {
 
         assertEquals(snapshot, repository.load().orElseThrow());
         String stored = Files.readString(file);
-        assertTrue(stored.contains("format.version=2"));
+        assertTrue(stored.contains("format.version=3"));
         assertFalse(stored.contains("삼성전자"));
         assertFalse(stored.toLowerCase().contains("app secret"));
     }
@@ -55,6 +55,20 @@ class PropertiesDesktopStateRepositoryTest {
         assertEquals("삼성전자", restored.watchlistItems().get(0).securityName());
         assertTrue(restored.alertRules().get(0).enabled());
         assertEquals("메모", restored.journalEntries().get(0).memo());
+    }
+
+    @Test void dropsStoredPricesFromOlderSelectionsAndKeepsIdentity() throws Exception {
+        Path file = temporaryDirectory.resolve("ui-state.properties");
+        String legacy = "format.version=2\n"
+                + "selected.stock=" + encoded("미국", "AAPL", "Apple", "NASDAQ", "$228.40", "+0.83%") + "\n";
+        Files.writeString(file, legacy, StandardCharsets.ISO_8859_1);
+
+        StockSelection restored = new PropertiesDesktopStateRepository(file).load().orElseThrow().selectedStock();
+
+        assertEquals("AAPL", restored.symbol());
+        assertEquals("NASDAQ", restored.exchange());
+        assertEquals("USD", restored.currency());
+        assertTrue(restored.overseas());
     }
 
     @Test void skipsMalformedTypedRowsButKeepsValidRows() throws Exception {

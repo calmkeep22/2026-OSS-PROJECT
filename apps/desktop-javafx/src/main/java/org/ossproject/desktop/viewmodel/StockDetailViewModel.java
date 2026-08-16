@@ -2,33 +2,52 @@ package org.ossproject.desktop.viewmodel;
 
 import org.ossproject.application.port.CandleQueryPort;
 import org.ossproject.application.port.StockQueryPort;
-import org.ossproject.finance.model.*;
+import org.ossproject.finance.model.CandleInterval;
+import org.ossproject.finance.model.PricePeriod;
+import org.ossproject.finance.model.PricePoint;
+import org.ossproject.finance.model.StockDetail;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Objects;
 
-/** 선택 종목을 상세 화면·차트·주문에서 사용할 표시 모델로 변환한다. */
+/**
+ * 선택 종목의 상세와 차트 데이터를 조회한다.
+ *
+ * <p>이 클래스는 값을 만들어 내지 않는다. 현재가·시가·고가·저가·거래량은 모두
+ * {@link StockQueryPort} 가 준 값을 그대로 쓰고, 차트는 {@link CandleQueryPort} 가 준 봉을
+ * 그대로 쓴다. 화면에 보이는 숫자가 조회 결과와 다르면 시각장애인 사용자는 그 사실을
+ * 확인할 방법이 없기 때문이다.
+ */
 public final class StockDetailViewModel {
+
+    private static final ZoneId MARKET_ZONE = ZoneId.of("Asia/Seoul");
+
+    /** 차트 기간 버튼. 각 버튼은 봉 주기와 조회 개수로만 정의된다. */
     public enum ChartRange {
-        MINUTE_1("1분", PricePeriod.DAY, "0.08"),
-        MINUTE_5("5분", PricePeriod.DAY, "0.14"),
-        MINUTE_30("30분", PricePeriod.DAY, "0.25"),
-        DAY("일", PricePeriod.MONTH, "1.00"),
-        WEEK("주", PricePeriod.THREE_MONTHS, "1.40"),
-        MONTH("월", PricePeriod.YEAR, "2.00"),
-        YEAR("년", PricePeriod.YEAR, "2.70");
+        MINUTE_1("1분", CandleInterval.MINUTE_1, 60),
+        MINUTE_5("5분", CandleInterval.MINUTE_5, 78),
+        MINUTE_15("15분", CandleInterval.MINUTE_15, 64),
+        MINUTE_60("60분", CandleInterval.MINUTE_60, 48),
+        DAY("일", CandleInterval.DAY, 30),
+        WEEK("주", CandleInterval.WEEK, 26),
+        MONTH("월", CandleInterval.MONTH, 24);
 
         private final String label;
-        private final PricePeriod queryPeriod;
-        private final BigDecimal range;
+        private final CandleInterval interval;
+        private final int count;
 
-        ChartRange(String label, PricePeriod queryPeriod, String range) {
-            this.label = label; this.queryPeriod = queryPeriod; this.range = new BigDecimal(range);
+        ChartRange(String label, CandleInterval interval, int count) {
+            this.label = label;
+            this.interval = interval;
+            this.count = count;
         }
 
         public String label() { return label; }
+        public CandleInterval interval() { return interval; }
+        public int count() { return count; }
     }
 
     private final DesktopSession session;
@@ -44,90 +63,44 @@ public final class StockDetailViewModel {
 
     public StockSelection selection() { return session.selectedStock(); }
 
+    /** 선택 종목의 최신 상세. 조회 결과를 가공하지 않고 그대로 돌려준다. */
     public StockDetail detail() {
-        StockSelection selected = selection();
-        BigDecimal current = parseNumber(selected.displayPrice(), new BigDecimal("73500"));
-        BigDecimal signedRate = parseSignedNumber(selected.displayChange(), new BigDecimal("3.23"));
-        PriceDirection direction = signedRate.signum() > 0 ? PriceDirection.UP
-                : signedRate.signum() < 0 ? PriceDirection.DOWN : PriceDirection.FLAT;
-        BigDecimal absoluteRate = signedRate.abs();
-        BigDecimal change = current.multiply(absoluteRate).divide(new BigDecimal("100"), 4, RoundingMode.HALF_UP);
-        int scale = selected.overseas() ? 2 : 0;
-        return new StockDetail(selected.symbol(), selected.name(), current.setScale(scale, RoundingMode.HALF_UP),
-                change.setScale(scale, RoundingMode.HALF_UP), absoluteRate.setScale(2, RoundingMode.HALF_UP), direction,
-                current.multiply(new BigDecimal("0.986")).setScale(scale, RoundingMode.HALF_UP),
-                current.multiply(new BigDecimal("1.018")).setScale(scale, RoundingMode.HALF_UP),
-                current.multiply(new BigDecimal("0.972")).setScale(scale, RoundingMode.HALF_UP),
-                selected.overseas() ? 42_381_210L : 18_450_230L,
-                stockQuery.getDetail(selected.symbol()).updatedAt());
-    }
-
-    public List<PricePoint> history(PricePeriod period) {
-        BigDecimal range = switch (period) {
-            case DAY -> new BigDecimal("0.18");
-            case WEEK -> new BigDecimal("0.45");
-            case MONTH -> BigDecimal.ONE;
-            case THREE_MONTHS -> new BigDecimal("1.65");
-            case YEAR -> new BigDecimal("2.70");
-        };
-        return history(period, range);
+        return stockQuery.getDetail(selection().symbol());
     }
 
     public List<PricePoint> history(ChartRange range) {
-        return history(range.queryPeriod, range.range);
+        Objects.requireNonNull(range, "range");
+        return history(range.interval(), range.count());
     }
 
-    private List<PricePoint> history(PricePeriod period, BigDecimal range) {
-        int count = switch (period) {
-            case DAY -> 2;
-            case WEEK -> 7;
-            case MONTH -> 30;
-            case THREE_MONTHS -> 90;
-            case YEAR -> 365;
+    public List<PricePoint> history(PricePeriod period) {
+        Objects.requireNonNull(period, "period");
+        return switch (period) {
+            case DAY -> history(CandleInterval.MINUTE_5, 78);
+            case WEEK -> history(CandleInterval.DAY, 5);
+            case MONTH -> history(CandleInterval.DAY, 22);
+            case THREE_MONTHS -> history(CandleInterval.DAY, 66);
+            case YEAR -> history(CandleInterval.WEEK, 52);
         };
-        List<PricePoint> base = candleQuery.getCandles(
-                        selection().symbol(), CandleInterval.DAY, count).stream()
-                .map(candle -> candle.toPricePoint(java.time.ZoneId.of("Asia/Seoul")))
-                .toList();
-        if (base.isEmpty()) return base;
-        BigDecimal target = detail().currentPrice();
-        BigDecimal factor = target.divide(base.get(base.size() - 1).close(), 10, RoundingMode.HALF_UP);
-        int scale = selection().overseas() ? 2 : 0;
-        return base.stream().map(point -> new PricePoint(point.date(),
-                expand(scale(point.open(), factor, scale), target, range, scale),
-                expand(scale(point.high(), factor, scale), target, range, scale),
-                expand(scale(point.low(), factor, scale), target, range, scale),
-                expand(scale(point.close(), factor, scale), target, range, scale), point.volume())).toList();
     }
 
+    private List<PricePoint> history(CandleInterval interval, int count) {
+        return candleQuery.getCandles(selection().symbol(), interval, count).stream()
+                .map(candle -> candle.toPricePoint(MARKET_ZONE))
+                .toList();
+    }
+
+    /** 선택 종목의 통화에 맞춘 금액 표기. */
     public String formatPrice(BigDecimal value) {
-        if (selection().overseas()) return "$" + value.setScale(2, RoundingMode.HALF_UP).toPlainString();
+        Objects.requireNonNull(value, "value");
+        if (selection().overseas()) {
+            return "$" + value.setScale(2, RoundingMode.HALF_UP).toPlainString();
+        }
         return String.format("%,d원", value.setScale(0, RoundingMode.HALF_UP).longValue());
     }
 
+    /** 주문 화면 입력란에 넣을 단가. 표기 기호 없이 숫자만 돌려준다. */
     public String plainOrderPrice() {
         return detail().currentPrice().stripTrailingZeros().toPlainString();
-    }
-
-    private BigDecimal scale(BigDecimal value, BigDecimal factor, int scale) {
-        return value.multiply(factor).setScale(scale, RoundingMode.HALF_UP);
-    }
-
-    private BigDecimal expand(BigDecimal value, BigDecimal center, BigDecimal range, int scale) {
-        return center.add(value.subtract(center).multiply(range)).setScale(scale, RoundingMode.HALF_UP);
-    }
-
-    private BigDecimal parseNumber(String text, BigDecimal fallback) {
-        if (text == null) return fallback;
-        String normalized = text.replaceAll("[^0-9.]", "");
-        try { return normalized.isBlank() ? fallback : new BigDecimal(normalized); }
-        catch (NumberFormatException ignored) { return fallback; }
-    }
-
-    private BigDecimal parseSignedNumber(String text, BigDecimal fallback) {
-        if (text == null) return fallback;
-        String normalized = text.replaceAll("[^0-9.+-]", "");
-        try { return normalized.isBlank() ? fallback : new BigDecimal(normalized); }
-        catch (NumberFormatException ignored) { return fallback; }
     }
 }
