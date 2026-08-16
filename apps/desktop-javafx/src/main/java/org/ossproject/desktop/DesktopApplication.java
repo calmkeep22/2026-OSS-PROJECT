@@ -82,7 +82,7 @@ public final class DesktopApplication extends Application {
     private final StackPane screenHost = new StackPane();
     private final Map<Screen, Button> navigationButtons = new EnumMap<>(Screen.class);
     private final DesktopSession session = new DesktopSession();
-    private final StockSearchViewModel stockSearchViewModel = new StockSearchViewModel(session);
+    private final StockSearchViewModel stockSearchViewModel;
     private final ConnectionViewModel connectionViewModel;
     private final WatchlistViewModel watchlistViewModel = new WatchlistViewModel(session);
     private final StockDetailViewModel stockDetailViewModel;
@@ -122,6 +122,7 @@ public final class DesktopApplication extends Application {
         this.accessibilityPreferencesRepository = services.accessibilityPreferences();
         this.sonificationPreferencesRepository = services.sonificationPreferences();
         this.connectionViewModel = new ConnectionViewModel(secretStore);
+        this.stockSearchViewModel = new StockSearchViewModel(session, stockAdapter);
         this.stockDetailViewModel = new StockDetailViewModel(session, stockAdapter, candleAdapter);
     }
 
@@ -487,7 +488,7 @@ public final class DesktopApplication extends Application {
         VBox quote = new VBox(8,
                 sectionHeading(selectedDetail.name() + " · " + selectedDetail.symbol()),
                 styledLabel(stockDetailViewModel.formatPrice(selectedDetail.currentPrice()), "stock-price"),
-                new Label("전일 대비 " + stockDetailViewModel.selection().displayChange()),
+                new Label("전일 대비 " + signedChangeRate(selectedDetail)),
                 informationRow("매도 1호가", stockDetailViewModel.formatPrice(selectedDetail.currentPrice().add(selectedDetail.currentPrice().multiply(new BigDecimal("0.001")))) + " · 18,001주"),
                 informationRow("매수 1호가", stockDetailViewModel.formatPrice(selectedDetail.currentPrice().subtract(selectedDetail.currentPrice().multiply(new BigDecimal("0.001")))) + " · 15,321주"));
         quote.getStyleClass().add("panel-card"); quote.setPadding(new Insets(20)); quote.setPrefWidth(340);
@@ -603,9 +604,9 @@ public final class DesktopApplication extends Application {
         orderBook.setOnKeyPressed(event -> { if (event.getCode() == KeyCode.ENTER) useSelectedQuote.run(); });
 
         TableView<ObservableList<String>> trades = textTable(detail.name() + " 실시간 체결",
-                List.of(row("14:32:01", stockDetailViewModel.formatPrice(detail.currentPrice()), selection.displayChange(), "321", "108.3"),
-                        row("14:31:59", stockDetailViewModel.formatPrice(detail.currentPrice().subtract(quoteStep)), selection.displayChange(), "122", "107.9"),
-                        row("14:31:57", stockDetailViewModel.formatPrice(detail.currentPrice()), selection.displayChange(), "84", "108.1")),
+                List.of(row("14:32:01", stockDetailViewModel.formatPrice(detail.currentPrice()), signedChangeRate(detail), "321", "108.3"),
+                        row("14:31:59", stockDetailViewModel.formatPrice(detail.currentPrice().subtract(quoteStep)), signedChangeRate(detail), "122", "107.9"),
+                        row("14:31:57", stockDetailViewModel.formatPrice(detail.currentPrice()), signedChangeRate(detail), "84", "108.1")),
                 "시간", "가격", "등락률", "체결량", "체결강도");
         trades.setPrefHeight(330);
 
@@ -1591,6 +1592,13 @@ public final class DesktopApplication extends Application {
         form.add(note, 0, 4, 2, 1); dialog.getDialogPane().setContent(form);
         dialog.getDialogPane().getButtonTypes().setAll(new ButtonType("환전 내용 확인", ButtonBar.ButtonData.OK_DONE), ButtonType.CANCEL);
         dialog.showAndWait();
+    }
+
+    /** 조회 결과의 등락률을 부호와 함께 표기한다. 값을 새로 만들지 않는다. */
+    private static String signedChangeRate(StockDetail detail) {
+        BigDecimal rate = detail.changeRate().setScale(2, java.math.RoundingMode.HALF_UP);
+        String sign = detail.direction() == PriceDirection.DOWN ? "-" : rate.signum() > 0 ? "+" : "";
+        return sign + rate.abs().toPlainString() + "%";
     }
 
     private void previewOrder(TextField symbol, TextField name, ComboBox<OrderSide> side,
