@@ -26,7 +26,6 @@ import java.util.function.Consumer;
 
 /** Owns accessible-chart state and coordinates historical playback, seeking, and live samples. */
 public final class AccessibleChartController implements AutoCloseable {
-    private static final String SYMBOL = "005930";
     private static final int MAXIMUM_PLAYBACK_POINTS = 48;
     private static final Duration TARGET_PLAYBACK_DURATION = Duration.ofSeconds(12);
     private static final double SPEECH_DUCKING_RATIO = 0.15;
@@ -58,10 +57,12 @@ public final class AccessibleChartController implements AutoCloseable {
     private volatile boolean speechActive;
     private Consumer<SonificationPreferences> preferencesListener = ignored -> { };
 
-    public AccessibleChartController(StockQueryPort stocks, CandleQueryPort candles,
+    public AccessibleChartController(String symbol, StockQueryPort stocks, CandleQueryPort candles,
                                      SonificationPort audio,
                                      ChartAnnouncementSink announcements,
                                      Consumer<String> applicationStatus) {
+        if (symbol == null || symbol.isBlank()) throw new IllegalArgumentException("symbol is required");
+        String selectedSymbol = symbol.trim();
         this.stocks = Objects.requireNonNull(stocks, "stocks");
         this.candles = Objects.requireNonNull(candles, "candles");
         this.audio = Objects.requireNonNull(audio, "audio");
@@ -70,15 +71,17 @@ public final class AccessibleChartController implements AutoCloseable {
         this.sonifier = new StreamingGraphSonifier(audio,
                 new GraphSonificationConfig(220, 440, 880, 5.0, Duration.ofSeconds(1)));
         this.playback = new GraphPlaybackController(sonifier);
-        this.stock = this.stocks.getDetail(SYMBOL);
+        this.stock = this.stocks.getDetail(selectedSymbol);
         this.samples = this.candles.getCandles(
-                        SYMBOL, org.ossproject.finance.model.CandleInterval.DAY, 30).stream()
+                        selectedSymbol, org.ossproject.finance.model.CandleInterval.DAY, 30).stream()
                 .map(candle -> new TimeSeriesSample(
-                        SYMBOL, candle.close().doubleValue(), candle.timestamp()))
+                        selectedSymbol, candle.close().doubleValue(), candle.timestamp()))
                 .toList();
+        if (samples.size() < 2) {
+            throw new IllegalStateException("청각 차트에는 가격 지점이 두 개 이상 필요합니다.");
+        }
         this.summary = GraphAnalyzer.summarize(samples);
-        this.liveFeed = new FakeMarketRadioFeed(SYMBOL,
-                List.of(70_800d, 71_600d, 70_500d, 72_400d, 72_600d, 73_100d, 72_900d, 73_800d, 73_500d),
+        this.liveFeed = new FakeMarketRadioFeed(selectedSymbol, recentValues(samples),
                 Duration.ofSeconds(1), sonifier::accept, this::handleLiveFeedFailure);
         configureListeners();
         refreshPointLabels();
@@ -313,6 +316,11 @@ public final class AccessibleChartController implements AutoCloseable {
 
     private void notifyPreferencesChanged() {
         preferencesListener.accept(preferences());
+    }
+
+    private static List<Double> recentValues(List<TimeSeriesSample> samples) {
+        int first = Math.max(0, samples.size() - 9);
+        return samples.subList(first, samples.size()).stream().map(TimeSeriesSample::value).toList();
     }
 
     private static void runOnFxThread(Runnable action) {

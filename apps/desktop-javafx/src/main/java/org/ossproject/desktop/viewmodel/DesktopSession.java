@@ -21,10 +21,10 @@ public final class DesktopSession {
     private final ObservableList<String> watchlistGroups = FXCollections.observableArrayList(
             ALL_GROUP, "반도체", "AI", "배당주", "미국 기술주");
     private final ObservableList<WatchlistItem> watchlistItems = FXCollections.observableArrayList(
-            new WatchlistItem("반도체", "삼성전자", "72,500원", "+2.12%", "18,320,122", "75,000원"),
-            new WatchlistItem("반도체", "SK하이닉스", "184,500원", "+1.42%", "5,821,330", "없음"),
-            new WatchlistItem("AI", "NAVER", "205,000원", "-0.71%", "1,230,922", "200,000원"),
-            new WatchlistItem("미국 기술주", "NVIDIA", "$142.65", "+2.34%", "42,381,210", "$150"));
+            new WatchlistItem("반도체", "국내", "005930", "삼성전자", "KRX", "KRW", "75,000원"),
+            new WatchlistItem("반도체", "국내", "000660", "SK하이닉스", "KRX", "KRW", "없음"),
+            new WatchlistItem("AI", "국내", "035420", "NAVER", "KRX", "KRW", "200,000원"),
+            new WatchlistItem("미국 기술주", "미국", "NVDA", "NVIDIA", "NASDAQ", "USD", "$150"));
     private final ObservableList<AlertRule> alertRules = FXCollections.observableArrayList(
             new AlertRule("삼성전자", "가격 이상", "75,000원", true),
             new AlertRule("SK하이닉스", "등락률 이상", "3.00%", true),

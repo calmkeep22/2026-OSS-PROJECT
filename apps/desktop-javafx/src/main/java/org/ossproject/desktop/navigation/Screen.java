@@ -7,28 +7,43 @@ package org.ossproject.desktop.navigation;
  * 애플리케이션 구현체를 직접 참조하지 않도록 한다.</p>
  */
 public enum Screen {
-    DASHBOARD("홈", true),
-    CONNECTION("API 연결", true),
-    MARKET("시장", true),
-    SEARCH("종목검색", true),
-    STOCK_DETAIL("종목 상세", false),
-    WATCHLIST("관심종목", true),
-    SCANNER("랭킹 · 스캐너", true),
-    CONDITION("조건검색", true),
-    SUPPLY("수급", true),
-    TRADING("주문", true),
-    ACCOUNT("계좌", true),
-    US_MARKET("미국주식", true),
-    NOTIFICATIONS("알림", true),
-    RADIO("청각 차트", true),
-    SETTINGS("설정", true);
+    DASHBOARD("홈", true, NavigationGroup.OVERVIEW),
+    CONNECTION("API 연결", true, NavigationGroup.OVERVIEW),
+    MARKET("시장", true, NavigationGroup.MARKET_EXPLORATION),
+    SEARCH("종목검색", true, NavigationGroup.MARKET_EXPLORATION),
+    STOCK_DETAIL("종목 상세", false, NavigationGroup.MARKET_EXPLORATION),
+    WATCHLIST("관심종목", true, NavigationGroup.MARKET_EXPLORATION),
+    SCANNER("랭킹 · 스캐너", true, NavigationGroup.MARKET_EXPLORATION),
+    CONDITION("조건검색", true, NavigationGroup.MARKET_EXPLORATION),
+    SUPPLY("수급", true, NavigationGroup.MARKET_EXPLORATION),
+    TRADING("주문", true, NavigationGroup.TRADING_ASSETS),
+    ACCOUNT("계좌", true, NavigationGroup.TRADING_ASSETS),
+    US_MARKET("미국주식", true, NavigationGroup.OVERSEAS),
+    NOTIFICATIONS("알림", true, NavigationGroup.ACCESSIBILITY_TOOLS),
+    RADIO("청각 차트", true, NavigationGroup.ACCESSIBILITY_TOOLS),
+    SETTINGS("설정", true, NavigationGroup.SETTINGS);
+
+    public enum NavigationGroup {
+        OVERVIEW("개요와 연결"),
+        MARKET_EXPLORATION("시장 탐색"),
+        TRADING_ASSETS("거래와 자산"),
+        OVERSEAS("해외 시장"),
+        ACCESSIBILITY_TOOLS("알림과 접근성"),
+        SETTINGS("환경 설정");
+
+        private final String label;
+        NavigationGroup(String label) { this.label = label; }
+        public String label() { return label; }
+    }
 
     private final String label;
     private final boolean shownInSidebar;
+    private final NavigationGroup navigationGroup;
 
-    Screen(String label, boolean shownInSidebar) {
+    Screen(String label, boolean shownInSidebar, NavigationGroup navigationGroup) {
         this.label = label;
         this.shownInSidebar = shownInSidebar;
+        this.navigationGroup = navigationGroup;
     }
 
     public String label() {
@@ -37,5 +52,9 @@ public enum Screen {
 
     public boolean shownInSidebar() {
         return shownInSidebar;
+    }
+
+    public NavigationGroup navigationGroup() {
+        return navigationGroup;
     }
 }

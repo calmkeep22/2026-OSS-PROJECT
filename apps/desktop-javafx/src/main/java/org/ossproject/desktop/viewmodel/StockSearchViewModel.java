@@ -8,6 +8,7 @@ import org.ossproject.finance.model.SecuritySummary;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * 종목검색의 조회·선택·최근검색 상태를 담당한다.
@@ -24,6 +25,8 @@ public final class StockSearchViewModel {
     private final ObservableList<StockSearchItem> items = FXCollections.observableArrayList();
     private final ObservableList<String> recentSearches = FXCollections.observableArrayList();
     private String lastError = "";
+    private String currentQuery = "";
+    private String currentMarket = "전체";
 
     public StockSearchViewModel(DesktopSession session, StockQueryPort stocks) {
         this.session = Objects.requireNonNull(session, "session");
@@ -44,17 +47,27 @@ public final class StockSearchViewModel {
         return lastError;
     }
 
+    public String currentQuery() {
+        return currentQuery;
+    }
+
+    public String currentMarket() {
+        return currentMarket;
+    }
+
     /**
      * 검색어로 조회하고 시장 구분으로 좁힌다.
      *
      * @return 표시 중인 결과 건수
      */
     public int filter(String query, String market) {
+        currentQuery = query == null ? "" : query;
+        currentMarket = market == null || market.isBlank() ? "전체" : market;
         List<StockSearchItem> found;
         try {
-            found = stocks.search(query, RESULT_LIMIT).stream()
+            found = stocks.search(currentQuery, RESULT_LIMIT).stream()
                     .map(StockSearchItem::of)
-                    .filter(item -> item.matchesMarket(market))
+                    .filter(item -> item.matchesMarket(currentMarket))
                     .toList();
             lastError = "";
         } catch (RuntimeException failure) {
@@ -64,6 +77,14 @@ public final class StockSearchViewModel {
         }
         items.setAll(found);
         return items.size();
+    }
+
+    /** 현재 검색 결과 중 코드나 이름이 정확히 일치하는 종목. */
+    public Optional<StockSearchItem> exactMatch(String query) {
+        if (query == null || query.isBlank()) return Optional.empty();
+        String normalized = query.strip();
+        return items.stream().filter(item -> item.symbol().equalsIgnoreCase(normalized)
+                || item.name().equalsIgnoreCase(normalized)).findFirst();
     }
 
     /** 검색어에 가장 가까운 종목. 없으면 {@code null}. */
@@ -94,6 +115,21 @@ public final class StockSearchViewModel {
         }
     }
 
+    /** 최근 검색 문자열을 다시 종목 선택으로 바꾼다. */
+    public boolean selectRecent(String recent) {
+        if (recent == null || recent.isBlank()) return false;
+        int separator = recent.lastIndexOf(" · ");
+        String query = separator < 0 ? recent : recent.substring(separator + 3);
+        StockSearchItem item = findBestMatch(query);
+        if (item == null) return false;
+        select(item);
+        return true;
+    }
+
+    public void removeRecent(String recent) {
+        if (recent != null) recentSearches.remove(recent);
+    }
+
     /**
      * 관심종목에 추가한다. 이미 있으면 {@code false}.
      *
@@ -102,7 +138,8 @@ public final class StockSearchViewModel {
     public boolean addToWatchlist(StockSearchItem item) {
         Objects.requireNonNull(item, "item");
         boolean exists = session.watchlistItems().stream()
-                .anyMatch(watchlistItem -> watchlistItem.securityName().equalsIgnoreCase(item.name()));
+                .anyMatch(watchlistItem -> watchlistItem.symbol().equalsIgnoreCase(item.symbol())
+                        && watchlistItem.exchange().equalsIgnoreCase(item.exchange()));
         if (exists) return false;
 
         String group = item.market();
@@ -110,8 +147,7 @@ public final class StockSearchViewModel {
             session.watchlistGroups().add(group);
         }
         SecuritySummary summary = item.summary();
-        session.watchlistItems().add(new WatchlistItem(
-                group, summary.name(), item.price(), item.changeRate(), "-", "없음"));
+        session.watchlistItems().add(WatchlistItem.from(group, summary, "없음"));
         return true;
     }
 }

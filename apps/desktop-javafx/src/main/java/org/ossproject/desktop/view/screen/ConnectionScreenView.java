@@ -99,8 +99,8 @@ public final class ConnectionScreenView {
         VBox credentialCard = card("자격증명", credentials, actions);
 
         TableView<ObservableList<String>> accounts = textTable("키움 계좌 목록",
-                List.of(row("선택", "모의계좌", "****-1204", "국내주식", "정상"),
-                        row("", "미국주식 모의계좌", "****-7781", "미국주식", "정상")),
+                List.of(row("선택", "모의계좌", "****-1204", "국내주식", "데모"),
+                        row("", "미국주식 모의계좌", "****-7781", "미국주식", "데모")),
                 "기본", "별칭", "계좌", "상품", "상태");
         accounts.setPrefHeight(190);
         Button select = new Button("선택 계좌를 기본으로 설정"); select.setOnAction(event -> {
