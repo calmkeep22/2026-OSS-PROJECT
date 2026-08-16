@@ -18,7 +18,7 @@ import java.util.function.Function;
 
 /** 데스크톱 화면 상태를 사용자 로컬 properties 파일에 원자적으로 저장한다. */
 public final class PropertiesDesktopStateRepository implements DesktopStateRepository {
-    private static final String FORMAT_VERSION = "2";
+    private static final String FORMAT_VERSION = "3";
     private final Path file;
 
     public PropertiesDesktopStateRepository(Path file) {
@@ -45,8 +45,7 @@ public final class PropertiesDesktopStateRepository implements DesktopStateRepos
                 entry.memo(), entry.tags())));
         properties.setProperty("selected.stock", encodeList(List.of(
                 snapshot.selectedStock().market(), snapshot.selectedStock().symbol(), snapshot.selectedStock().name(),
-                snapshot.selectedStock().exchange(), snapshot.selectedStock().displayPrice(),
-                snapshot.selectedStock().displayChange())));
+                snapshot.selectedStock().exchange(), snapshot.selectedStock().currency())));
         properties.setProperty("setting.preventDuplicateOrders", Boolean.toString(snapshot.preventDuplicateOrders()));
         properties.setProperty("setting.maxSubscriptions", Integer.toString(snapshot.maxSubscriptions()));
         AtomicPropertiesFile.save(file, properties, "OpenStock Access UI state - no credentials");
@@ -130,10 +129,28 @@ public final class PropertiesDesktopStateRepository implements DesktopStateRepos
                 .map(encoded -> new String(decoder.decode(encoded), StandardCharsets.UTF_8)).toList();
     }
 
+    /**
+     * 선택 종목을 읽는다.
+     *
+     * <p>format 2까지는 화면 표기 가격을 함께 저장했다. 그 파일을 읽을 때는 앞의 식별 정보만
+     * 쓰고 통화는 거래소에서 되살린다. 가격은 저장하지 않고 항상 다시 조회한다.
+     */
     private StockSelection decodeSelection(String value) {
         List<String> fields = decodeList(value);
-        return fields.size() == 6
-                ? new StockSelection(fields.get(0), fields.get(1), fields.get(2), fields.get(3), fields.get(4), fields.get(5))
-                : StockSelection.samsungElectronics();
+        if (fields.size() == 5) {
+            return safe(() -> new StockSelection(fields.get(0), fields.get(1), fields.get(2),
+                    fields.get(3), fields.get(4))).orElseGet(StockSelection::samsungElectronics);
+        }
+        if (fields.size() == 6) {
+            return safe(() -> new StockSelection(fields.get(0), fields.get(1), fields.get(2),
+                    fields.get(3), currencyOf(fields.get(0), fields.get(3))))
+                    .orElseGet(StockSelection::samsungElectronics);
+        }
+        return StockSelection.samsungElectronics();
+    }
+
+    private static String currencyOf(String market, String exchange) {
+        return "미국".equals(market) || "NASDAQ".equalsIgnoreCase(exchange)
+                || "NYSE".equalsIgnoreCase(exchange) ? "USD" : "KRW";
     }
 }
