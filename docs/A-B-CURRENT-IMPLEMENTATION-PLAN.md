@@ -451,7 +451,7 @@ public interface BrokerConnectionApplicationPort {
 - 화면에는 토큰 문자열을 반환하지 않는다.
 - 실전 연결은 화면에 모의 연결과 명확히 다른 문구와 상태를 제공한다.
 
-### B-2. MarketApplicationPort — 부분 완료
+### B-2. MarketApplicationPort — B 범위 완료
 
 ~~~java
 public interface MarketApplicationPort {
@@ -477,8 +477,10 @@ public interface MarketApplicationListener {
   JavaFX Application Thread에서 반영한다.
 - `SecurityId`와 기존 문자열 기반 A 포트 사이에는 호환 오버로드가 있다. Quote와 저수준
   스트림의 완전한 SecurityId 전환은 A와 함께 진행한다.
-- Sonification 실시간 모니터링을 이 포트로 전환하고 시각 차트와 동일한 Candle 목록을
-  공유하는 작업은 남아 있다.
+- StockDetailViewModel이 조회한 동일한 Candle 스냅샷을 시각 차트와 청각 차트가 공유한다.
+- 청각 차트 실시간 모니터링은 `monitor`의 Quote만 재생하며 중지, 화면 이탈, 종목 변경,
+  앱 종료 시 EventSubscription을 멱등하게 해제한다. `sonification` 코어는 금융 타입을
+  의존하지 않고 JavaFX 조정 계층이 Quote를 TimeSeriesSample로 변환한다.
 
 ### B-3. AccountApplicationPort — 신규
 
@@ -646,7 +648,7 @@ Navigator 같은 공개 Port를 추가하면 추상화만 늘어나므로 필요
 | 주문 | TradingApplicationPort | BrokerOrderPort, BrokerTradingStreamPort | 모의엔진 동작 |
 | 계좌 | AccountApplicationPort | AccountQueryPort, AccountSnapshotRepository | 모의 데이터 |
 | 알림 | TradingApplicationListener, SpeechQueue | BrokerTradingStreamPort | 샘플+로컬 |
-| 청각 차트 | MarketApplicationPort, SonificationPort | CandleQueryPort, MarketDataStreamPort | Fake 데이터로 동작 |
+| 청각 차트 | MarketApplicationPort, SonificationPort | CandleQueryPort, MarketDataStreamPort | 동일 Candle·실시간 구독 연결 완료, 현재 조립은 Fake 어댑터 |
 | 설정 | 접근성·Sonification 설정 Repository | 없음 | typed 로컬 저장 완료 |
 | 대시보드 | 위 Application Port들의 읽기 조합 | 해당 조회 Port | 샘플 중심 |
 

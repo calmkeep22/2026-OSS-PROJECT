@@ -34,7 +34,8 @@ public final class AccessibleChartView {
         notice.setWrapText(true);
 
         var stockDetail = controller.stock();
-        Label stock = new Label(stockDetail.name() + " (" + stockDetail.symbol() + ") · 최근 1개월 종가");
+        Label stock = new Label(stockDetail.name() + " (" + stockDetail.symbol() + ") · "
+                + controller.seriesDescription());
         stock.getStyleClass().add("section-title");
         Label summary = new Label(controller.summaryText());
         summary.setWrapText(true);
@@ -103,11 +104,12 @@ public final class AccessibleChartView {
         keyboardHelp.getStyleClass().add("keyboard-help");
         keyboardHelp.setWrapText(true);
 
-        Label liveDescription = new Label("실시간 모니터링은 Fake 가격이 들어오는 순서대로 같은 음역 규칙을 적용합니다.");
+        Label liveDescription = new Label("실시간 모니터링은 시장 연결에서 받은 실제 시세를 같은 음역 규칙으로 표현합니다. "
+                + "연결이 끊기면 소리를 멈추고 현재 연결 상태를 텍스트로 안내합니다.");
         liveDescription.setWrapText(true);
         Label liveState = new Label();
         liveState.textProperty().bind(controller.liveStatusProperty());
-        Button liveStart = new Button("실시간 모니터링 시작 (Fake)");
+        Button liveStart = new Button("실시간 모니터링 시작");
         liveStart.setOnAction(event -> controller.startLive());
         Button liveStop = new Button("실시간 모니터링 중지");
         liveStop.setOnAction(event -> controller.stopLive());

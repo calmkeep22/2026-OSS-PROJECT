@@ -1,6 +1,7 @@
 package org.ossproject.desktop.viewmodel;
 
 import org.ossproject.application.port.MarketApplicationPort;
+import org.ossproject.finance.model.Candle;
 import org.ossproject.finance.model.CandleInterval;
 import org.ossproject.finance.model.PricePeriod;
 import org.ossproject.finance.model.PricePoint;
@@ -49,15 +50,28 @@ public final class StockDetailViewModel {
         public int count() { return count; }
     }
 
-    public record InitialData(StockDetail detail, List<PricePoint> chartPoints) {}
+    /** 상세 화면과 청각 차트가 함께 사용하는 하나의 조회 스냅샷. */
+    public record InitialData(
+            StockDetail detail,
+            List<Candle> candles,
+            List<PricePoint> chartPoints
+    ) {
+        public InitialData {
+            Objects.requireNonNull(detail, "detail");
+            candles = List.copyOf(Objects.requireNonNull(candles, "candles"));
+            chartPoints = List.copyOf(Objects.requireNonNull(chartPoints, "chartPoints"));
+        }
+    }
 
     private final DesktopSession session;
     private final MarketApplicationPort market;
     private final Executor stateExecutor;
     private final AtomicLong loadSequence = new AtomicLong();
     private final Map<ChartRange, List<PricePoint>> historyCache = new EnumMap<>(ChartRange.class);
+    private final Map<ChartRange, List<Candle>> candleCache = new EnumMap<>(ChartRange.class);
     private SecurityId cachedSecurity;
     private StockDetail cachedDetail;
+    private ChartRange selectedChartRange = ChartRange.DAY;
 
     public StockDetailViewModel(
             DesktopSession session,
@@ -76,9 +90,11 @@ public final class StockDetailViewModel {
         SecurityId requested = selection().securityId();
         long requestId = loadSequence.incrementAndGet();
         CompletionStage<StockDetail> detail = market.loadDetail(requested);
-        CompletionStage<List<PricePoint>> history = queryHistory(requested, ChartRange.DAY);
+        CompletionStage<List<Candle>> candles = queryCandles(requested, ChartRange.DAY);
         CompletableFuture<InitialData> result = new CompletableFuture<>();
-        detail.thenCombine(history, InitialData::new).whenComplete((data, failure) ->
+        detail.thenCombine(candles, (loadedDetail, loadedCandles) ->
+                new InitialData(loadedDetail, loadedCandles, toPricePoints(loadedCandles)))
+                .whenComplete((data, failure) ->
                 executeStateChange(result, () -> {
                     if (failure != null) {
                         result.completeExceptionally(unwrap(failure));
@@ -91,7 +107,9 @@ public final class StockDetailViewModel {
                         return;
                     }
                     replaceCache(requested, data.detail());
+                    candleCache.put(ChartRange.DAY, data.candles());
                     historyCache.put(ChartRange.DAY, data.chartPoints());
+                    selectedChartRange = ChartRange.DAY;
                     result.complete(data);
                 }));
         return result;
@@ -130,11 +148,27 @@ public final class StockDetailViewModel {
         return cachedDetail != null && selection().securityId().equals(cachedSecurity);
     }
 
+    /** 현재 선택 종목에 대해 화면과 청각 차트가 공유할 봉 스냅샷이 준비됐는지 확인한다. */
+    public boolean hasCurrentChartData() {
+        return hasCurrentDetail() && candleCache.containsKey(selectedChartRange)
+                && historyCache.containsKey(selectedChartRange);
+    }
+
+    public ChartRange selectedChartRange() {
+        requireCurrentChartData();
+        return selectedChartRange;
+    }
+
+    public List<Candle> selectedCandles() {
+        requireCurrentChartData();
+        return candleCache.get(selectedChartRange);
+    }
+
     public CompletionStage<List<PricePoint>> loadHistory(ChartRange range) {
         Objects.requireNonNull(range, "range");
         SecurityId requested = selection().securityId();
         CompletableFuture<List<PricePoint>> result = new CompletableFuture<>();
-        queryHistory(requested, range).whenComplete((points, failure) ->
+        queryCandles(requested, range).whenComplete((candles, failure) ->
                 executeStateChange(result, () -> {
                     if (failure != null) {
                         result.completeExceptionally(unwrap(failure));
@@ -145,9 +179,16 @@ public final class StockDetailViewModel {
                                 new IllegalStateException("선택 종목이 변경되어 이전 차트 결과를 버렸습니다."));
                         return;
                     }
-                    if (!requested.equals(cachedSecurity)) historyCache.clear();
+                    if (!requested.equals(cachedSecurity)) {
+                        historyCache.clear();
+                        candleCache.clear();
+                        cachedDetail = null;
+                    }
+                    List<PricePoint> points = toPricePoints(candles);
                     cachedSecurity = requested;
+                    candleCache.put(range, candles);
                     historyCache.put(range, points);
+                    selectedChartRange = range;
                     result.complete(points);
                 }));
         return result;
@@ -171,16 +212,21 @@ public final class StockDetailViewModel {
         };
     }
 
-    private CompletionStage<List<PricePoint>> queryHistory(SecurityId security, ChartRange range) {
-        return queryHistory(security, range.interval(), range.count());
+    private CompletionStage<List<Candle>> queryCandles(SecurityId security, ChartRange range) {
+        return market.loadCandles(security, range.interval(), range.count())
+                .thenApply(List::copyOf);
     }
 
     private CompletionStage<List<PricePoint>> queryHistory(
             SecurityId security, CandleInterval interval, int count
     ) {
-        return market.loadCandles(security, interval, count).thenApply(candles -> candles.stream()
+        return market.loadCandles(security, interval, count).thenApply(this::toPricePoints);
+    }
+
+    private List<PricePoint> toPricePoints(List<Candle> candles) {
+        return candles.stream()
                 .map(candle -> candle.toPricePoint(MARKET_ZONE))
-                .toList());
+                .toList();
     }
 
     /** 선택 종목의 통화에 맞춘 금액 표기. */
@@ -198,7 +244,11 @@ public final class StockDetailViewModel {
     }
 
     private void replaceCache(SecurityId security, StockDetail detail) {
-        if (!security.equals(cachedSecurity)) historyCache.clear();
+        if (!security.equals(cachedSecurity)) {
+            historyCache.clear();
+            candleCache.clear();
+            selectedChartRange = ChartRange.DAY;
+        }
         cachedSecurity = security;
         cachedDetail = Objects.requireNonNull(detail, "detail");
     }
@@ -206,6 +256,14 @@ public final class StockDetailViewModel {
     private void requireCurrentCache() {
         if (cachedDetail == null || !selection().securityId().equals(cachedSecurity)) {
             throw new IllegalStateException("선택 종목의 상세 정보를 먼저 조회해야 합니다.");
+        }
+    }
+
+    private void requireCurrentChartData() {
+        requireCurrentCache();
+        if (!candleCache.containsKey(selectedChartRange)
+                || !historyCache.containsKey(selectedChartRange)) {
+            throw new IllegalStateException("선택 종목의 차트 데이터를 먼저 조회해야 합니다.");
         }
     }
 
