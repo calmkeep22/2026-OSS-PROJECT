@@ -38,7 +38,7 @@ public final class WatchlistScreenView {
         ComboBox<String> group = new ComboBox<>(viewModel.groups());
         group.setValue(DesktopSession.ALL_GROUP);
         Button refresh = new Button("최신 시세 조회");
-        refresh.setOnAction(event -> status.accept(viewModel.refresh().message()));
+        refresh.setOnAction(event -> refreshQuotes(refresh));
         Button add = new Button("종목 검색해서 추가");
         Button manageGroup = new Button("그룹 관리");
         Region spacer = new Region(); HBox.setHgrow(spacer, Priority.ALWAYS);
@@ -73,12 +73,11 @@ public final class WatchlistScreenView {
 
     public VBox createUsPanel(Consumer<WatchlistQuoteRow> orderAction) {
         Objects.requireNonNull(orderAction, "orderAction");
-        viewModel.refresh();
         FilteredList<WatchlistQuoteRow> usItems = new FilteredList<>(viewModel.quoteRows(), WatchlistQuoteRow::overseas);
         TableView<WatchlistQuoteRow> table = watchlistTable("미국주식 관심종목", usItems);
         table.setPrefHeight(390);
         Button refresh = new Button("최신 시세 조회");
-        refresh.setOnAction(event -> status.accept(viewModel.refresh().message()));
+        refresh.setOnAction(event -> refreshQuotes(refresh));
         Button add = new Button("종목 검색해서 추가"); add.setOnAction(event -> findStock.run());
         Button edit = new Button("선택 설정 수정"); edit.setOnAction(event -> editSelected(table));
         Button remove = new Button("선택 삭제"); remove.setOnAction(event -> removeSelected(table));
@@ -99,6 +98,16 @@ public final class WatchlistScreenView {
         VBox panel = new VBox(12, table, wrappingRow(8, refresh, add, open, edit, remove, alert, order));
         panel.setPadding(new Insets(12));
         return panel;
+    }
+
+    private void refreshQuotes(Button button) {
+        button.setDisable(true);
+        status.accept("관심종목 최신 시세를 조회하고 있습니다.");
+        viewModel.refresh().whenComplete((result, failure) -> {
+            button.setDisable(false);
+            if (failure != null) status.accept("관심종목 시세를 조회하지 못했습니다.");
+            else if (result.applied()) status.accept(result.message());
+        });
     }
 
     private TableView<WatchlistQuoteRow> watchlistTable(String accessibleName,

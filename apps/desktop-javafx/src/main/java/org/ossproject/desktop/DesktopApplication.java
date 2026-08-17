@@ -26,6 +26,7 @@ import org.ossproject.accessibility.port.SoundPort;
 import org.ossproject.accessibility.port.SpeechPort;
 import org.ossproject.accessibility.port.SpeechVoiceProvider;
 import org.ossproject.application.port.CandleQueryPort;
+import org.ossproject.application.port.MarketApplicationPort;
 import org.ossproject.application.port.StockQueryPort;
 import org.ossproject.application.usecase.TradingUseCase;
 import org.ossproject.desktop.composition.DesktopServices;
@@ -70,6 +71,7 @@ import static org.ossproject.desktop.view.UiKit.*;
 
 public final class DesktopApplication extends Application {
     private final TradingUseCase tradingUseCase;
+    private final MarketApplicationPort marketApplication;
     private final StockQueryPort stockAdapter;
     private final CandleQueryPort candleAdapter;
     private final SpeechPort speechPort;
@@ -117,6 +119,7 @@ public final class DesktopApplication extends Application {
 
     DesktopApplication(DesktopServices services) {
         this.tradingUseCase = services.trading();
+        this.marketApplication = services.market();
         this.stockAdapter = services.stocks();
         this.candleAdapter = services.candles();
         this.speechPort = services.speech();
@@ -128,9 +131,12 @@ public final class DesktopApplication extends Application {
         this.accessibilityPreferencesRepository = services.accessibilityPreferences();
         this.sonificationPreferencesRepository = services.sonificationPreferences();
         this.connectionViewModel = new ConnectionViewModel(secretStore);
-        this.stockSearchViewModel = new StockSearchViewModel(session, stockAdapter);
-        this.watchlistViewModel = new WatchlistViewModel(session, stockAdapter);
-        this.stockDetailViewModel = new StockDetailViewModel(session, stockAdapter, candleAdapter);
+        this.stockSearchViewModel = new StockSearchViewModel(
+                session, marketApplication, Platform::runLater);
+        this.watchlistViewModel = new WatchlistViewModel(
+                session, marketApplication, Platform::runLater);
+        this.stockDetailViewModel = new StockDetailViewModel(
+                session, marketApplication, Platform::runLater);
     }
 
     @Override public void start(Stage stage) {
@@ -353,39 +359,45 @@ public final class DesktopApplication extends Application {
             return;
         }
         String query = globalSearch.getText().trim();
-        int count = stockSearchViewModel.filter(query, "전체");
-        if (!stockSearchViewModel.lastError().isBlank()) {
-            screenController.invalidate(Screen.SEARCH);
-            navigate(Screen.SEARCH);
-            status.setText(stockSearchViewModel.lastError());
-            return;
-        }
-        var selected = stockSearchViewModel.exactMatch(query)
-                .orElseGet(() -> count == 1 ? stockSearchViewModel.items().get(0) : null);
-        if (selected == null) {
-            screenController.invalidate(Screen.SEARCH);
-            navigate(Screen.SEARCH);
-            status.setText(count == 0 ? query + " 검색 결과가 없습니다."
-                    : query + " 검색 결과 " + count + "건에서 종목을 선택해주세요.");
-            return;
-        }
-        stockSearchViewModel.select(selected);
-        navigate(Screen.STOCK_DETAIL);
-        status.setText(selected.name() + " 상세 화면을 열었습니다.");
+        status.setText(query + " 종목을 조회하고 있습니다.");
+        stockSearchViewModel.filter(query, "전체").thenAccept(result -> {
+            if (!result.applied()) return;
+            if (!stockSearchViewModel.lastError().isBlank()) {
+                screenController.invalidate(Screen.SEARCH);
+                navigate(Screen.SEARCH);
+                status.setText(stockSearchViewModel.lastError());
+                return;
+            }
+            var selected = stockSearchViewModel.exactMatch(query)
+                    .orElseGet(() -> result.count() == 1 ? stockSearchViewModel.items().get(0) : null);
+            if (selected == null) {
+                screenController.invalidate(Screen.SEARCH);
+                navigate(Screen.SEARCH);
+                status.setText(result.count() == 0 ? query + " 검색 결과가 없습니다."
+                        : query + " 검색 결과 " + result.count() + "건에서 종목을 선택해주세요.");
+                return;
+            }
+            stockSearchViewModel.select(selected);
+            navigate(Screen.STOCK_DETAIL);
+        });
     }
 
     private void openStockByQuery(String query) {
-        if (selectStockByQuery(query)) navigate(Screen.STOCK_DETAIL);
+        selectStockByQuery(query).thenAccept(selected -> {
+            if (selected) navigate(Screen.STOCK_DETAIL);
+        });
     }
 
-    private boolean selectStockByQuery(String query) {
-        var selected = stockSearchViewModel.findBestMatch(query);
-        if (selected == null) {
-            status.setText(query + " 종목 정보를 찾지 못했습니다.");
-            return false;
-        }
-        stockSearchViewModel.select(selected);
-        return true;
+    private java.util.concurrent.CompletionStage<Boolean> selectStockByQuery(String query) {
+        status.setText(query + " 종목을 조회하고 있습니다.");
+        return stockSearchViewModel.findBestMatch(query).thenApply(selected -> {
+            if (selected == null) {
+                status.setText(query + " 종목 정보를 찾지 못했습니다.");
+                return false;
+            }
+            stockSearchViewModel.select(selected);
+            return true;
+        });
     }
 
     private void openSelectedStock(TableView<ObservableList<String>> table, int nameColumn) {
@@ -403,10 +415,39 @@ public final class DesktopApplication extends Application {
         if (selected == null || selected.size() <= nameColumn) {
             status.setText("주문할 종목을 먼저 선택해주세요."); table.requestFocus(); return;
         }
-        if (selectStockByQuery(selected.get(nameColumn))) openOrder(side);
+        selectStockByQuery(selected.get(nameColumn)).thenAccept(found -> {
+            if (found) openOrder(side);
+        });
     }
 
     private void navigate(Screen screen) {
+        if (screen == Screen.STOCK_DETAIL) {
+            status.setText(session.selectedStock().name() + " 상세와 차트를 조회하고 있습니다.");
+            stockDetailViewModel.loadInitial().whenComplete((data, failure) -> {
+                if (failure != null) {
+                    status.setText("종목 상세를 조회하지 못했습니다. 연결 상태를 확인해주세요.");
+                    play(SoundCue.ERROR);
+                } else {
+                    showScreen(screen);
+                    status.setText(data.detail().name() + " 상세 화면을 열었습니다.");
+                }
+            });
+            return;
+        }
+        if (screen == Screen.TRADING && !stockDetailViewModel.hasCurrentDetail()) {
+            status.setText(session.selectedStock().name() + " 주문 기준가를 조회하고 있습니다.");
+            stockDetailViewModel.loadDetail().whenComplete((detail, failure) -> {
+                if (failure != null) {
+                    status.setText("주문 기준가를 조회하지 못했습니다. 연결 상태를 확인해주세요.");
+                    play(SoundCue.ERROR);
+                } else showScreen(screen);
+            });
+            return;
+        }
+        showScreen(screen);
+    }
+
+    private void showScreen(Screen screen) {
         if (screen == Screen.WATCHLIST || screen == Screen.US_MARKET) watchlistViewModel.refresh();
         if (screen == Screen.RADIO
                 && !accessibleChartController.stock().symbol().equals(session.selectedStock().symbol())) {
@@ -437,21 +478,36 @@ public final class DesktopApplication extends Application {
     }
 
     private void openOrder(OrderSide side) {
+        if (!stockDetailViewModel.hasCurrentDetail()) {
+            status.setText(session.selectedStock().name() + " 주문 기준가를 조회하고 있습니다.");
+            stockDetailViewModel.loadDetail().whenComplete((detail, failure) -> {
+                if (failure != null) {
+                    status.setText("주문 기준가를 조회하지 못했습니다. 연결 상태를 확인해주세요.");
+                    play(SoundCue.ERROR);
+                } else prepareOrder(side, detail.currentPrice().stripTrailingZeros().toPlainString());
+            });
+            return;
+        }
+        prepareOrder(side, stockDetailViewModel.plainOrderPrice());
+    }
+
+    private void prepareOrder(OrderSide side, String price) {
         StockDetail detail = stockDetailViewModel.detail();
         Screen origin = screenController.currentScreen().orElse(Screen.DASHBOARD);
         orderDraft = new OrderDraft(detail.symbol(), detail.name(), side,
-                OrderType.LIMIT, 1, stockDetailViewModel.plainOrderPrice(), origin);
+                OrderType.LIMIT, 1, price, origin);
         pendingOrderPrice = orderDraft.price();
         navigate(Screen.TRADING);
     }
 
     private void openOrderAtPrice(OrderSide side, String price) {
-        StockDetail detail = stockDetailViewModel.detail();
-        Screen origin = screenController.currentScreen().orElse(Screen.STOCK_DETAIL);
-        orderDraft = new OrderDraft(detail.symbol(), detail.name(), side,
-                OrderType.LIMIT, 1, price, origin);
-        pendingOrderPrice = orderDraft.price();
-        navigate(Screen.TRADING);
+        if (!stockDetailViewModel.hasCurrentDetail()) {
+            status.setText("선택 종목 정보를 다시 조회하고 있습니다.");
+            stockDetailViewModel.loadDetail().whenComplete((detail, failure) -> {
+                if (failure != null) status.setText("주문 기준가를 조회하지 못했습니다.");
+                else prepareOrder(side, price);
+            });
+        } else prepareOrder(side, price);
     }
 
     private void configureScreens() {
@@ -672,11 +728,13 @@ public final class DesktopApplication extends Application {
         Label symbol = new Label(detail.symbol() + " · " + selection.exchange()); symbol.getStyleClass().add("mode-badge");
         Button favorite = new Button("관심종목 추가");
         favorite.setOnAction(event -> {
-            var item = stockSearchViewModel.findBestMatch(detail.symbol());
-            if (item == null) status.setText(detail.name() + " 종목 정보를 찾지 못했습니다.");
-            else status.setText(stockSearchViewModel.addToWatchlist(item)
-                    ? detail.name() + "을 관심종목에 추가했습니다."
-                    : detail.name() + "은 이미 관심종목에 있습니다.");
+            status.setText(detail.name() + " 종목을 확인하고 있습니다.");
+            stockSearchViewModel.findBestMatch(detail.symbol()).thenAccept(item -> {
+                if (item == null) status.setText(detail.name() + " 종목 정보를 찾지 못했습니다.");
+                else status.setText(stockSearchViewModel.addToWatchlist(item)
+                        ? detail.name() + "을 관심종목에 추가했습니다."
+                        : detail.name() + "은 이미 관심종목에 있습니다.");
+            });
         });
         Button buy = primaryButton("매수", () -> openOrder(OrderSide.BUY));
         Button sell = new Button("매도"); sell.getStyleClass().add("sell-button"); sell.setOnAction(event -> openOrder(OrderSide.SELL));
@@ -730,9 +788,19 @@ public final class DesktopApplication extends Application {
         history.getColumns().add(priceColumn("거래량", point -> Long.toString(point.volume())));
         history.setPrefHeight(350);
         periodButtons.forEach((button, range) -> button.setOnAction(event -> {
-            List<PricePoint> updated = stockDetailViewModel.history(range);
-            candleChart.setPoints(updated); history.getItems().setAll(updated);
-            status.setText(detail.name() + " " + range.label() + " 차트로 변경했습니다.");
+            button.setDisable(true);
+            status.setText(detail.name() + " " + range.label() + " 차트를 조회하고 있습니다.");
+            stockDetailViewModel.loadHistory(range).whenComplete((updated, failure) -> {
+                button.setDisable(false);
+                if (failure != null || updated.isEmpty()) {
+                    status.setText(detail.name() + " 차트를 조회하지 못했습니다.");
+                    play(SoundCue.ERROR);
+                } else {
+                    candleChart.setPoints(updated);
+                    history.getItems().setAll(updated);
+                    status.setText(detail.name() + " " + range.label() + " 차트로 변경했습니다.");
+                }
+            });
         }));
         Button soundChart = new Button("이 차트를 소리로 탐색");
         soundChart.setOnAction(event -> navigate(Screen.RADIO));
@@ -880,7 +948,7 @@ public final class DesktopApplication extends Application {
     }
 
     private void startWatchlistSearch(String market) {
-        stockSearchViewModel.filter("", market);
+        stockSearchViewModel.prepare("", market);
         screenController.invalidate(Screen.SEARCH);
         navigate(Screen.SEARCH);
         status.setText("관심종목에 추가할 종목을 검색해주세요.");
@@ -2016,6 +2084,7 @@ public final class DesktopApplication extends Application {
         if (persistenceDelay != null) persistenceDelay.stop();
         saveLocalState();
         if (accessibleChartController != null) accessibleChartController.close();
+        marketApplication.close();
         sonificationPort.close();
         speechQueue.close();
         soundPort.close();
