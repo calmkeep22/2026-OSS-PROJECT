@@ -49,25 +49,30 @@ public final class SearchScreenView {
         results.setPlaceholder(emptyState);
 
         Consumer<Boolean> filter = focusResults -> {
-            int count = viewModel.filter(query.getText(), market.getValue());
-            String message;
-            if (!viewModel.lastError().isBlank()) {
-                message = viewModel.lastError();
-                emptyState.setText(message);
-            } else if (count == 0) {
-                message = "검색 결과가 없습니다. 검색어나 시장을 바꿔보세요.";
-                emptyState.setText(message);
-            } else {
-                message = "검색 결과 " + count + "건을 표시했습니다.";
-                emptyState.setText("");
-            }
-            resultState.setText(message);
-            resultState.setAccessibleText("검색 상태. " + message);
-            status.accept(message);
-            if (focusResults && count > 0) {
-                results.getSelectionModel().selectFirst();
-                Platform.runLater(results::requestFocus);
-            }
+            String loading = "종목을 조회하고 있습니다.";
+            resultState.setText(loading);
+            resultState.setAccessibleText("검색 상태. " + loading);
+            viewModel.filter(query.getText(), market.getValue()).whenComplete((result, failure) -> {
+                if (failure != null) {
+                    Platform.runLater(() -> {
+                        String message = "종목 검색 화면을 갱신하지 못했습니다.";
+                        resultState.setText(message);
+                        emptyState.setText(message);
+                        status.accept(message);
+                    });
+                    return;
+                }
+                if (!result.applied()) return;
+                String message = result.message();
+                resultState.setText(message);
+                resultState.setAccessibleText("검색 상태. " + message);
+                emptyState.setText(result.count() == 0 ? message : "");
+                status.accept(message);
+                if (focusResults && result.count() > 0) {
+                    results.getSelectionModel().selectFirst();
+                    Platform.runLater(results::requestFocus);
+                }
+            });
         };
         Button search = primaryButton("검색", () -> filter.accept(true));
         query.setOnAction(event -> filter.accept(true));
@@ -81,13 +86,8 @@ public final class SearchScreenView {
         });
         HBox searchBar = new HBox(10, query, market, search, clear);
         searchBar.setAlignment(Pos.CENTER_LEFT); HBox.setHgrow(query, Priority.ALWAYS);
-        if (!viewModel.lastError().isBlank()) {
-            resultState.setText(viewModel.lastError());
-            emptyState.setText(viewModel.lastError());
-        } else {
-            resultState.setText("검색 결과 " + viewModel.items().size() + "건");
-            if (viewModel.items().isEmpty()) emptyState.setText("검색 결과가 없습니다.");
-        }
+        resultState.setText("검색 준비됨");
+        emptyState.setText("종목을 조회하고 있습니다.");
 
         Runnable openSelected = () -> {
             StockSearchItem selected = results.getSelectionModel().getSelectedItem();
@@ -126,8 +126,11 @@ public final class SearchScreenView {
                 recent.requestFocus();
                 return;
             }
-            if (viewModel.selectRecent(selected)) navigate.accept(Screen.STOCK_DETAIL);
-            else status.accept(selected + " 종목을 다시 찾지 못했습니다.");
+            status.accept(selected + " 종목을 다시 찾고 있습니다.");
+            viewModel.selectRecent(selected).whenComplete((opened, failure) -> {
+                if (failure != null || !opened) status.accept(selected + " 종목을 다시 찾지 못했습니다.");
+                else navigate.accept(Screen.STOCK_DETAIL);
+            });
         };
         recent.setOnMouseClicked(event -> { if (event.getClickCount() == 2) openRecent.run(); });
         recent.setOnKeyPressed(event -> {
@@ -142,6 +145,7 @@ public final class SearchScreenView {
         openRecentButton.setOnAction(event -> openRecent.run());
         VBox body = new VBox(18, title, searchBar, resultState, results, new HBox(10, open, favorite),
                 card("최근 검색", recent, openRecentButton));
+        Platform.runLater(() -> filter.accept(false));
         return scrollPage("종목검색", body);
     }
 

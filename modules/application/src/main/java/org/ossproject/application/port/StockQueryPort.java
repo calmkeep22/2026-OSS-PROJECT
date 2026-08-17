@@ -1,6 +1,7 @@
 package org.ossproject.application.port;
 
 import org.ossproject.finance.model.SecuritySummary;
+import org.ossproject.finance.model.SecurityId;
 import org.ossproject.finance.model.StockDetail;
 
 import java.util.List;
@@ -23,4 +24,13 @@ public interface StockQueryPort {
      * @throws IllegalArgumentException when the security is unknown to this adapter
      */
     StockDetail getDetail(String symbol);
+
+    /**
+     * 거래소를 포함한 목표 계약. 기존 문자열 어댑터는 기본 구현으로 호환하며,
+     * KRX/NXT를 구분하는 어댑터는 이 메서드를 재정의한다.
+     */
+    default StockDetail getDetail(SecurityId security) {
+        if (security == null) throw new IllegalArgumentException("종목 식별자는 필수입니다.");
+        return getDetail(security.symbol());
+    }
 }

@@ -1,26 +1,25 @@
 package org.ossproject.desktop.viewmodel;
 
-import org.ossproject.application.port.CandleQueryPort;
-import org.ossproject.application.port.StockQueryPort;
+import org.ossproject.application.port.MarketApplicationPort;
 import org.ossproject.finance.model.CandleInterval;
 import org.ossproject.finance.model.PricePeriod;
 import org.ossproject.finance.model.PricePoint;
+import org.ossproject.finance.model.SecurityId;
 import org.ossproject.finance.model.StockDetail;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.ZoneId;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * 선택 종목의 상세와 차트 데이터를 조회한다.
- *
- * <p>이 클래스는 값을 만들어 내지 않는다. 현재가·시가·고가·저가·거래량은 모두
- * {@link StockQueryPort} 가 준 값을 그대로 쓰고, 차트는 {@link CandleQueryPort} 가 준 봉을
- * 그대로 쓴다. 화면에 보이는 숫자가 조회 결과와 다르면 시각장애인 사용자는 그 사실을
- * 확인할 방법이 없기 때문이다.
- */
+/** 선택 종목의 상세와 차트 데이터를 Application Port에서 비동기로 조회한다. */
 public final class StockDetailViewModel {
 
     private static final ZoneId MARKET_ZONE = ZoneId.of("Asia/Seoul");
@@ -50,44 +49,138 @@ public final class StockDetailViewModel {
         public int count() { return count; }
     }
 
-    private final DesktopSession session;
-    private final StockQueryPort stockQuery;
-    private final CandleQueryPort candleQuery;
+    public record InitialData(StockDetail detail, List<PricePoint> chartPoints) {}
 
-    public StockDetailViewModel(DesktopSession session, StockQueryPort stockQuery,
-                                CandleQueryPort candleQuery) {
+    private final DesktopSession session;
+    private final MarketApplicationPort market;
+    private final Executor stateExecutor;
+    private final AtomicLong loadSequence = new AtomicLong();
+    private final Map<ChartRange, List<PricePoint>> historyCache = new EnumMap<>(ChartRange.class);
+    private SecurityId cachedSecurity;
+    private StockDetail cachedDetail;
+
+    public StockDetailViewModel(
+            DesktopSession session,
+            MarketApplicationPort market,
+            Executor stateExecutor
+    ) {
         this.session = Objects.requireNonNull(session, "session");
-        this.stockQuery = Objects.requireNonNull(stockQuery, "stockQuery");
-        this.candleQuery = Objects.requireNonNull(candleQuery, "candleQuery");
+        this.market = Objects.requireNonNull(market, "market");
+        this.stateExecutor = Objects.requireNonNull(stateExecutor, "stateExecutor");
     }
 
     public StockSelection selection() { return session.selectedStock(); }
 
-    /** 선택 종목의 최신 상세. 조회 결과를 가공하지 않고 그대로 돌려준다. */
+    /** 상세 화면을 만들기 전에 상세와 기본 일 차트를 함께 준비한다. */
+    public CompletionStage<InitialData> loadInitial() {
+        SecurityId requested = selection().securityId();
+        long requestId = loadSequence.incrementAndGet();
+        CompletionStage<StockDetail> detail = market.loadDetail(requested);
+        CompletionStage<List<PricePoint>> history = queryHistory(requested, ChartRange.DAY);
+        CompletableFuture<InitialData> result = new CompletableFuture<>();
+        detail.thenCombine(history, InitialData::new).whenComplete((data, failure) ->
+                executeStateChange(result, () -> {
+                    if (failure != null) {
+                        result.completeExceptionally(unwrap(failure));
+                        return;
+                    }
+                    if (requestId != loadSequence.get()
+                            || !requested.equals(selection().securityId())) {
+                        result.completeExceptionally(
+                                new IllegalStateException("선택 종목이 변경되어 이전 조회 결과를 버렸습니다."));
+                        return;
+                    }
+                    replaceCache(requested, data.detail());
+                    historyCache.put(ChartRange.DAY, data.chartPoints());
+                    result.complete(data);
+                }));
+        return result;
+    }
+
+    /** 주문 화면처럼 상세만 필요한 흐름에서 사용한다. */
+    public CompletionStage<StockDetail> loadDetail() {
+        SecurityId requested = selection().securityId();
+        long requestId = loadSequence.incrementAndGet();
+        CompletableFuture<StockDetail> result = new CompletableFuture<>();
+        market.loadDetail(requested).whenComplete((detail, failure) ->
+                executeStateChange(result, () -> {
+                    if (failure != null) {
+                        result.completeExceptionally(unwrap(failure));
+                        return;
+                    }
+                    if (requestId != loadSequence.get()
+                            || !requested.equals(selection().securityId())) {
+                        result.completeExceptionally(
+                                new IllegalStateException("선택 종목이 변경되어 이전 조회 결과를 버렸습니다."));
+                        return;
+                    }
+                    replaceCache(requested, detail);
+                    result.complete(detail);
+                }));
+        return result;
+    }
+
+    /** 캐시에 준비된 최신 상세. 네트워크 호출을 하지 않는다. */
     public StockDetail detail() {
-        return stockQuery.getDetail(selection().symbol());
+        requireCurrentCache();
+        return cachedDetail;
+    }
+
+    public boolean hasCurrentDetail() {
+        return cachedDetail != null && selection().securityId().equals(cachedSecurity);
+    }
+
+    public CompletionStage<List<PricePoint>> loadHistory(ChartRange range) {
+        Objects.requireNonNull(range, "range");
+        SecurityId requested = selection().securityId();
+        CompletableFuture<List<PricePoint>> result = new CompletableFuture<>();
+        queryHistory(requested, range).whenComplete((points, failure) ->
+                executeStateChange(result, () -> {
+                    if (failure != null) {
+                        result.completeExceptionally(unwrap(failure));
+                        return;
+                    }
+                    if (!requested.equals(selection().securityId())) {
+                        result.completeExceptionally(
+                                new IllegalStateException("선택 종목이 변경되어 이전 차트 결과를 버렸습니다."));
+                        return;
+                    }
+                    if (!requested.equals(cachedSecurity)) historyCache.clear();
+                    cachedSecurity = requested;
+                    historyCache.put(range, points);
+                    result.complete(points);
+                }));
+        return result;
     }
 
     public List<PricePoint> history(ChartRange range) {
-        Objects.requireNonNull(range, "range");
-        return history(range.interval(), range.count());
+        requireCurrentCache();
+        List<PricePoint> points = historyCache.get(range);
+        if (points == null) throw new IllegalStateException("차트 데이터를 먼저 조회해야 합니다.");
+        return points;
     }
 
-    public List<PricePoint> history(PricePeriod period) {
+    public CompletionStage<List<PricePoint>> loadHistory(PricePeriod period) {
         Objects.requireNonNull(period, "period");
         return switch (period) {
-            case DAY -> history(CandleInterval.MINUTE_5, 78);
-            case WEEK -> history(CandleInterval.DAY, 5);
-            case MONTH -> history(CandleInterval.DAY, 22);
-            case THREE_MONTHS -> history(CandleInterval.DAY, 66);
-            case YEAR -> history(CandleInterval.WEEK, 52);
+            case DAY -> queryHistory(selection().securityId(), CandleInterval.MINUTE_5, 78);
+            case WEEK -> queryHistory(selection().securityId(), CandleInterval.DAY, 5);
+            case MONTH -> queryHistory(selection().securityId(), CandleInterval.DAY, 22);
+            case THREE_MONTHS -> queryHistory(selection().securityId(), CandleInterval.DAY, 66);
+            case YEAR -> queryHistory(selection().securityId(), CandleInterval.WEEK, 52);
         };
     }
 
-    private List<PricePoint> history(CandleInterval interval, int count) {
-        return candleQuery.getCandles(selection().symbol(), interval, count).stream()
+    private CompletionStage<List<PricePoint>> queryHistory(SecurityId security, ChartRange range) {
+        return queryHistory(security, range.interval(), range.count());
+    }
+
+    private CompletionStage<List<PricePoint>> queryHistory(
+            SecurityId security, CandleInterval interval, int count
+    ) {
+        return market.loadCandles(security, interval, count).thenApply(candles -> candles.stream()
                 .map(candle -> candle.toPricePoint(MARKET_ZONE))
-                .toList();
+                .toList());
     }
 
     /** 선택 종목의 통화에 맞춘 금액 표기. */
@@ -102,5 +195,36 @@ public final class StockDetailViewModel {
     /** 주문 화면 입력란에 넣을 단가. 표기 기호 없이 숫자만 돌려준다. */
     public String plainOrderPrice() {
         return detail().currentPrice().stripTrailingZeros().toPlainString();
+    }
+
+    private void replaceCache(SecurityId security, StockDetail detail) {
+        if (!security.equals(cachedSecurity)) historyCache.clear();
+        cachedSecurity = security;
+        cachedDetail = Objects.requireNonNull(detail, "detail");
+    }
+
+    private void requireCurrentCache() {
+        if (cachedDetail == null || !selection().securityId().equals(cachedSecurity)) {
+            throw new IllegalStateException("선택 종목의 상세 정보를 먼저 조회해야 합니다.");
+        }
+    }
+
+    private Throwable unwrap(Throwable failure) {
+        return failure instanceof java.util.concurrent.CompletionException && failure.getCause() != null
+                ? failure.getCause() : failure;
+    }
+
+    private void executeStateChange(CompletableFuture<?> result, Runnable change) {
+        try {
+            stateExecutor.execute(() -> {
+                try {
+                    change.run();
+                } catch (RuntimeException failure) {
+                    result.completeExceptionally(failure);
+                }
+            });
+        } catch (RuntimeException failure) {
+            result.completeExceptionally(failure);
+        }
     }
 }
