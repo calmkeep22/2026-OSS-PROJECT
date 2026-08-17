@@ -1,15 +1,25 @@
 package org.ossproject.desktop.viewmodel;
 
 import org.junit.jupiter.api.Test;
+import org.ossproject.application.usecase.MarketApplicationService;
 import org.ossproject.desktop.state.WatchlistItem;
+import org.ossproject.fake.FakeCandleQueryAdapter;
+import org.ossproject.fake.FakeMarketDataStreamAdapter;
 import org.ossproject.fake.FakeStockQueryAdapter;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class WatchlistViewModelTest {
+    private WatchlistViewModel viewModel(DesktopSession session) {
+        return new WatchlistViewModel(session,
+                new MarketApplicationService(new FakeStockQueryAdapter(),
+                        new FakeCandleQueryAdapter(), new FakeMarketDataStreamAdapter(), Runnable::run),
+                Runnable::run);
+    }
+
     @Test void preventsDeletingUsedGroupAndRenamesRowsTogether() {
         DesktopSession session = new DesktopSession();
-        WatchlistViewModel viewModel = new WatchlistViewModel(session, new FakeStockQueryAdapter());
+        WatchlistViewModel viewModel = viewModel(session);
 
         assertEquals(WatchlistViewModel.GroupDeleteResult.IN_USE, viewModel.deleteGroup("반도체"));
         assertTrue(viewModel.renameGroup("반도체", "반도체 핵심"));
@@ -19,7 +29,7 @@ class WatchlistViewModelTest {
 
     @Test void addsEditsMovesAlertsRemovesAndRefreshesTypedItems() {
         DesktopSession session = new DesktopSession();
-        WatchlistViewModel viewModel = new WatchlistViewModel(session, new FakeStockQueryAdapter());
+        WatchlistViewModel viewModel = viewModel(session);
         WatchlistItem added = new WatchlistItem(
                 "미국 기술주", "미국", "AAPL", "Apple", "NASDAQ", "USD", "없음");
 
@@ -44,7 +54,8 @@ class WatchlistViewModelTest {
         DesktopSession session = new DesktopSession();
         session.watchlistItems().setAll(WatchlistItem.legacy("반도체", "삼성전자", "72,500원", "없음"));
 
-        WatchlistViewModel viewModel = new WatchlistViewModel(session, new FakeStockQueryAdapter());
+        WatchlistViewModel viewModel = viewModel(session);
+        viewModel.refresh().toCompletableFuture().join();
 
         assertEquals("005930", viewModel.items().get(0).symbol());
         assertEquals("KRX", viewModel.items().get(0).exchange());

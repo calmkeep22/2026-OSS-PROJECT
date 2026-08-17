@@ -1,6 +1,7 @@
 package org.ossproject.desktop.state;
 
 import org.ossproject.desktop.viewmodel.StockSelection;
+import org.ossproject.finance.model.SecurityId;
 import org.ossproject.finance.model.SecuritySummary;
 
 import java.util.Objects;
@@ -46,6 +47,13 @@ public record WatchlistItem(
 
     public boolean needsIdentityRepair() {
         return UNKNOWN_EXCHANGE.equals(exchange);
+    }
+
+    public SecurityId securityId() {
+        if (needsIdentityRepair()) {
+            throw new IllegalStateException("예전 관심종목의 거래소 식별자를 먼저 복구해야 합니다.");
+        }
+        return SecurityId.of(symbol, exchange);
     }
 
     public boolean overseas() {

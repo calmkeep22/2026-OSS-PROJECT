@@ -2,36 +2,48 @@ package org.ossproject.desktop.viewmodel;
 
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
-import org.ossproject.application.port.StockQueryPort;
+import org.ossproject.application.port.MarketApplicationPort;
 import org.ossproject.desktop.state.WatchlistItem;
 import org.ossproject.finance.model.SecuritySummary;
 
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 종목검색의 조회·선택·최근검색 상태를 담당한다.
  *
- * <p>종목 목록은 {@link StockQueryPort} 에서만 온다. 화면이 자체 목록을 들고 있으면 실제
+ * <p>종목 목록은 {@link MarketApplicationPort} 에서만 온다. 화면이 자체 목록을 들고 있으면 실제
  * 연동으로 바꿀 때 어느 값이 진짜인지 구분할 수 없다.
  */
 public final class StockSearchViewModel {
     private static final int RESULT_LIMIT = 50;
     private static final int RECENT_LIMIT = 8;
 
+    public record SearchResult(int count, String message, boolean applied) {}
+
     private final DesktopSession session;
-    private final StockQueryPort stocks;
+    private final MarketApplicationPort market;
+    private final Executor stateExecutor;
+    private final AtomicLong requestSequence = new AtomicLong();
     private final ObservableList<StockSearchItem> items = FXCollections.observableArrayList();
     private final ObservableList<String> recentSearches = FXCollections.observableArrayList();
     private String lastError = "";
     private String currentQuery = "";
     private String currentMarket = "전체";
 
-    public StockSearchViewModel(DesktopSession session, StockQueryPort stocks) {
+    public StockSearchViewModel(
+            DesktopSession session,
+            MarketApplicationPort market,
+            Executor stateExecutor
+    ) {
         this.session = Objects.requireNonNull(session, "session");
-        this.stocks = Objects.requireNonNull(stocks, "stocks");
-        filter("", "전체");
+        this.market = Objects.requireNonNull(market, "market");
+        this.stateExecutor = Objects.requireNonNull(stateExecutor, "stateExecutor");
     }
 
     public ObservableList<StockSearchItem> items() {
@@ -55,28 +67,52 @@ public final class StockSearchViewModel {
         return currentMarket;
     }
 
+    /** 화면을 열기 전에 검색어와 시장 선택만 준비한다. 실제 조회는 화면 생성 후 실행한다. */
+    public void prepare(String query, String marketFilter) {
+        currentQuery = query == null ? "" : query;
+        currentMarket = marketFilter == null || marketFilter.isBlank() ? "전체" : marketFilter;
+    }
+
     /**
      * 검색어로 조회하고 시장 구분으로 좁힌다.
      *
-     * @return 표시 중인 결과 건수
+     * @return 최신 요청이 화면 상태에 반영된 뒤 완료되는 검색 결과
      */
-    public int filter(String query, String market) {
+    public CompletionStage<SearchResult> filter(String query, String marketFilter) {
         currentQuery = query == null ? "" : query;
-        currentMarket = market == null || market.isBlank() ? "전체" : market;
-        List<StockSearchItem> found;
-        try {
-            found = stocks.search(currentQuery, RESULT_LIMIT).stream()
-                    .map(StockSearchItem::of)
-                    .filter(item -> item.matchesMarket(currentMarket))
-                    .toList();
-            lastError = "";
-        } catch (RuntimeException failure) {
-            // 조회 실패를 빈 목록으로 감추면 "검색 결과 없음"과 구분되지 않는다.
-            found = List.of();
-            lastError = "종목을 조회하지 못했습니다. 연결 상태를 확인해주세요.";
-        }
-        items.setAll(found);
-        return items.size();
+        currentMarket = marketFilter == null || marketFilter.isBlank() ? "전체" : marketFilter;
+        String requestedQuery = currentQuery;
+        String requestedMarket = currentMarket;
+        long requestId = requestSequence.incrementAndGet();
+        CompletableFuture<SearchResult> applied = new CompletableFuture<>();
+
+        market.search(requestedQuery, RESULT_LIMIT).whenComplete((summaries, failure) ->
+                executeStateChange(applied, () -> {
+                    if (requestId != requestSequence.get()) {
+                        applied.complete(new SearchResult(items.size(), "", false));
+                        return;
+                    }
+                    List<StockSearchItem> found;
+                    String message;
+                    if (failure != null) {
+                        // 조회 실패를 빈 목록으로 감추면 "검색 결과 없음"과 구분되지 않는다.
+                        found = List.of();
+                        lastError = "종목을 조회하지 못했습니다. 연결 상태를 확인해주세요.";
+                        message = lastError;
+                    } else {
+                        found = summaries.stream()
+                                .map(StockSearchItem::of)
+                                .filter(item -> item.matchesMarket(requestedMarket))
+                                .toList();
+                        lastError = "";
+                        message = found.isEmpty()
+                                ? "검색 결과가 없습니다. 검색어나 시장을 바꿔보세요."
+                                : "검색 결과 " + found.size() + "건을 표시했습니다.";
+                    }
+                    items.setAll(found);
+                    applied.complete(new SearchResult(items.size(), message, true));
+                }));
+        return applied;
     }
 
     /** 현재 검색 결과 중 코드나 이름이 정확히 일치하는 종목. */
@@ -88,20 +124,25 @@ public final class StockSearchViewModel {
     }
 
     /** 검색어에 가장 가까운 종목. 없으면 {@code null}. */
-    public StockSearchItem findBestMatch(String query) {
-        if (query == null || query.isBlank()) return null;
-        List<StockSearchItem> found;
-        try {
-            found = stocks.search(query, RESULT_LIMIT).stream().map(StockSearchItem::of).toList();
-        } catch (RuntimeException failure) {
-            return null;
-        }
+    public CompletionStage<StockSearchItem> findBestMatch(String query) {
+        if (query == null || query.isBlank()) return CompletableFuture.completedFuture(null);
         String normalized = query.strip();
-        return found.stream()
-                .filter(item -> item.symbol().equalsIgnoreCase(normalized)
-                        || item.name().equalsIgnoreCase(normalized))
-                .findFirst()
-                .orElseGet(() -> found.isEmpty() ? null : found.get(0));
+        CompletableFuture<StockSearchItem> result = new CompletableFuture<>();
+        market.search(normalized, RESULT_LIMIT).whenComplete((summaries, failure) ->
+                executeStateChange(result, () -> {
+                    if (failure != null) {
+                        result.complete(null);
+                        return;
+                    }
+                    List<StockSearchItem> found = summaries.stream().map(StockSearchItem::of).toList();
+                    StockSearchItem match = found.stream()
+                            .filter(item -> item.symbol().equalsIgnoreCase(normalized)
+                                    || item.name().equalsIgnoreCase(normalized))
+                            .findFirst()
+                            .orElseGet(() -> found.isEmpty() ? null : found.get(0));
+                    result.complete(match);
+                }));
+        return result;
     }
 
     public void select(StockSearchItem item) {
@@ -116,14 +157,15 @@ public final class StockSearchViewModel {
     }
 
     /** 최근 검색 문자열을 다시 종목 선택으로 바꾼다. */
-    public boolean selectRecent(String recent) {
-        if (recent == null || recent.isBlank()) return false;
+    public CompletionStage<Boolean> selectRecent(String recent) {
+        if (recent == null || recent.isBlank()) return CompletableFuture.completedFuture(false);
         int separator = recent.lastIndexOf(" · ");
         String query = separator < 0 ? recent : recent.substring(separator + 3);
-        StockSearchItem item = findBestMatch(query);
-        if (item == null) return false;
-        select(item);
-        return true;
+        return findBestMatch(query).thenApply(item -> {
+            if (item == null) return false;
+            select(item);
+            return true;
+        });
     }
 
     public void removeRecent(String recent) {
@@ -149,5 +191,19 @@ public final class StockSearchViewModel {
         SecuritySummary summary = item.summary();
         session.watchlistItems().add(WatchlistItem.from(group, summary, "없음"));
         return true;
+    }
+
+    private void executeStateChange(CompletableFuture<?> result, Runnable change) {
+        try {
+            stateExecutor.execute(() -> {
+                try {
+                    change.run();
+                } catch (RuntimeException failure) {
+                    result.completeExceptionally(failure);
+                }
+            });
+        } catch (RuntimeException failure) {
+            result.completeExceptionally(failure);
+        }
     }
 }
