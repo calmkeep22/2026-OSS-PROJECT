@@ -21,9 +21,10 @@ public final class ConnectionViewModel {
     }
 
     private final ObjectProperty<Environment> environment = new SimpleObjectProperty<>(Environment.MOCK);
-    private final StringProperty connectionMessage = new SimpleStringProperty("모의투자 서버에 연결되어 있습니다.");
-    private final StringProperty connectionTone = new SimpleStringProperty("success");
-    private final StringProperty tokenExpiry = new SimpleStringProperty("2026-08-11 09:00");
+    private final StringProperty connectionMessage = new SimpleStringProperty(
+            "자격증명과 API 연결을 아직 확인하지 않았습니다. 현재 화면은 로컬 데모입니다.");
+    private final StringProperty connectionTone = new SimpleStringProperty("warning");
+    private final StringProperty tokenExpiry = new SimpleStringProperty("발급 전 · 실제 API 미연결");
     private final StringProperty defaultAccount = new SimpleStringProperty("모의계좌");
     private final StringProperty credentialStorageDescription = new SimpleStringProperty();
     private final StringProperty credentialStorageStatus = new SimpleStringProperty();
@@ -110,9 +111,9 @@ public final class ConnectionViewModel {
     }
 
     public void reissueDemoToken() {
-        tokenExpiry.set("2026-08-11 18:00");
-        connectionMessage.set("데모 토큰 만료 시각을 갱신했습니다.");
-        connectionTone.set("success");
+        tokenExpiry.set("데모 발급됨 · 실제 토큰 아님");
+        connectionMessage.set("화면 확인용 데모 토큰 상태를 만들었습니다. 실제 API는 호출하지 않았습니다.");
+        connectionTone.set("warning");
     }
 
     public void revokeToken() {

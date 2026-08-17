@@ -7,6 +7,7 @@
 .nav-button { -fx-background-color: transparent; -fx-text-fill: #4e5968; -fx-alignment: center-left; -fx-padding: 10 13; -fx-font-weight: 600; -fx-cursor: hand; -fx-min-height: 42; }
 .nav-button:hover { -fx-background-color: #e8edf5; }
 .nav-button:selected { -fx-background-color: #e8efff; -fx-text-fill: #2457e6; -fx-border-color: #3d6aff; -fx-border-width: 0 0 0 4; }
+.nav-group-label { -fx-text-fill: #6b7684; -fx-font-size: 12px; -fx-font-weight: 800; -fx-padding: 14 10 4 10; }
 .keyboard-help { -fx-background-color: #ffffff; -fx-border-color: #d1d6db; -fx-border-radius: 8; -fx-background-radius: 8; -fx-padding: 12; -fx-text-fill: #4e5968; }
 .top-bar { -fx-background-color: #ffffff; -fx-border-color: #dfe3e8; -fx-border-width: 0 0 1 0; }
 .top-bar .text-field { -fx-background-color: #f3f5f7; -fx-background-radius: 9; -fx-border-color: #d8dde3; -fx-border-radius: 9; -fx-padding: 10 13; }
@@ -81,6 +82,9 @@
 .large-text .title { -fx-font-size: 36px; }
 .large-text .section-title { -fx-font-size: 26px; }
 .large-text .sidebar-title { -fx-font-size: 27px; }
+.large-text .table-row-cell { -fx-cell-size: 56px; }
+.large-text .button { -fx-min-height: 46px; }
+.large-text .status-item { -fx-font-size: 15px; }
 .high-contrast { -fx-base: #000000; -fx-background: #000000; -fx-control-inner-background: #000000; -fx-text-fill: #ffffff; }
 .high-contrast .screen-content, .high-contrast .sidebar, .high-contrast .market-card,
 .high-contrast .feature-card, .high-contrast .settings-card, .high-contrast .radio-status,

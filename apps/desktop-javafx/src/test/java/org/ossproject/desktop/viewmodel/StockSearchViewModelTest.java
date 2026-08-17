@@ -64,4 +64,22 @@ class StockSearchViewModelTest {
         assertEquals(0, viewModel.filter("삼성", "전체"));
         assertFalse(viewModel.lastError().isBlank());
     }
+
+    @Test void keepsSearchContextAndCanOpenAndDeleteARecentSearch() {
+        DesktopSession session = new DesktopSession();
+        StockSearchViewModel viewModel = viewModel(session);
+
+        viewModel.filter("NV", "미국");
+        viewModel.select(viewModel.items().get(0));
+        String recent = viewModel.recentSearches().get(0);
+        viewModel.filter("삼성", "국내");
+
+        assertEquals("삼성", viewModel.currentQuery());
+        assertEquals("국내", viewModel.currentMarket());
+        assertTrue(viewModel.selectRecent(recent));
+        assertEquals("NVDA", session.selectedStock().symbol());
+
+        viewModel.removeRecent(recent);
+        assertFalse(viewModel.recentSearches().contains(recent));
+    }
 }

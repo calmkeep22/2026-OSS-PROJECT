@@ -5,6 +5,7 @@ import javafx.collections.FXCollections;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.*;
+import javafx.scene.input.KeyCode;
 import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.VBox;
 import org.ossproject.desktop.viewmodel.ScannerItem;
@@ -72,11 +73,20 @@ public final class ScannerScreenView {
         table.getColumns().add(column("거래량", item -> String.format("%,d", item.volume())));
         table.getColumns().add(column("거래대금", item -> String.format("%,d백만원", item.tradingValueMillion())));
         table.getColumns().add(column("신호", ScannerItem::signal));
-        table.setOnMouseClicked(event -> {
+        Runnable openSelected = () -> {
             ScannerItem selected = table.getSelectionModel().getSelectedItem();
-            if (event.getClickCount() == 2 && selected != null) openStock.accept(selected.name());
+            if (selected == null) {
+                status.accept("상세 화면에서 볼 종목을 선택해주세요.");
+                table.requestFocus();
+            } else openStock.accept(selected.name());
+        };
+        table.setOnMouseClicked(event -> { if (event.getClickCount() == 2) openSelected.run(); });
+        table.setOnKeyPressed(event -> {
+            if (event.getCode() == KeyCode.ENTER) openSelected.run();
         });
-        table.setPrefHeight(380); return table;
+        Button open = new Button("선택 종목 열기");
+        open.setOnAction(event -> openSelected.run());
+        table.setPrefHeight(380); return new VBox(8, table, open);
     }
 
     private TableColumn<ScannerItem, String> column(String title, Function<ScannerItem, String> mapper) {

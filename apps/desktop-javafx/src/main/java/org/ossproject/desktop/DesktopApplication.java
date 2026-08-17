@@ -10,6 +10,8 @@ import javafx.collections.transformation.FilteredList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
+import javafx.scene.AccessibleAttribute;
+import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.input.KeyCode;
@@ -32,6 +34,7 @@ import org.ossproject.desktop.chart.AccessibleChartController;
 import org.ossproject.desktop.chart.AccessibleChartView;
 import org.ossproject.desktop.chart.CandlestickChartView;
 import org.ossproject.desktop.presentation.Formatters;
+import org.ossproject.desktop.navigation.OrderDraft;
 import org.ossproject.desktop.navigation.Screen;
 import org.ossproject.desktop.controller.DesktopScreenController;
 import org.ossproject.sonification.port.SonificationPort;
@@ -54,11 +57,10 @@ import org.ossproject.desktop.state.AccessibilityPreferences;
 import org.ossproject.desktop.state.AlertRule;
 import org.ossproject.desktop.state.JournalEntry;
 import org.ossproject.desktop.state.SonificationPreferences;
+import org.ossproject.desktop.state.WatchlistItem;
 import org.ossproject.desktop.accessibility.AccessibilityAudit;
 
 import java.math.BigDecimal;
-import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -84,7 +86,7 @@ public final class DesktopApplication extends Application {
     private final DesktopSession session = new DesktopSession();
     private final StockSearchViewModel stockSearchViewModel;
     private final ConnectionViewModel connectionViewModel;
-    private final WatchlistViewModel watchlistViewModel = new WatchlistViewModel(session);
+    private final WatchlistViewModel watchlistViewModel;
     private final StockDetailViewModel stockDetailViewModel;
     private final ScannerViewModel scannerViewModel = new ScannerViewModel();
     private final DesktopStateRepository stateRepository;
@@ -93,7 +95,10 @@ public final class DesktopApplication extends Application {
     private DesktopScreenController screenController;
     private PauseTransition persistenceDelay;
     private final TextField globalSearch = new TextField();
+    private final Button backButton = new Button("← 뒤로");
+    private final Label currentLocation = new Label("홈");
     private BorderPane root;
+    private VBox sidebarRoot;
     private boolean speechEnabled;
     private boolean soundEnabled = true;
     private boolean keyboardGuidanceEnabled = true;
@@ -105,6 +110,7 @@ public final class DesktopApplication extends Application {
     private int maxSubscriptions = 160;
     private SonificationPreferences sonificationPreferences = SonificationPreferences.DEFAULT;
     private String pendingOrderPrice = "73500";
+    private OrderDraft orderDraft;
     public DesktopApplication() {
         this(DesktopServices.createDefault());
     }
@@ -123,6 +129,7 @@ public final class DesktopApplication extends Application {
         this.sonificationPreferencesRepository = services.sonificationPreferences();
         this.connectionViewModel = new ConnectionViewModel(secretStore);
         this.stockSearchViewModel = new StockSearchViewModel(session, stockAdapter);
+        this.watchlistViewModel = new WatchlistViewModel(session, stockAdapter);
         this.stockDetailViewModel = new StockDetailViewModel(session, stockAdapter, candleAdapter);
     }
 
@@ -139,18 +146,12 @@ public final class DesktopApplication extends Application {
         root.setTop(createTopBar());
         root.setCenter(screenHost);
         root.setBottom(createStatusBar());
-        accessibleChartController = new AccessibleChartController(
-                stockAdapter,
-                candleAdapter,
-                sonificationPort,
-                (text, key) -> announce(text, SpeechPriority.USER_REQUEST, key),
-                status::setText);
-        accessibleChartController.applyPreferences(sonificationPreferences);
-        accessibleChartController.setPreferencesListener(preferences -> {
-            sonificationPreferences = preferences;
-            scheduleStateSave();
-        });
-        accessibleChartView = new AccessibleChartView(accessibleChartController);
+        status.setAccessibleText("앱 상태. " + status.getText());
+        status.textProperty().addListener((obs, old, message) -> Platform.runLater(() -> {
+            status.setAccessibleText("앱 상태. " + message);
+            status.notifyAccessibleAttributeChanged(AccessibleAttribute.TEXT);
+        }));
+        rebuildAccessibleChart(session.selectedStock().symbol());
         configureScreens();
         speechQueue.addListener(new SpeechListener() {
             @Override public void onStarted(SpeechRequest request) {
@@ -189,9 +190,17 @@ public final class DesktopApplication extends Application {
         scene.getAccelerators().put(new KeyCodeCombination(KeyCode.R, KeyCombination.ALT_DOWN),
                 () -> navigate(Screen.RADIO));
         scene.getAccelerators().put(new KeyCodeCombination(KeyCode.O, KeyCombination.ALT_DOWN),
-                () -> navigate(Screen.TRADING));
+                () -> openOrder(OrderSide.BUY));
+        scene.getAccelerators().put(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.ALT_DOWN),
+                this::navigateBack);
         scene.getAccelerators().put(new KeyCodeCombination(KeyCode.COMMA, KeyCombination.CONTROL_DOWN),
                 () -> navigate(Screen.SETTINGS));
+        scene.addEventFilter(javafx.scene.input.KeyEvent.KEY_PRESSED, event -> {
+            if (event.getCode() == KeyCode.F6) {
+                cycleFocusRegion(event.isShiftDown());
+                event.consume();
+            }
+        });
 
         navigate(Screen.DASHBOARD);
         stage.setTitle("OpenStock Access - 모의투자 UI");
@@ -209,14 +218,37 @@ public final class DesktopApplication extends Application {
         product.getStyleClass().add("sidebar-title");
         Label mode = new Label("모의투자 · UI 데모");
         mode.getStyleClass().add("mode-badge");
+        ComboBox<Screen> quickNavigation = new ComboBox<>(FXCollections.observableArrayList(
+                java.util.Arrays.stream(Screen.values()).filter(Screen::shownInSidebar).toList()));
+        quickNavigation.setPromptText("화면 바로 이동");
+        quickNavigation.setAccessibleText("화면 바로 이동");
+        quickNavigation.setMaxWidth(Double.MAX_VALUE);
+        quickNavigation.setConverter(new StringConverter<>() {
+            @Override public String toString(Screen screen) {
+                return screen == null ? "" : screen.navigationGroup().label() + " · " + screen.label();
+            }
+            @Override public Screen fromString(String value) { return null; }
+        });
+        quickNavigation.setOnAction(event -> {
+            Screen selected = quickNavigation.getValue();
+            if (selected != null) openNavigationScreen(selected);
+        });
         VBox nav = new VBox(4);
+        Screen.NavigationGroup currentGroup = null;
         for (Screen screen : Screen.values()) {
             if (!screen.shownInSidebar()) continue;
+            if (screen.navigationGroup() != currentGroup) {
+                currentGroup = screen.navigationGroup();
+                Label group = new Label(currentGroup.label());
+                group.getStyleClass().add("nav-group-label");
+                group.setAccessibleText(currentGroup.label() + " 메뉴 그룹");
+                nav.getChildren().add(group);
+            }
             Button button = new Button(screen.label());
             button.getStyleClass().add("nav-button");
             button.setMaxWidth(Double.MAX_VALUE);
             button.setAccessibleText(screen.label() + " 화면 열기");
-            button.setOnAction(event -> navigate(screen));
+            button.setOnAction(event -> openNavigationScreen(screen));
             navigationButtons.put(screen, button);
             nav.getChildren().add(button);
         }
@@ -225,16 +257,30 @@ public final class DesktopApplication extends Application {
         navScroll.setFitToWidth(true);
         navScroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
         VBox.setVgrow(navScroll, Priority.ALWAYS);
-        Label help = new Label("키보드\nAlt+D 홈 · Alt+S 검색\nAlt+O 주문 · Alt+A 계좌\nAlt+R 청각 차트");
+        Label help = new Label("키보드\nF6 / Shift+F6 영역 이동\nAlt+← 뒤로 · Alt+D 홈 · Alt+S 검색\nAlt+O 주문 · Alt+A 계좌\nAlt+R 청각 차트");
         help.getStyleClass().add("keyboard-help");
-        VBox sidebar = new VBox(14, product, mode, navScroll, help);
+        VBox sidebar = new VBox(14, product, mode, quickNavigation, navScroll, help);
         sidebar.getStyleClass().add("sidebar");
         sidebar.setPadding(new Insets(20));
-        sidebar.setPrefWidth(216); sidebar.setMinWidth(200);
+        sidebar.setPrefWidth(largeTextEnabled ? 250 : 216);
+        sidebar.setMinWidth(largeTextEnabled ? 230 : 200);
+        sidebarRoot = sidebar;
         return sidebar;
     }
 
-    private HBox createTopBar() {
+    private void openNavigationScreen(Screen screen) {
+        if (screen == Screen.TRADING) openOrder(OrderSide.BUY);
+        else navigate(screen);
+    }
+
+    private VBox createTopBar() {
+        backButton.setDisable(true);
+        backButton.setAccessibleText("이전 화면으로 돌아가기");
+        backButton.setAccessibleHelp("Alt와 왼쪽 방향키로도 이전 화면으로 돌아갈 수 있습니다.");
+        backButton.setOnAction(event -> navigateBack());
+        currentLocation.getStyleClass().add("muted-text");
+        currentLocation.setAccessibleText("현재 화면 홈");
+
         globalSearch.setPromptText("종목명 또는 종목코드 검색");
         globalSearch.setAccessibleText("국내와 미국 종목 통합 검색");
         globalSearch.setAccessibleHelp("검색어를 입력하고 Enter 키를 누르면 종목 상세 화면을 엽니다.");
@@ -246,11 +292,12 @@ public final class DesktopApplication extends Application {
         searchButton.setOnAction(event -> openSearchedStock());
         HBox search = new HBox(8, globalSearch, searchButton);
         search.setAlignment(Pos.CENTER_LEFT);
+        search.setMaxWidth(Double.MAX_VALUE);
         HBox.setHgrow(globalSearch, Priority.ALWAYS);
 
-        Label market = new Label("국내장 · 장중");
-        market.getStyleClass().addAll("status-chip", "positive-chip");
-        Button connection = new Button("키움 모의 · 연결됨");
+        Label market = new Label("데모 시세 · 고정 스냅샷");
+        market.getStyleClass().addAll("status-chip", "mode-badge");
+        Button connection = new Button("키움 API · 미연결");
         connection.getStyleClass().add("connection-button");
         connection.setOnAction(event -> navigate(Screen.CONNECTION));
         Button alerts = new Button("알림 3");
@@ -258,12 +305,12 @@ public final class DesktopApplication extends Application {
         Button account = new Button("계좌 ****-1204");
         account.setOnAction(event -> navigate(Screen.ACCOUNT));
 
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
-        HBox top = new HBox(12, search, spacer, market, alerts, account, connection);
-        top.setAlignment(Pos.CENTER_LEFT);
+        Region spacer = new Region(); HBox.setHgrow(spacer, Priority.ALWAYS);
+        HBox context = new HBox(12, backButton, currentLocation, spacer, market, alerts, account, connection);
+        context.setAlignment(Pos.CENTER_LEFT);
+        VBox top = new VBox(10, context, search);
         top.getStyleClass().add("top-bar");
-        top.setPadding(new Insets(14, 18, 14, 18));
+        top.setPadding(new Insets(12, 18, 12, 18));
         return top;
     }
 
@@ -272,15 +319,54 @@ public final class DesktopApplication extends Application {
         globalSearch.selectAll();
     }
 
+    private void cycleFocusRegion(boolean reverse) {
+        Node focused = root.getScene() == null ? null : root.getScene().getFocusOwner();
+        boolean inTop = isDescendantOf(focused, root.getTop());
+        boolean inContent = isDescendantOf(focused, root.getCenter());
+        if (reverse) {
+            if (inTop) focusSidebar();
+            else if (inContent) focusGlobalSearch();
+            else screenController.focusContent();
+        } else {
+            if (inTop) screenController.focusContent();
+            else if (inContent) focusSidebar();
+            else focusGlobalSearch();
+        }
+    }
+
+    private void focusSidebar() {
+        Button first = navigationButtons.get(Screen.DASHBOARD);
+        if (first != null) first.requestFocus();
+    }
+
+    private boolean isDescendantOf(Node node, Node ancestor) {
+        if (!(ancestor instanceof Parent) || node == null) return false;
+        for (Node candidate = node; candidate != null; candidate = candidate.getParent()) {
+            if (candidate == ancestor) return true;
+        }
+        return false;
+    }
+
     private void openSearchedStock() {
         if (globalSearch.getText() == null || globalSearch.getText().isBlank()) {
             navigate(Screen.SEARCH);
             return;
         }
-        var selected = stockSearchViewModel.findBestMatch(globalSearch.getText());
-        if (selected == null) {
+        String query = globalSearch.getText().trim();
+        int count = stockSearchViewModel.filter(query, "전체");
+        if (!stockSearchViewModel.lastError().isBlank()) {
+            screenController.invalidate(Screen.SEARCH);
             navigate(Screen.SEARCH);
-            status.setText(globalSearch.getText().trim() + " 검색 결과가 없습니다.");
+            status.setText(stockSearchViewModel.lastError());
+            return;
+        }
+        var selected = stockSearchViewModel.exactMatch(query)
+                .orElseGet(() -> count == 1 ? stockSearchViewModel.items().get(0) : null);
+        if (selected == null) {
+            screenController.invalidate(Screen.SEARCH);
+            navigate(Screen.SEARCH);
+            status.setText(count == 0 ? query + " 검색 결과가 없습니다."
+                    : query + " 검색 결과 " + count + "건에서 종목을 선택해주세요.");
             return;
         }
         stockSearchViewModel.select(selected);
@@ -312,35 +398,91 @@ public final class DesktopApplication extends Application {
         openStockByQuery(selected.get(nameColumn));
     }
 
-    private void navigateForSelectedStock(TableView<ObservableList<String>> table, int nameColumn, Screen target) {
+    private void navigateForSelectedStock(TableView<ObservableList<String>> table, int nameColumn, OrderSide side) {
         ObservableList<String> selected = table.getSelectionModel().getSelectedItem();
         if (selected == null || selected.size() <= nameColumn) {
             status.setText("주문할 종목을 먼저 선택해주세요."); table.requestFocus(); return;
         }
-        if (selectStockByQuery(selected.get(nameColumn))) navigate(target);
+        if (selectStockByQuery(selected.get(nameColumn))) openOrder(side);
     }
 
     private void navigate(Screen screen) {
+        if (screen == Screen.WATCHLIST || screen == Screen.US_MARKET) watchlistViewModel.refresh();
+        if (screen == Screen.RADIO
+                && !accessibleChartController.stock().symbol().equals(session.selectedStock().symbol())) {
+            rebuildAccessibleChart(session.selectedStock().symbol());
+            screenController.invalidate(Screen.RADIO);
+        }
+        if (screen == Screen.STOCK_DETAIL || screen == Screen.TRADING) screenController.invalidate(screen);
         screenController.show(screen);
+    }
+
+    private void rebuildAccessibleChart(String symbol) {
+        if (accessibleChartController != null) {
+            sonificationPreferences = accessibleChartController.preferences();
+            accessibleChartController.close();
+        }
+        accessibleChartController = new AccessibleChartController(
+                symbol, stockAdapter, candleAdapter, sonificationPort, this::requestSpeech, status::setText);
+        accessibleChartController.applyPreferences(sonificationPreferences);
+        accessibleChartController.setPreferencesListener(preferences -> {
+            sonificationPreferences = preferences;
+            scheduleStateSave();
+        });
+        accessibleChartView = new AccessibleChartView(accessibleChartController);
+    }
+
+    private void navigateBack() {
+        if (!screenController.goBack()) status.setText("이전 화면 기록이 없습니다.");
+    }
+
+    private void openOrder(OrderSide side) {
+        StockDetail detail = stockDetailViewModel.detail();
+        Screen origin = screenController.currentScreen().orElse(Screen.DASHBOARD);
+        orderDraft = new OrderDraft(detail.symbol(), detail.name(), side,
+                OrderType.LIMIT, 1, stockDetailViewModel.plainOrderPrice(), origin);
+        pendingOrderPrice = orderDraft.price();
+        navigate(Screen.TRADING);
+    }
+
+    private void openOrderAtPrice(OrderSide side, String price) {
+        StockDetail detail = stockDetailViewModel.detail();
+        Screen origin = screenController.currentScreen().orElse(Screen.STOCK_DETAIL);
+        orderDraft = new OrderDraft(detail.symbol(), detail.name(), side,
+                OrderType.LIMIT, 1, price, origin);
+        pendingOrderPrice = orderDraft.price();
+        navigate(Screen.TRADING);
     }
 
     private void configureScreens() {
         screenController = new DesktopScreenController(screenHost, navigationButtons, status::setText);
+        backButton.disableProperty().unbind();
+        backButton.disableProperty().bind(screenController.canGoBackProperty().not());
+        screenController.currentScreenProperty().addListener((obs, old, screen) -> {
+            if (screen == null) return;
+            String location = switch (screen) {
+                case STOCK_DETAIL -> "종목 상세 · " + session.selectedStock().name();
+                case TRADING -> "주문 · " + session.selectedStock().name();
+                default -> screen.label();
+            };
+            currentLocation.setText(location);
+            currentLocation.setAccessibleText("현재 화면 " + location);
+        });
         screenController.register(Screen.DASHBOARD, this::createDashboard);
         screenController.register(Screen.CONNECTION, this::createConnectionScreen);
         screenController.register(Screen.MARKET, this::createMarketScreen);
-        screenController.register(Screen.SEARCH, this::createSearchScreen);
+        screenController.registerPreservingState(Screen.SEARCH, this::createSearchScreen);
         screenController.register(Screen.STOCK_DETAIL, this::createStockScreen);
-        screenController.register(Screen.WATCHLIST, this::createWatchlistScreen);
+        screenController.registerPreservingState(Screen.WATCHLIST, this::createWatchlistScreen);
         screenController.register(Screen.SCANNER, this::createScannerScreen);
         screenController.register(Screen.CONDITION, this::createConditionScreen);
         screenController.register(Screen.SUPPLY, this::createSupplyScreen);
         screenController.register(Screen.TRADING, this::createTradingScreen);
         screenController.register(Screen.ACCOUNT, this::createAccountScreen);
         screenController.register(Screen.US_MARKET, this::createUsMarketScreen);
-        screenController.register(Screen.NOTIFICATIONS, this::createNotificationsScreen);
+        screenController.registerPreservingState(Screen.NOTIFICATIONS, this::createNotificationsScreen);
         screenController.register(Screen.RADIO, () -> accessibleChartView.root());
-        screenController.register(Screen.SETTINGS, this::createSettingsScreen);
+        screenController.registerPreservingState(Screen.SETTINGS, this::createSettingsScreen);
     }
 
     private ScrollPane createDashboard() {
@@ -348,10 +490,11 @@ public final class DesktopApplication extends Application {
         Label description = new Label("모의투자 데이터 · 2026년 8월 10일 기준");
         description.getStyleClass().add("muted-text");
         VBox intro = new VBox(4, title, description);
-        Button order = primaryButton("주문하기", () -> navigate(Screen.TRADING));
+        Button order = primaryButton("주문하기", () -> openOrder(OrderSide.BUY));
         Button listen = new Button("화면 요약 듣기");
-        listen.setOnAction(event -> announce("총 자산 5천 2백 34만원, 오늘 평가손익은 143만원 이익입니다. 코스피와 코스닥 모두 상승 중입니다.",
-                SpeechPriority.USER_REQUEST, "dashboard-summary"));
+        listen.setOnAction(event -> requestSpeech(
+                "총 자산 5천 2백 34만원, 오늘 평가손익은 143만원 이익입니다. 코스피와 코스닥 모두 상승 중입니다.",
+                "dashboard-summary"));
         Region titleSpacer = new Region(); HBox.setHgrow(titleSpacer, Priority.ALWAYS);
         HBox header = new HBox(12, intro, titleSpacer, listen, order); header.setAlignment(Pos.CENTER_LEFT);
 
@@ -375,6 +518,7 @@ public final class DesktopApplication extends Application {
                 ), "종목", "수량", "현재가", "수익률");
         holdings.setPrefHeight(210);
         holdings.setOnMouseClicked(event -> { if (event.getClickCount() == 2) openSelectedStock(holdings, 0); });
+        holdings.setOnKeyPressed(event -> { if (event.getCode() == KeyCode.ENTER) openSelectedStock(holdings, 0); });
 
         TableView<ObservableList<String>> ranking = textTable("오늘 시장 거래대금 상위",
                 List.of(
@@ -385,6 +529,7 @@ public final class DesktopApplication extends Application {
                 ), "순위", "종목", "거래대금", "등락률");
         ranking.setPrefHeight(210);
         ranking.setOnMouseClicked(event -> { if (event.getClickCount() == 2) openSelectedStock(ranking, 1); });
+        ranking.setOnKeyPressed(event -> { if (event.getCode() == KeyCode.ENTER) openSelectedStock(ranking, 1); });
 
         VBox left = card("보유종목", holdings, linkButton("계좌 전체 보기", Screen.ACCOUNT));
         VBox right = card("오늘 시장", ranking, linkButton("랭킹 전체 보기", Screen.SCANNER));
@@ -430,8 +575,8 @@ public final class DesktopApplication extends Application {
         holdings.setOnMouseClicked(event -> { if (event.getClickCount() == 2) openSelectedStock(holdings, 0); });
         holdings.setOnKeyPressed(event -> { if (event.getCode() == KeyCode.ENTER) openSelectedStock(holdings, 0); });
         Button holdingDetail = new Button("선택 종목 상세"); holdingDetail.setOnAction(event -> openSelectedStock(holdings, 0));
-        Button holdingBuy = primaryButton("선택 종목 매수", () -> navigateForSelectedStock(holdings, 0, Screen.TRADING));
-        Button holdingSell = new Button("선택 종목 매도"); holdingSell.setOnAction(event -> navigateForSelectedStock(holdings, 0, Screen.TRADING));
+        Button holdingBuy = primaryButton("선택 종목 매수", () -> navigateForSelectedStock(holdings, 0, OrderSide.BUY));
+        Button holdingSell = new Button("선택 종목 매도"); holdingSell.setOnAction(event -> navigateForSelectedStock(holdings, 0, OrderSide.SELL));
         VBox holdingsPanel = new VBox(10, holdings, wrappingRow(8, holdingDetail, holdingBuy, holdingSell));
         holdingsPanel.setPadding(new Insets(10));
 
@@ -464,9 +609,17 @@ public final class DesktopApplication extends Application {
                 textColumn("전략·메모", JournalEntry::memo),
                 textColumn("태그", JournalEntry::tags));
         Button addJournal = new Button("일지 작성"); addJournal.setOnAction(event -> showJournalDialog(null));
-        Button editJournal = new Button("선택 수정"); editJournal.setOnAction(event -> showJournalDialog(journal.getSelectionModel().getSelectedItem()));
+        Button editJournal = new Button("선택 수정"); editJournal.setOnAction(event -> {
+            JournalEntry selected = journal.getSelectionModel().getSelectedItem();
+            if (selected == null) {
+                status.setText("수정할 매매일지를 선택해주세요.");
+                journal.requestFocus();
+                return;
+            }
+            showJournalDialog(selected);
+        });
         Button deleteJournal = new Button("선택 삭제");
-        deleteJournal.setOnAction(event -> session.journalEntries().remove(journal.getSelectionModel().getSelectedItem()));
+        deleteJournal.setOnAction(event -> deleteSelectedJournal(journal));
         Button attach = new Button("차트 화면 첨부"); attach.setOnAction(event -> status.setText("현재 차트 화면을 매매일지 첨부 대상으로 선택했습니다."));
         VBox journalPanel = new VBox(10, journal, wrappingRow(8, addJournal, editJournal, deleteJournal, attach));
         journalPanel.setPadding(new Insets(10));
@@ -518,9 +671,15 @@ public final class DesktopApplication extends Application {
         Label title = heading(detail.name());
         Label symbol = new Label(detail.symbol() + " · " + selection.exchange()); symbol.getStyleClass().add("mode-badge");
         Button favorite = new Button("관심종목 추가");
-        favorite.setOnAction(event -> status.setText(detail.name() + "을 관심종목에 추가했습니다."));
-        Button buy = primaryButton("매수", () -> navigate(Screen.TRADING));
-        Button sell = new Button("매도"); sell.getStyleClass().add("sell-button"); sell.setOnAction(event -> navigate(Screen.TRADING));
+        favorite.setOnAction(event -> {
+            var item = stockSearchViewModel.findBestMatch(detail.symbol());
+            if (item == null) status.setText(detail.name() + " 종목 정보를 찾지 못했습니다.");
+            else status.setText(stockSearchViewModel.addToWatchlist(item)
+                    ? detail.name() + "을 관심종목에 추가했습니다."
+                    : detail.name() + "은 이미 관심종목에 있습니다.");
+        });
+        Button buy = primaryButton("매수", () -> openOrder(OrderSide.BUY));
+        Button sell = new Button("매도"); sell.getStyleClass().add("sell-button"); sell.setOnAction(event -> openOrder(OrderSide.SELL));
         Region titleSpacer = new Region(); HBox.setHgrow(titleSpacer, Priority.ALWAYS);
         HBox titleRow = new HBox(12, title, symbol, titleSpacer, favorite, sell, buy); titleRow.setAlignment(Pos.CENTER_LEFT);
         String direction = detail.direction() == PriceDirection.UP ? "상승" : detail.direction() == PriceDirection.DOWN ? "하락" : "보합";
@@ -528,9 +687,10 @@ public final class DesktopApplication extends Application {
                 + stockDetailViewModel.formatPrice(detail.changeAmount().abs()) + " · " + detail.changeRate().abs() + "%");
         price.getStyleClass().add("stock-price");
         Button listen = new Button("최신 정보 듣기");
-        listen.setOnAction(event -> announce(detail.name() + " 현재가 " + stockDetailViewModel.formatPrice(detail.currentPrice())
+        listen.setOnAction(event -> requestSpeech(detail.name() + " 현재가 "
+                + stockDetailViewModel.formatPrice(detail.currentPrice())
                 + ", 전일 대비 " + direction + " " + detail.changeRate().abs() + "퍼센트입니다.",
-                SpeechPriority.USER_REQUEST, "stock-detail-" + detail.symbol()));
+                "stock-detail-" + detail.symbol()));
 
         FlowPane metrics = wrappingRow(12,
                 miniMetric("시가", stockDetailViewModel.formatPrice(detail.open())), miniMetric("고가", stockDetailViewModel.formatPrice(detail.high())),
@@ -595,10 +755,15 @@ public final class DesktopApplication extends Application {
         orderBook.setPrefHeight(360);
         Runnable useSelectedQuote = () -> {
             ObservableList<String> selected = orderBook.getSelectionModel().getSelectedItem();
-            if (selected == null || selected.size() < 2) return;
-            pendingOrderPrice = selected.get(1).replaceAll("[^0-9.]", "");
+            if (selected == null || selected.size() < 2) {
+                status.setText("주문에 반영할 호가를 선택해주세요.");
+                orderBook.requestFocus();
+                return;
+            }
+            String selectedPrice = selected.get(1).replaceAll("[^0-9.]", "");
             status.setText("선택한 호가 " + selected.get(1) + "을 주문 가격에 입력했습니다.");
-            navigate(Screen.TRADING);
+            OrderSide selectedSide = "매도".equals(selected.get(0)) ? OrderSide.BUY : OrderSide.SELL;
+            openOrderAtPrice(selectedSide, selectedPrice);
         };
         orderBook.setOnMouseClicked(event -> { if (event.getClickCount() == 2) useSelectedQuote.run(); });
         orderBook.setOnKeyPressed(event -> { if (event.getCode() == KeyCode.ENTER) useSelectedQuote.run(); });
@@ -644,6 +809,9 @@ public final class DesktopApplication extends Application {
                         row("4", "NAVER", "205,000원", "-0.71%", "1,230,922", "2,540억")),
                 "순위", "종목", "현재가", "등락률", "거래량", "거래대금");
         movers.setPrefHeight(350); movers.setOnMouseClicked(event -> { if (event.getClickCount() == 2) openSelectedStock(movers, 1); });
+        movers.setOnKeyPressed(event -> { if (event.getCode() == KeyCode.ENTER) openSelectedStock(movers, 1); });
+        Button openMarketStock = new Button("선택 종목 열기");
+        openMarketStock.setOnAction(event -> openSelectedStock(movers, 1));
 
         ToggleGroup group = new ToggleGroup(); FlowPane filters = wrappingRow(8);
         for (String value : List.of("거래량", "거래대금", "상승률", "하락률", "외국인", "기관", "프로그램")) {
@@ -652,7 +820,7 @@ public final class DesktopApplication extends Application {
             if (value.equals("거래대금")) button.setSelected(true); filters.getChildren().add(button);
         }
         sortMarketRows(movers, "거래대금");
-        VBox domestic = new VBox(16, marketSummary, filters, movers); domestic.setPadding(new Insets(12));
+        VBox domestic = new VBox(16, marketSummary, filters, movers, openMarketStock); domestic.setPadding(new Insets(12));
         TableView<ObservableList<String>> sectors = textTable("업종 지수",
                 List.of(row("반도체", "4,820.31", "+3.40%", "54", "12"),
                         row("자동차", "2,145.82", "+1.82%", "31", "8"),
@@ -671,12 +839,14 @@ public final class DesktopApplication extends Application {
                         row("305720", "KODEX 2차전지", "12,830원", "+1.92%", "0.45%", "1.2조")),
                 "코드", "ETF", "현재가", "등락률", "보수", "순자산");
         etf.setOnMouseClicked(event -> { if (event.getClickCount() == 2) showProductDetail("ETF", selectedName(etf, 1, "KODEX 200")); });
+        etf.setOnKeyPressed(event -> { if (event.getCode() == KeyCode.ENTER) showProductDetail("ETF", selectedName(etf, 1, "KODEX 200")); });
         TableView<ObservableList<String>> elw = textTable("ELW 목록",
                 List.of(row("58K123", "삼성전자 콜", "125원", "+8.70%", "86일", "0.42"),
                         row("57K882", "KOSPI200 풋", "210원", "-4.20%", "42일", "-0.36"),
                         row("58K220", "SK하이닉스 콜", "95원", "+12.30%", "71일", "0.51")),
                 "코드", "종목", "현재가", "등락률", "잔존일", "델타");
         elw.setOnMouseClicked(event -> { if (event.getClickCount() == 2) showProductDetail("ELW", selectedName(elw, 1, "삼성전자 콜")); });
+        elw.setOnKeyPressed(event -> { if (event.getCode() == KeyCode.ENTER) showProductDetail("ELW", selectedName(elw, 1, "삼성전자 콜")); });
         VBox gold = new VBox(16,
                 wrappingRow(14, summaryCard("금 99.99 1g", "128,450원", "+0.74%", "positive"),
                         summaryCard("매수 1호가", "128,440원", "잔량 1,820g", "neutral"),
@@ -700,7 +870,20 @@ public final class DesktopApplication extends Application {
     }
 
     private ScrollPane createWatchlistScreen() {
-        return new WatchlistScreenView(watchlistViewModel, this::openStockByQuery, status::setText).create();
+        return new WatchlistScreenView(watchlistViewModel, this::openWatchlistStock,
+                () -> startWatchlistSearch("전체"), status::setText).create();
+    }
+
+    private void openWatchlistStock(WatchlistItem item) {
+        session.selectStock(item.toSelection());
+        navigate(Screen.STOCK_DETAIL);
+    }
+
+    private void startWatchlistSearch(String market) {
+        stockSearchViewModel.filter("", market);
+        screenController.invalidate(Screen.SEARCH);
+        navigate(Screen.SEARCH);
+        status.setText("관심종목에 추가할 종목을 검색해주세요.");
     }
 
     private ScrollPane createScannerScreen() {
@@ -742,8 +925,11 @@ public final class DesktopApplication extends Application {
         FlowPane controls = wrappingRow(12, labeledControl("키움 조건식", condition), realtime, run); controls.setAlignment(Pos.BOTTOM_LEFT);
         results.setPrefHeight(360);
         results.setOnMouseClicked(event -> { if (event.getClickCount() == 2) openSelectedStock(results, 2); });
+        results.setOnKeyPressed(event -> { if (event.getCode() == KeyCode.ENTER) openSelectedStock(results, 2); });
+        Button openConditionStock = new Button("선택 종목 열기");
+        openConditionStock.setOnAction(event -> openSelectedStock(results, 2));
         search.run();
-        return scrollPage("조건검색", new VBox(20, title, controls, limit, results));
+        return scrollPage("조건검색", new VBox(20, title, controls, limit, results, openConditionStock));
     }
 
     private ScrollPane createSupplyScreen() {
@@ -885,8 +1071,10 @@ public final class DesktopApplication extends Application {
     }
 
     private VBox createUsWatchlistPanel() {
-        return new WatchlistScreenView(watchlistViewModel, this::openStockByQuery, status::setText)
-                .createUsPanel(() -> showUsOrderConfirmation("NVDA", "매수", 1, "142.50"));
+        return new WatchlistScreenView(watchlistViewModel, this::openWatchlistStock,
+                () -> startWatchlistSearch("미국"), status::setText)
+                .createUsPanel(selected -> showUsOrderConfirmation(selected.symbol(), "매수", 1,
+                        selected.displayPrice().replace("$", "").replace(",", "")));
     }
 
     private VBox createUsOrderPanel() {
@@ -926,7 +1114,7 @@ public final class DesktopApplication extends Application {
         TextArea summary = new TextArea("AI 가속기 수요가 데이터센터 투자를 중심으로 이어지고 있습니다. 다음 실적에서 공급 일정과 마진 추이를 확인해야 합니다. 출처: 키움 미국주식 리서치 UI 예시.");
         summary.setEditable(false); summary.setWrapText(true); summary.setPrefRowCount(5);
         Button listen = new Button("선택 리서치 듣기");
-        listen.setOnAction(event -> announce(summary.getText(), SpeechPriority.USER_REQUEST, "us-research-summary"));
+        listen.setOnAction(event -> requestSpeech(summary.getText(), "us-research-summary"));
         VBox panel = new VBox(14, reports, summary, listen); panel.setPadding(new Insets(12)); return panel;
     }
 
@@ -963,14 +1151,34 @@ public final class DesktopApplication extends Application {
         Button listen = new Button("선택 알림 듣기");
         listen.setOnAction(event -> {
             String selected = notifications.getSelectionModel().getSelectedItem();
-            if (selected != null) announce(selected, SpeechPriority.USER_REQUEST, "notification-selected");
+            if (selected == null) {
+                status.setText("들을 알림을 먼저 선택해주세요.");
+                notifications.requestFocus();
+                return;
+            }
+            requestSpeech(selected, "notification-selected");
         });
         Button markRead = new Button("선택 읽음"); markRead.setOnAction(event -> {
             String selected = notifications.getSelectionModel().getSelectedItem();
-            if (selected == null) return;
-            int index = session.notifications().indexOf(selected); if (index >= 0) session.notifications().set(index, selected.replace("새 알림 · ", ""));
+            if (selected == null) {
+                status.setText("읽음 처리할 알림을 선택해주세요.");
+                notifications.requestFocus();
+                return;
+            }
+            int index = session.notifications().indexOf(selected);
+            if (index >= 0) session.notifications().set(index, selected.replace("새 알림 · ", ""));
+            status.setText("선택한 알림을 읽음 처리했습니다.");
         });
-        Button delete = new Button("선택 삭제"); delete.setOnAction(event -> session.notifications().remove(notifications.getSelectionModel().getSelectedItem()));
+        Button delete = new Button("선택 삭제"); delete.setOnAction(event -> {
+            String selected = notifications.getSelectionModel().getSelectedItem();
+            if (selected == null) {
+                status.setText("삭제할 알림을 선택해주세요.");
+                notifications.requestFocus();
+                return;
+            }
+            session.notifications().remove(selected);
+            status.setText("선택한 알림을 삭제했습니다.");
+        });
         VBox history = new VBox(10, notifications, wrappingRow(8, listen, markRead, delete)); history.setPadding(new Insets(10));
 
         TableView<AlertRule> rules = typedTable("알림 규칙", session.alertRules(),
@@ -979,16 +1187,28 @@ public final class DesktopApplication extends Application {
                 textColumn("기준", AlertRule::threshold),
                 textColumn("상태", AlertRule::statusText));
         Button addRule = new Button("알림 규칙 추가"); addRule.setOnAction(event -> showAlertRuleDialog(null));
-        Button editRule = new Button("선택 수정"); editRule.setOnAction(event -> showAlertRuleDialog(rules.getSelectionModel().getSelectedItem()));
+        Button editRule = new Button("선택 수정"); editRule.setOnAction(event -> {
+            AlertRule selected = rules.getSelectionModel().getSelectedItem();
+            if (selected == null) {
+                status.setText("수정할 알림 규칙을 선택해주세요.");
+                rules.requestFocus();
+                return;
+            }
+            showAlertRuleDialog(selected);
+        });
         Button toggleRule = new Button("활성·일시정지"); toggleRule.setOnAction(event -> {
             AlertRule selected = rules.getSelectionModel().getSelectedItem();
-            if (selected != null) {
-                int index = session.alertRules().indexOf(selected);
-                if (index >= 0) session.alertRules().set(index, selected.toggled());
+            if (selected == null) {
+                status.setText("상태를 바꿀 알림 규칙을 선택해주세요.");
+                rules.requestFocus();
+                return;
             }
+            int index = session.alertRules().indexOf(selected);
+            if (index >= 0) session.alertRules().set(index, selected.toggled());
+            status.setText(selected.securityName() + " 알림 규칙 상태를 변경했습니다.");
         });
         Button deleteRule = new Button("선택 삭제");
-        deleteRule.setOnAction(event -> session.alertRules().remove(rules.getSelectionModel().getSelectedItem()));
+        deleteRule.setOnAction(event -> deleteSelectedAlertRule(rules));
         VBox rulePanel = new VBox(10, rules, wrappingRow(8, addRule, editRule, toggleRule, deleteRule)); rulePanel.setPadding(new Insets(10));
         TabPane tabs = new TabPane(tab("알림 기록", history), tab("알림 규칙", rulePanel));
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE); tabs.setPrefHeight(530);
@@ -1028,21 +1248,35 @@ public final class DesktopApplication extends Application {
 
     private VBox createOrderForm() {
         var selected = stockDetailViewModel.selection();
-        TextField symbol = new TextField(selected.symbol()); TextField name = new TextField(selected.name());
-        ComboBox<OrderSide> side = new ComboBox<>(FXCollections.observableArrayList(OrderSide.values())); side.setValue(OrderSide.BUY);
+        OrderDraft draft = orderDraft == null
+                ? new OrderDraft(selected.symbol(), selected.name(), OrderSide.BUY,
+                OrderType.LIMIT, 1, pendingOrderPrice, Screen.DASHBOARD)
+                : orderDraft;
+        orderDraft = draft;
+        TextField symbol = new TextField(draft.symbol()); TextField name = new TextField(draft.name());
+        symbol.setEditable(false); name.setEditable(false);
+        symbol.setAccessibleHelp("종목을 바꾸려면 종목검색에서 다른 종목을 선택해주세요.");
+        name.setAccessibleHelp(symbol.getAccessibleHelp());
+        ComboBox<OrderSide> side = new ComboBox<>(FXCollections.observableArrayList(OrderSide.values())); side.setValue(draft.side());
         side.setConverter(new StringConverter<>() {
             @Override public String toString(OrderSide value) { return value == null ? "" : value.displayName(); }
             @Override public OrderSide fromString(String value) { return OrderSide.valueOf(value); }
         });
         ComboBox<OrderType> orderType = new ComboBox<>(FXCollections.observableArrayList(OrderType.values()));
-        orderType.setValue(OrderType.LIMIT);
+        orderType.setValue(draft.type());
         orderType.setConverter(new StringConverter<>() {
             @Override public String toString(OrderType value) { return value == null ? "" : value.displayName(); }
             @Override public OrderType fromString(String value) { return OrderType.valueOf(value); }
         });
-        Spinner<Integer> quantity = new Spinner<>(1, 1_000_000, 1); quantity.setEditable(true);
-        TextField price = new TextField(pendingOrderPrice);
-        orderType.valueProperty().addListener((obs, old, selectedType) -> price.setDisable(selectedType == OrderType.MARKET));
+        Spinner<Integer> quantity = new Spinner<>(1, 1_000_000, draft.quantity()); quantity.setEditable(true);
+        TextField price = new TextField(draft.price());
+        price.setDisable(draft.type() == OrderType.MARKET);
+        side.valueProperty().addListener((obs, old, selectedSide) ->
+                updateOrderDraft(draft, selectedSide, orderType.getValue(), quantity.getValue(), price.getText()));
+        orderType.valueProperty().addListener((obs, old, selectedType) -> {
+            price.setDisable(selectedType == OrderType.MARKET);
+            updateOrderDraft(draft, side.getValue(), selectedType, quantity.getValue(), price.getText());
+        });
         GridPane form = new GridPane(); form.setHgap(10); form.setVgap(10);
         addField(form, 0, "종목 코드", symbol); addField(form, 1, "종목명", name);
         addField(form, 2, "매수 / 매도", side); addField(form, 3, "주문 유형", orderType);
@@ -1063,8 +1297,14 @@ public final class DesktopApplication extends Application {
                 estimatedAmount.setText("가격을 확인하세요");
             }
         };
-        price.textProperty().addListener((obs, old, value) -> updateEstimate.run());
-        quantity.valueProperty().addListener((obs, old, value) -> updateEstimate.run());
+        price.textProperty().addListener((obs, old, value) -> {
+            updateEstimate.run();
+            updateOrderDraft(draft, side.getValue(), orderType.getValue(), quantity.getValue(), value);
+        });
+        quantity.valueProperty().addListener((obs, old, value) -> {
+            updateEstimate.run();
+            updateOrderDraft(draft, side.getValue(), orderType.getValue(), value, price.getText());
+        });
         updateEstimate.run();
         VBox estimates = new VBox(8,
                 informationRow("주문 예상금액", estimatedAmount),
@@ -1076,6 +1316,14 @@ public final class DesktopApplication extends Application {
         VBox box = new VBox(14, sectionHeading("모의주문 준비"), form, new Label("주문 비율"), ratios, estimates, preview);
         box.getStyleClass().add("panel-card"); box.setPadding(new Insets(20));
         return box;
+    }
+
+    private void updateOrderDraft(OrderDraft initial, OrderSide side, OrderType type,
+                                  Integer quantity, String price) {
+        if (side == null || type == null || quantity == null || quantity <= 0
+                || price == null || price.isBlank()) return;
+        orderDraft = new OrderDraft(initial.symbol(), initial.name(), side, type, quantity, price, initial.origin());
+        pendingOrderPrice = orderDraft.price();
     }
 
     private ScrollPane createSettingsScreen() {
@@ -1093,6 +1341,10 @@ public final class DesktopApplication extends Application {
         CheckBox largeText = setting("큰 글자", largeTextEnabled, selected -> {
             largeTextEnabled = selected;
             toggleClass("large-text", selected);
+            if (sidebarRoot != null) {
+                sidebarRoot.setPrefWidth(selected ? 250 : 216);
+                sidebarRoot.setMinWidth(selected ? 230 : 200);
+            }
             scheduleStateSave();
         });
         CheckBox contrast = setting("고대비", highContrastEnabled, selected -> {
@@ -1164,8 +1416,8 @@ public final class DesktopApplication extends Application {
                 voiceSettings, wrappingRow(8, preview, auditAccessibility)); accessibility.setPadding(new Insets(18));
 
         VBox kiwoom = new VBox(14, sectionHeading("키움 API 연결"),
-                informationRow("현재 환경", "모의투자"), informationRow("REST", "정상"),
-                informationRow("실시간", "연결됨"), informationRow("토큰 만료", "2026-08-11 09:00"),
+                informationRow("현재 환경", "로컬 모의 UI"), informationRow("REST", "미연결"),
+                informationRow("실시간", "미연결"), informationRow("토큰", "발급 전"),
                 primaryButton("연결 설정 열기", () -> navigate(Screen.CONNECTION)),
                 new Label("App Secret은 화면이나 일반 설정 파일에 표시·저장하지 않습니다."));
         kiwoom.setPadding(new Insets(18));
@@ -1399,6 +1651,22 @@ public final class DesktopApplication extends Application {
         });
     }
 
+    private void deleteSelectedAlertRule(TableView<AlertRule> table) {
+        AlertRule selected = table.getSelectionModel().getSelectedItem();
+        if (selected == null) {
+            status.setText("삭제할 알림 규칙을 선택해주세요.");
+            table.requestFocus();
+            return;
+        }
+        Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION,
+                selected.securityName() + " 알림 규칙을 삭제하시겠습니까?", ButtonType.OK, ButtonType.CANCEL);
+        confirmation.setHeaderText("알림 규칙 삭제");
+        confirmation.showAndWait().filter(ButtonType.OK::equals).ifPresent(result -> {
+            session.alertRules().remove(selected);
+            status.setText(selected.securityName() + " 알림 규칙을 삭제했습니다.");
+        });
+    }
+
     private void showJournalDialog(JournalEntry existing) {
         Dialog<ButtonType> dialog = new Dialog<>(); dialog.setTitle(existing == null ? "매매일지 작성" : "매매일지 수정");
         TextField date = new TextField(existing == null ? "08/10" : existing.date());
@@ -1426,6 +1694,23 @@ public final class DesktopApplication extends Application {
                 if (index >= 0) session.journalEntries().set(index, replacement);
             }
             status.setText(security.getText().trim() + " 매매일지를 저장했습니다.");
+        });
+    }
+
+    private void deleteSelectedJournal(TableView<JournalEntry> table) {
+        JournalEntry selected = table.getSelectionModel().getSelectedItem();
+        if (selected == null) {
+            status.setText("삭제할 매매일지를 선택해주세요.");
+            table.requestFocus();
+            return;
+        }
+        Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION,
+                selected.date() + " · " + selected.securityName() + " 일지를 삭제하시겠습니까?",
+                ButtonType.OK, ButtonType.CANCEL);
+        confirmation.setHeaderText("매매일지 삭제");
+        confirmation.showAndWait().filter(ButtonType.OK::equals).ifPresent(result -> {
+            session.journalEntries().remove(selected);
+            status.setText(selected.securityName() + " 매매일지를 삭제했습니다.");
         });
     }
 
@@ -1614,7 +1899,8 @@ public final class DesktopApplication extends Application {
             Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION);
             confirmation.setTitle("모의주문 재확인");
             confirmation.setHeaderText(request.name() + " " + request.quantity() + "주 " + request.side().displayName() + " 주문을 제출하시겠습니까?");
-            confirmation.setContentText("종목 코드: " + request.symbol() + "\n지정가: " + Formatters.won(request.limitPrice())
+            String orderPrice = request.type() == OrderType.MARKET ? "시장가" : Formatters.won(request.limitPrice());
+            confirmation.setContentText("종목 코드: " + request.symbol() + "\n주문 가격: " + orderPrice
                     + "\n예상 주문금액: " + Formatters.won(result.estimatedAmount())
                     + "\n주문 후 예상 현금: " + Formatters.won(result.availableCashAfter()) + "\n\n실제 주문이 아닌 모의주문입니다.");
             ButtonType submit = new ButtonType("모의 " + request.side().displayName() + " 제출", ButtonBar.ButtonData.OK_DONE);
@@ -1624,6 +1910,14 @@ public final class DesktopApplication extends Application {
                 String receiptMessage = receipt.describe();
                 status.setText(receiptMessage + " 주문번호 " + receipt.orderId());
                 announce(receiptMessage, SpeechPriority.ORDER, "order-" + receipt.orderId()); play(SoundCue.SUCCESS);
+                Alert completed = new Alert(Alert.AlertType.INFORMATION);
+                completed.setTitle("모의주문 접수 결과");
+                completed.setHeaderText(receiptMessage);
+                completed.setContentText("주문번호: " + receipt.orderId() + "\n주문 화면에 머물거나 이전 화면으로 돌아갈 수 있습니다.");
+                ButtonType back = new ButtonType("이전 화면으로 돌아가기", ButtonBar.ButtonData.BACK_PREVIOUS);
+                ButtonType stay = new ButtonType("주문 화면 유지", ButtonBar.ButtonData.OK_DONE);
+                completed.getButtonTypes().setAll(back, stay);
+                completed.showAndWait().filter(back::equals).ifPresent(resultButton -> navigateBack());
             });
         } catch (RuntimeException exception) {
             status.setText("주문 입력 오류: " + exception.getMessage());
@@ -1634,11 +1928,11 @@ public final class DesktopApplication extends Application {
 
     private HBox createStatusBar() {
         status.setWrapText(true);
-        Label rest = new Label("REST 정상"); rest.getStyleClass().addAll("status-item", "status-ok");
-        Label realtime = new Label("실시간 연결됨"); realtime.getStyleClass().addAll("status-item", "status-ok");
+        Label rest = new Label("REST 미연결"); rest.getStyleClass().addAll("status-item", "status-mock");
+        Label realtime = new Label("실시간 미연결"); realtime.getStyleClass().addAll("status-item", "status-mock");
         Label mode = new Label("모의투자"); mode.getStyleClass().addAll("status-item", "status-mock");
-        Label subscriptions = new Label("구독 24 / 200"); subscriptions.getStyleClass().add("status-item");
-        lastDataTime.setText("마지막 시세 " + LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss")));
+        Label subscriptions = new Label("실시간 구독 0 / 200"); subscriptions.getStyleClass().add("status-item");
+        lastDataTime.setText("데모 시세 · 로컬 스냅샷");
         lastDataTime.getStyleClass().add("status-item");
         Region spacer = new Region(); HBox.setHgrow(spacer, Priority.ALWAYS);
         HBox bar = new HBox(14, status, spacer, rest, realtime, mode, subscriptions, lastDataTime);
@@ -1696,6 +1990,17 @@ public final class DesktopApplication extends Application {
     private void announce(String text, SpeechPriority priority, String key) {
         announce(text, priority, key, SpeechMergePolicy.KEEP_FIRST);
     }
+
+    /** 사용자가 직접 누른 듣기 동작은 TTS가 꺼져 있어도 이유를 알려 준다. */
+    private void requestSpeech(String text, String key) {
+        if (!speechEnabled || speechQueue.isClosed()) {
+            status.setText("음성 안내가 꺼져 있습니다. 설정에서 화면 읽기(TTS)를 켜주세요.");
+            play(SoundCue.WARNING);
+            return;
+        }
+        announce(text, SpeechPriority.USER_REQUEST, key);
+    }
+
     private void announce(String text, SpeechPriority priority, String key, SpeechMergePolicy mergePolicy) {
         if (speechEnabled && !speechQueue.isClosed()) {
             speechQueue.announce(new SpeechRequest(text, priority, key, mergePolicy));

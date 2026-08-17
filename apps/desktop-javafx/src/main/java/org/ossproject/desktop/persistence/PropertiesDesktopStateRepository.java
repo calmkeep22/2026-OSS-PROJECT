@@ -18,7 +18,7 @@ import java.util.function.Function;
 
 /** 데스크톱 화면 상태를 사용자 로컬 properties 파일에 원자적으로 저장한다. */
 public final class PropertiesDesktopStateRepository implements DesktopStateRepository {
-    private static final String FORMAT_VERSION = "3";
+    private static final String FORMAT_VERSION = "4";
     private final Path file;
 
     public PropertiesDesktopStateRepository(Path file) {
@@ -35,8 +35,8 @@ public final class PropertiesDesktopStateRepository implements DesktopStateRepos
         properties.setProperty("format.version", FORMAT_VERSION);
         properties.setProperty("watchlist.groups", encodeList(snapshot.watchlistGroups()));
         properties.setProperty("watchlist.rows", encodeRows(snapshot.watchlistItems(), item -> List.of(
-                item.group(), item.securityName(), item.displayPrice(), item.displayChange(),
-                item.displayVolume(), item.alertText())));
+                item.group(), item.market(), item.symbol(), item.securityName(), item.exchange(),
+                item.currency(), item.alertText())));
         properties.setProperty("alert.rules", encodeRows(snapshot.alertRules(), rule -> List.of(
                 rule.securityName(), rule.condition(), rule.threshold(), Boolean.toString(rule.enabled()))));
         properties.setProperty("notifications", encodeList(snapshot.notifications()));
@@ -68,9 +68,14 @@ public final class PropertiesDesktopStateRepository implements DesktopStateRepos
     }
 
     private Optional<WatchlistItem> watchlistItem(List<String> fields) {
-        if (fields.size() != 6) return Optional.empty();
-        return safe(() -> new WatchlistItem(
-                fields.get(0), fields.get(1), fields.get(2), fields.get(3), fields.get(4), fields.get(5)));
+        if (fields.size() == 7) {
+            return safe(() -> new WatchlistItem(fields.get(0), fields.get(1), fields.get(2), fields.get(3),
+                    fields.get(4), fields.get(5), fields.get(6)));
+        }
+        if (fields.size() == 6) {
+            return safe(() -> WatchlistItem.legacy(fields.get(0), fields.get(1), fields.get(2), fields.get(5)));
+        }
+        return Optional.empty();
     }
 
     private Optional<AlertRule> alertRule(List<String> fields) {

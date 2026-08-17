@@ -23,7 +23,7 @@ class PropertiesDesktopStateRepositoryTest {
         var repository = new PropertiesDesktopStateRepository(file);
         var snapshot = new DesktopStateSnapshot(
                 List.of("전체", "반도체"),
-                List.of(new WatchlistItem("반도체", "삼성전자", "72,500원", "+2.1%", "100", "없음")),
+                List.of(new WatchlistItem("반도체", "국내", "005930", "삼성전자", "KRX", "KRW", "없음")),
                 List.of(new AlertRule("삼성전자", "가격 이상", "75,000원", true)),
                 List.of("체결 알림"),
                 List.of(new JournalEntry("08/10", "삼성전자", "1", "2", "+1", "메모", "태그")),
@@ -33,7 +33,7 @@ class PropertiesDesktopStateRepositoryTest {
 
         assertEquals(snapshot, repository.load().orElseThrow());
         String stored = Files.readString(file);
-        assertTrue(stored.contains("format.version=3"));
+        assertTrue(stored.contains("format.version=4"));
         assertFalse(stored.contains("삼성전자"));
         assertFalse(stored.toLowerCase().contains("app secret"));
     }
@@ -53,6 +53,7 @@ class PropertiesDesktopStateRepositoryTest {
         DesktopStateSnapshot restored = new PropertiesDesktopStateRepository(file).load().orElseThrow();
 
         assertEquals("삼성전자", restored.watchlistItems().get(0).securityName());
+        assertTrue(restored.watchlistItems().get(0).needsIdentityRepair());
         assertTrue(restored.alertRules().get(0).enabled());
         assertEquals("메모", restored.journalEntries().get(0).memo());
     }

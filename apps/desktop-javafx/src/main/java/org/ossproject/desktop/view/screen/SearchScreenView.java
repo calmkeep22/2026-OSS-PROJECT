@@ -1,5 +1,6 @@
 package org.ossproject.desktop.view.screen;
 
+import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
@@ -32,25 +33,61 @@ public final class SearchScreenView {
     public ScrollPane create() {
         Label title = heading("종목검색");
         TextField query = new TextField();
+        query.setText(viewModel.currentQuery());
         query.setPromptText("삼성전자, 005930, AAPL처럼 검색");
         query.setAccessibleText("국내와 미국 종목 검색어");
         ComboBox<String> market = new ComboBox<>(javafx.collections.FXCollections.observableArrayList(
                 "전체", "국내", "미국", "ETF", "ELW"));
-        market.setValue("전체");
+        market.setValue(viewModel.currentMarket());
 
         TableView<StockSearchItem> results = createResultTable();
-        Runnable filter = () -> {
+        Label resultState = new Label();
+        resultState.setWrapText(true);
+        resultState.getStyleClass().add("muted-text");
+        Label emptyState = new Label();
+        emptyState.setWrapText(true);
+        results.setPlaceholder(emptyState);
+
+        Consumer<Boolean> filter = focusResults -> {
             int count = viewModel.filter(query.getText(), market.getValue());
-            // 조회 실패와 "결과 없음"은 다른 상황이므로 다르게 읽어 준다.
-            status.accept(viewModel.lastError().isBlank()
-                    ? "검색 결과 " + count + "건을 표시했습니다."
-                    : viewModel.lastError());
+            String message;
+            if (!viewModel.lastError().isBlank()) {
+                message = viewModel.lastError();
+                emptyState.setText(message);
+            } else if (count == 0) {
+                message = "검색 결과가 없습니다. 검색어나 시장을 바꿔보세요.";
+                emptyState.setText(message);
+            } else {
+                message = "검색 결과 " + count + "건을 표시했습니다.";
+                emptyState.setText("");
+            }
+            resultState.setText(message);
+            resultState.setAccessibleText("검색 상태. " + message);
+            status.accept(message);
+            if (focusResults && count > 0) {
+                results.getSelectionModel().selectFirst();
+                Platform.runLater(results::requestFocus);
+            }
         };
-        Button search = primaryButton("검색", filter);
-        query.setOnAction(event -> filter.run());
-        market.valueProperty().addListener((obs, old, value) -> filter.run());
-        HBox searchBar = new HBox(10, query, market, search);
+        Button search = primaryButton("검색", () -> filter.accept(true));
+        query.setOnAction(event -> filter.accept(true));
+        market.valueProperty().addListener((obs, old, value) -> filter.accept(false));
+        Button clear = new Button("검색 초기화");
+        clear.setOnAction(event -> {
+            query.clear();
+            market.setValue("전체");
+            filter.accept(false);
+            query.requestFocus();
+        });
+        HBox searchBar = new HBox(10, query, market, search, clear);
         searchBar.setAlignment(Pos.CENTER_LEFT); HBox.setHgrow(query, Priority.ALWAYS);
+        if (!viewModel.lastError().isBlank()) {
+            resultState.setText(viewModel.lastError());
+            emptyState.setText(viewModel.lastError());
+        } else {
+            resultState.setText("검색 결과 " + viewModel.items().size() + "건");
+            if (viewModel.items().isEmpty()) emptyState.setText("검색 결과가 없습니다.");
+        }
 
         Runnable openSelected = () -> {
             StockSearchItem selected = results.getSelectionModel().getSelectedItem();
@@ -79,8 +116,32 @@ public final class SearchScreenView {
         });
 
         ListView<String> recent = new ListView<>(viewModel.recentSearches());
-        recent.setAccessibleText("최근 검색"); recent.setPrefHeight(130);
-        VBox body = new VBox(18, title, searchBar, results, new HBox(10, open, favorite), card("최근 검색", recent));
+        recent.setAccessibleText("최근 검색");
+        recent.setAccessibleHelp("위아래 방향키로 선택하고 Enter를 누르면 종목 상세 화면을 엽니다. Delete를 누르면 기록을 삭제합니다.");
+        recent.setPrefHeight(130);
+        Runnable openRecent = () -> {
+            String selected = recent.getSelectionModel().getSelectedItem();
+            if (selected == null) {
+                status.accept("다시 열 최근 검색을 선택해주세요.");
+                recent.requestFocus();
+                return;
+            }
+            if (viewModel.selectRecent(selected)) navigate.accept(Screen.STOCK_DETAIL);
+            else status.accept(selected + " 종목을 다시 찾지 못했습니다.");
+        };
+        recent.setOnMouseClicked(event -> { if (event.getClickCount() == 2) openRecent.run(); });
+        recent.setOnKeyPressed(event -> {
+            if (event.getCode() == KeyCode.ENTER) openRecent.run();
+            else if (event.getCode() == KeyCode.DELETE) {
+                String selected = recent.getSelectionModel().getSelectedItem();
+                viewModel.removeRecent(selected);
+                if (selected != null) status.accept(selected + " 최근 검색을 삭제했습니다.");
+            }
+        });
+        Button openRecentButton = new Button("선택 최근 검색 열기");
+        openRecentButton.setOnAction(event -> openRecent.run());
+        VBox body = new VBox(18, title, searchBar, resultState, results, new HBox(10, open, favorite),
+                card("최근 검색", recent, openRecentButton));
         return scrollPage("종목검색", body);
     }
 
