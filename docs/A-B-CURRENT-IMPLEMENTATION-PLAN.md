@@ -451,7 +451,7 @@ public interface BrokerConnectionApplicationPort {
 - 화면에는 토큰 문자열을 반환하지 않는다.
 - 실전 연결은 화면에 모의 연결과 명확히 다른 문구와 상태를 제공한다.
 
-### B-2. MarketApplicationPort — 신규
+### B-2. MarketApplicationPort — 부분 완료
 
 ~~~java
 public interface MarketApplicationPort {
@@ -471,9 +471,14 @@ public interface MarketApplicationListener {
 }
 ~~~
 
-- 현재 StockSearchViewModel의 고정 목록을 이 포트 결과로 교체한다.
-- 현재 StockDetailViewModel이 화면 문자열로 가격을 다시 만드는 로직을 제거한다.
-- Sonification과 시각 차트는 같은 Candle 목록을 사용한다.
+- `MarketApplicationPort`, `MarketApplicationListener`, `EventSubscription`과
+  `MarketApplicationService` 구현 및 구독 수명주기 테스트를 추가했다.
+- StockSearchViewModel, StockDetailViewModel, WatchlistViewModel은 이 포트의 비동기 결과를
+  JavaFX Application Thread에서 반영한다.
+- `SecurityId`와 기존 문자열 기반 A 포트 사이에는 호환 오버로드가 있다. Quote와 저수준
+  스트림의 완전한 SecurityId 전환은 A와 함께 진행한다.
+- Sonification 실시간 모니터링을 이 포트로 전환하고 시각 차트와 동일한 Candle 목록을
+  공유하는 작업은 남아 있다.
 
 ### B-3. AccountApplicationPort — 신규
 
@@ -631,9 +636,9 @@ Navigator 같은 공개 Port를 추가하면 추상화만 늘어나므로 필요
 | 화면 | B가 호출할 계약 | A가 구현할 계약 | 현재 상태 |
 |---|---|---|---|
 | API 연결 | BrokerConnectionApplicationPort | BrokerConnectionPort, SecretStore | 데모 |
-| 종목 검색 | MarketApplicationPort | SecurityQueryPort | 고정 목록 |
-| 종목 상세·차트 | MarketApplicationPort | SecurityQueryPort, CandleQueryPort, MarketDataStreamPort | 일부 Fake |
-| 관심종목 | WatchlistRepository, MarketApplicationPort | MarketDataStreamPort | 로컬 동작 |
+| 종목 검색 | MarketApplicationPort | SecurityQueryPort | Application Port 연결, Fake 데이터 |
+| 종목 상세·차트 | MarketApplicationPort | SecurityQueryPort, CandleQueryPort, MarketDataStreamPort | 상세·과거봉 연결, 실시간은 남음 |
+| 관심종목 | WatchlistRepository, MarketApplicationPort | MarketDataStreamPort | 비동기 최신 조회 연결, 저장소 분리는 남음 |
 | 랭킹·스캐너 | MarketDiscoveryApplicationPort | MarketRankingQueryPort | 고정 목록 |
 | 조건검색 | MarketDiscoveryApplicationPort | ConditionSearchPort | 샘플 화면 |
 | 수급 | MarketDiscoveryApplicationPort | InvestorFlowQueryPort | 샘플 화면 |

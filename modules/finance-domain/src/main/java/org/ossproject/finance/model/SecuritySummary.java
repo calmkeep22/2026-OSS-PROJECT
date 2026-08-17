@@ -43,6 +43,11 @@ public record SecuritySummary(
         return "KRW".equalsIgnoreCase(currency);
     }
 
+    /** 화면과 Application 계층에서 사용할 거래소 포함 식별자. */
+    public SecurityId securityId() {
+        return SecurityId.of(symbol, exchange);
+    }
+
     /** 검색어가 종목 코드나 종목명에 걸리는지 확인한다. */
     public boolean matches(String query) {
         if (query == null || query.isBlank()) {

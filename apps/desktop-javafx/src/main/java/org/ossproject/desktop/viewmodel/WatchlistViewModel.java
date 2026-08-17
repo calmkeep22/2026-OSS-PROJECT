@@ -4,36 +4,51 @@ import javafx.collections.FXCollections;
 import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
 import javafx.collections.transformation.FilteredList;
-import org.ossproject.application.port.StockQueryPort;
+import org.ossproject.application.port.MarketApplicationPort;
 import org.ossproject.desktop.state.WatchlistItem;
 import org.ossproject.finance.model.SecuritySummary;
+import org.ossproject.finance.model.StockDetail;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicLong;
 
-/** 관심종목 식별 상태와 최신 조회 시세를 결합한다. */
+/** 관심종목 식별 상태와 최신 조회 시세를 비동기로 결합한다. */
 public final class WatchlistViewModel {
     public enum GroupDeleteResult { DELETED, NOT_FOUND, IN_USE }
-    public record RefreshResult(int updated, int failed) {
+
+    public record RefreshResult(int updated, int failed, boolean applied) {
         public String message() {
+            if (!applied) return "더 최근의 관심종목 조회 결과를 기다리고 있습니다.";
             if (failed == 0) return "관심종목 " + updated + "개의 최신 시세를 조회했습니다.";
             return "관심종목 " + updated + "개 조회, " + failed + "개 실패. 연결 상태를 확인해주세요.";
         }
     }
 
-    private final DesktopSession session;
-    private final StockQueryPort stocks;
-    private final ObservableList<WatchlistQuoteRow> quoteRows = FXCollections.observableArrayList();
-    private boolean refreshing;
+    private record ResolvedQuote(WatchlistItem original, WatchlistItem resolved, StockDetail detail) {}
 
-    public WatchlistViewModel(DesktopSession session, StockQueryPort stocks) {
+    private final DesktopSession session;
+    private final MarketApplicationPort market;
+    private final Executor stateExecutor;
+    private final AtomicLong refreshSequence = new AtomicLong();
+    private final ObservableList<WatchlistQuoteRow> quoteRows = FXCollections.observableArrayList();
+    private boolean applyingRefresh;
+
+    public WatchlistViewModel(
+            DesktopSession session,
+            MarketApplicationPort market,
+            Executor stateExecutor
+    ) {
         this.session = Objects.requireNonNull(session, "session");
-        this.stocks = Objects.requireNonNull(stocks, "stocks");
+        this.market = Objects.requireNonNull(market, "market");
+        this.stateExecutor = Objects.requireNonNull(stateExecutor, "stateExecutor");
         items().addListener((ListChangeListener<WatchlistItem>) change -> {
-            if (!refreshing) refresh();
+            if (!applyingRefresh) refresh();
         });
-        refresh();
     }
 
     public ObservableList<String> groups() { return session.watchlistGroups(); }
@@ -50,43 +65,70 @@ public final class WatchlistViewModel {
     }
 
     /** 저장된 종목 식별자로 최신 상세를 다시 조회한다. 일부 실패도 행에서 명시한다. */
-    public RefreshResult refresh() {
-        if (refreshing) return new RefreshResult(quoteRows.size(), 0);
-        refreshing = true;
-        try {
-            List<WatchlistQuoteRow> refreshed = new ArrayList<>();
-            int updated = 0;
-            int failed = 0;
-            for (int index = 0; index < items().size(); index++) {
-                WatchlistItem original = items().get(index);
-                WatchlistItem resolved = repairLegacyIdentity(original);
-                if (!resolved.equals(original)) items().set(index, resolved);
-                try {
-                    refreshed.add(WatchlistQuoteRow.available(resolved, stocks.getDetail(resolved.symbol())));
-                    updated++;
-                } catch (RuntimeException unavailable) {
-                    refreshed.add(WatchlistQuoteRow.unavailable(resolved));
-                    failed++;
-                }
-            }
-            quoteRows.setAll(refreshed);
-            return new RefreshResult(updated, failed);
-        } finally {
-            refreshing = false;
-        }
+    public CompletionStage<RefreshResult> refresh() {
+        long requestId = refreshSequence.incrementAndGet();
+        List<WatchlistItem> snapshot = List.copyOf(items());
+        List<CompletableFuture<ResolvedQuote>> requests = snapshot.stream()
+                .map(this::resolveQuote)
+                .map(CompletionStage::toCompletableFuture)
+                .toList();
+        CompletableFuture<RefreshResult> result = new CompletableFuture<>();
+
+        CompletableFuture.allOf(requests.toArray(CompletableFuture[]::new))
+                .whenComplete((ignored, failure) -> executeStateChange(result, () -> {
+                    if (requestId != refreshSequence.get()) {
+                        result.complete(new RefreshResult(quoteRows.size(), 0, false));
+                        return;
+                    }
+                    List<WatchlistQuoteRow> refreshed = new ArrayList<>();
+                    int updated = 0;
+                    int failed = 0;
+                    applyingRefresh = true;
+                    try {
+                        for (CompletableFuture<ResolvedQuote> request : requests) {
+                            ResolvedQuote quote = request.join();
+                            WatchlistItem resolved = quote.resolved();
+                            int currentIndex = items().indexOf(quote.original());
+                            if (currentIndex >= 0 && !resolved.equals(quote.original())) {
+                                items().set(currentIndex, resolved);
+                            }
+                            if (quote.detail() != null) {
+                                refreshed.add(WatchlistQuoteRow.available(resolved, quote.detail()));
+                                updated++;
+                            } else {
+                                refreshed.add(WatchlistQuoteRow.unavailable(resolved));
+                                failed++;
+                            }
+                        }
+                        quoteRows.setAll(refreshed);
+                    } finally {
+                        applyingRefresh = false;
+                    }
+                    result.complete(new RefreshResult(updated, failed, true));
+                }));
+        return result;
     }
 
-    private WatchlistItem repairLegacyIdentity(WatchlistItem item) {
-        if (!item.needsIdentityRepair()) return item;
-        try {
-            SecuritySummary match = stocks.search(item.securityName(), 20).stream()
-                    .filter(summary -> summary.name().equalsIgnoreCase(item.securityName())
-                            || summary.symbol().equalsIgnoreCase(item.symbol()))
-                    .findFirst().orElse(null);
-            return match == null ? item : WatchlistItem.from(item.group(), match, item.alertText());
-        } catch (RuntimeException unavailable) {
-            return item;
-        }
+    private CompletionStage<ResolvedQuote> resolveQuote(WatchlistItem item) {
+        CompletionStage<WatchlistItem> identity = item.needsIdentityRepair()
+                ? market.search(item.securityName(), 20).thenApply(summaries -> repairIdentity(item, summaries))
+                : CompletableFuture.completedFuture(item);
+        return identity.thenCompose(resolved -> {
+            if (resolved.needsIdentityRepair()) {
+                return CompletableFuture.completedFuture(new ResolvedQuote(item, resolved, null));
+            }
+            return market.loadDetail(resolved.securityId())
+                    .handle((detail, failure) -> new ResolvedQuote(
+                            item, resolved, failure == null ? detail : null));
+        }).exceptionally(failure -> new ResolvedQuote(item, item, null));
+    }
+
+    private WatchlistItem repairIdentity(WatchlistItem item, List<SecuritySummary> summaries) {
+        SecuritySummary match = summaries.stream()
+                .filter(summary -> summary.name().equalsIgnoreCase(item.securityName())
+                        || summary.symbol().equalsIgnoreCase(item.symbol()))
+                .findFirst().orElse(null);
+        return match == null ? item : WatchlistItem.from(item.group(), match, item.alertText());
     }
 
     public void save(WatchlistItem existing, WatchlistItem replacement) {
@@ -109,8 +151,14 @@ public final class WatchlistViewModel {
         int current = items().indexOf(selected);
         int target = current + direction;
         if (current < 0 || target < 0 || target >= items().size()) return false;
-        items().remove(current);
-        items().add(target, selected);
+        applyingRefresh = true;
+        try {
+            items().remove(current);
+            items().add(target, selected);
+        } finally {
+            applyingRefresh = false;
+        }
+        refresh();
         return true;
     }
 
@@ -133,11 +181,17 @@ public final class WatchlistViewModel {
         if (selected == null || normalized.isBlank() || groups().contains(normalized)) return false;
         int index = groups().indexOf(selected);
         if (index < 0 || DesktopSession.ALL_GROUP.equals(selected)) return false;
-        groups().set(index, normalized);
-        for (int itemIndex = 0; itemIndex < items().size(); itemIndex++) {
-            WatchlistItem item = items().get(itemIndex);
-            if (item.group().equals(selected)) items().set(itemIndex, item.withGroup(normalized));
+        applyingRefresh = true;
+        try {
+            groups().set(index, normalized);
+            for (int itemIndex = 0; itemIndex < items().size(); itemIndex++) {
+                WatchlistItem item = items().get(itemIndex);
+                if (item.group().equals(selected)) items().set(itemIndex, item.withGroup(normalized));
+            }
+        } finally {
+            applyingRefresh = false;
         }
+        refresh();
         return true;
     }
 
@@ -148,5 +202,19 @@ public final class WatchlistViewModel {
         if (items().stream().anyMatch(item -> item.group().equals(selected))) return GroupDeleteResult.IN_USE;
         groups().remove(selected);
         return GroupDeleteResult.DELETED;
+    }
+
+    private void executeStateChange(CompletableFuture<?> result, Runnable change) {
+        try {
+            stateExecutor.execute(() -> {
+                try {
+                    change.run();
+                } catch (RuntimeException failure) {
+                    result.completeExceptionally(failure);
+                }
+            });
+        } catch (RuntimeException failure) {
+            result.completeExceptionally(failure);
+        }
     }
 }

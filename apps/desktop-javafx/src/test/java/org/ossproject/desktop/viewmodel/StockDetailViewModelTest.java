@@ -1,12 +1,15 @@
 package org.ossproject.desktop.viewmodel;
 
 import org.junit.jupiter.api.Test;
+import org.ossproject.application.usecase.MarketApplicationService;
 import org.ossproject.fake.FakeCandleQueryAdapter;
+import org.ossproject.fake.FakeMarketDataStreamAdapter;
 import org.ossproject.fake.FakeStockQueryAdapter;
 import org.ossproject.finance.model.PricePoint;
 import org.ossproject.finance.model.StockDetail;
 
 import java.util.List;
+import java.util.concurrent.CompletionException;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -15,7 +18,15 @@ class StockDetailViewModelTest {
     private StockDetailViewModel viewModel(StockSelection selection) {
         DesktopSession session = new DesktopSession();
         session.selectStock(selection);
-        return new StockDetailViewModel(session, new FakeStockQueryAdapter(), new FakeCandleQueryAdapter());
+        return new StockDetailViewModel(session,
+                new MarketApplicationService(new FakeStockQueryAdapter(), new FakeCandleQueryAdapter(),
+                        new FakeMarketDataStreamAdapter(), Runnable::run), Runnable::run);
+    }
+
+    private StockDetailViewModel loadedViewModel(StockSelection selection) {
+        StockDetailViewModel viewModel = viewModel(selection);
+        viewModel.loadInitial().toCompletableFuture().join();
+        return viewModel;
     }
 
     private static StockSelection apple() {
@@ -23,7 +34,7 @@ class StockDetailViewModelTest {
     }
 
     @Test void selectedOverseasStockUsesItsOwnCurrencyAndPrice() {
-        StockDetailViewModel viewModel = viewModel(apple());
+        StockDetailViewModel viewModel = loadedViewModel(apple());
 
         assertEquals("AAPL", viewModel.detail().symbol());
         assertEquals("Apple", viewModel.detail().name());
@@ -31,7 +42,7 @@ class StockDetailViewModelTest {
     }
 
     @Test void reportsExactlyWhatTheQueryPortReturns() {
-        StockDetailViewModel viewModel = viewModel(apple());
+        StockDetailViewModel viewModel = loadedViewModel(apple());
         StockDetail reported = new FakeStockQueryAdapter().getDetail("AAPL");
         StockDetail shown = viewModel.detail();
 
@@ -45,7 +56,7 @@ class StockDetailViewModelTest {
     }
 
     @Test void chartClosesAtTheQuotedPriceWithoutRescaling() {
-        StockDetailViewModel viewModel = viewModel(apple());
+        StockDetailViewModel viewModel = loadedViewModel(apple());
 
         List<PricePoint> history = viewModel.history(StockDetailViewModel.ChartRange.DAY);
 
@@ -54,7 +65,7 @@ class StockDetailViewModelTest {
     }
 
     @Test void chartUsesTheCandlesAsReturnedByThePort() {
-        StockDetailViewModel viewModel = viewModel(apple());
+        StockDetailViewModel viewModel = loadedViewModel(apple());
         List<PricePoint> shown = viewModel.history(StockDetailViewModel.ChartRange.DAY);
         List<PricePoint> reported = new FakeCandleQueryAdapter()
                 .getCandles("AAPL", StockDetailViewModel.ChartRange.DAY.interval(),
@@ -71,7 +82,7 @@ class StockDetailViewModelTest {
     }
 
     @Test void koreanStockFormatsInWon() {
-        StockDetailViewModel viewModel = viewModel(StockSelection.samsungElectronics());
+        StockDetailViewModel viewModel = loadedViewModel(StockSelection.samsungElectronics());
 
         assertEquals("73,500원", viewModel.formatPrice(viewModel.detail().currentPrice()));
         assertEquals("73500", viewModel.plainOrderPrice());
@@ -81,6 +92,8 @@ class StockDetailViewModelTest {
         StockDetailViewModel viewModel = viewModel(
                 new StockSelection("국내", "999999", "없는종목", "KRX", "KRW"));
 
-        assertThrows(IllegalArgumentException.class, viewModel::detail);
+        assertThrows(CompletionException.class,
+                () -> viewModel.loadInitial().toCompletableFuture().join());
+        assertFalse(viewModel.hasCurrentDetail());
     }
 }
