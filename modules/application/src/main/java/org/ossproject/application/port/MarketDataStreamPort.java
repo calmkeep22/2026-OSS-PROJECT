@@ -40,6 +40,25 @@ public interface MarketDataStreamPort extends AutoCloseable {
 
     void removeQuoteListener(QuoteListener listener);
 
+    /**
+     * 이 스트림이 실시간 호가창을 전달할 수 있는지 여부.
+     *
+     * <p>모든 구현이 호가를 주는 것은 아니므로, 화면 계층은 호가창을 열기 전에 확인한다.
+     * 지원하지 않는데 조용히 빈 화면을 보여 주면 사용자는 원인을 알 수 없다.
+     */
+    default boolean supportsOrderBook() {
+        return false;
+    }
+
+    /** 실시간 호가창을 받는다. {@link #supportsOrderBook()} 이 거짓이면 아무 일도 하지 않는다. */
+    default void addOrderBookListener(OrderBookListener listener) {
+        // 호가를 지원하지 않는 구현을 위한 기본 동작.
+    }
+
+    default void removeOrderBookListener(OrderBookListener listener) {
+        // 위와 같다.
+    }
+
     void addConnectionListener(ConnectionListener listener);
 
     void removeConnectionListener(ConnectionListener listener);

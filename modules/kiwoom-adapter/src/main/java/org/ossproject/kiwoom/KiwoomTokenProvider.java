@@ -10,6 +10,9 @@ import org.ossproject.kiwoom.http.HttpTransport;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 
 /**
  * 액세스 토큰 발급과 캐싱.
@@ -22,6 +25,12 @@ import java.time.Duration;
  * {@link #buildRequestBody()} 만 고치면 된다.
  */
 public final class KiwoomTokenProvider {
+
+    /** 만료 정보를 해석하지 못했을 때 쓰는 보수적인 수명. */
+    private static final Duration DEFAULT_LIFETIME = Duration.ofMinutes(10);
+    private static final ZoneId MARKET_ZONE = ZoneId.of("Asia/Seoul");
+    private static final DateTimeFormatter EXPIRY_FORMAT =
+            DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
 
     private final HttpTransport transport;
     private final KiwoomJsonMapper jsonMapper;
@@ -100,21 +109,51 @@ public final class KiwoomTokenProvider {
         return node.asText();
     }
 
+    /**
+     * 만료 정보를 초 단위로 바꾼다.
+     *
+     * <p>키움은 남은 초가 아니라 만료 시각을 {@code yyyyMMddHHmmss} 형식으로 준다.
+     * 다른 증권사나 옛 응답이 남은 초를 줄 수도 있어 둘 다 받아들인다. 값을 해석하지
+     * 못하면 짧게 잡아 다음 호출에서 다시 발급받게 한다. 만료를 놓쳐 주문이 실패하는
+     * 것보다 한 번 더 발급받는 편이 낫다.
+     */
     private long readExpiresIn(JsonNode root) {
         String name = properties.fields().nameOf(KiwoomField.TOKEN_EXPIRES_IN);
         JsonNode node = root.get(name);
         if (node == null || node.isNull()) {
-            // 만료 시간을 알려 주지 않으면 보수적으로 짧게 잡는다.
-            return Duration.ofMinutes(10).toSeconds();
+            return DEFAULT_LIFETIME.toSeconds();
         }
-        long seconds = node.asLong();
-        return seconds > 0 ? seconds : Duration.ofMinutes(10).toSeconds();
+        String raw = node.asText();
+        if (raw == null || raw.isBlank()) {
+            return DEFAULT_LIFETIME.toSeconds();
+        }
+        raw = raw.trim();
+
+        // yyyyMMddHHmmss 형식의 만료 시각
+        if (raw.length() == 14 && raw.chars().allMatch(Character::isDigit)) {
+            try {
+                LocalDateTime expiry = LocalDateTime.parse(raw, EXPIRY_FORMAT);
+                long seconds = Duration.between(clock.instant(), expiry.atZone(MARKET_ZONE).toInstant())
+                        .toSeconds();
+                return seconds > 0 ? seconds : DEFAULT_LIFETIME.toSeconds();
+            } catch (RuntimeException ignored) {
+                return DEFAULT_LIFETIME.toSeconds();
+            }
+        }
+
+        try {
+            long seconds = Long.parseLong(raw);
+            return seconds > 0 ? seconds : DEFAULT_LIFETIME.toSeconds();
+        } catch (NumberFormatException e) {
+            return DEFAULT_LIFETIME.toSeconds();
+        }
     }
 
     /** 자격 증명 문자열은 이 메서드 밖으로 나가지 않는다. */
     private String buildRequestBody() {
+        // 키움은 시크릿 필드를 appsecret 이 아니라 secretkey 로 받는다.
         return "{\"grant_type\":\"client_credentials\",\"appkey\":\""
-                + escape(credentials.appKey()) + "\",\"appsecret\":\""
+                + escape(credentials.appKey()) + "\",\"secretkey\":\""
                 + escape(credentials.appSecret()) + "\"}";
     }
 

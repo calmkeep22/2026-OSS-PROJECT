@@ -24,6 +24,58 @@ public final class KiwoomFieldMap {
     }
 
     /**
+     * 실제 키움 응답 필드명.
+     *
+     * <p>토큰 응답은 OAuth2 관례와 달리 {@code access_token} 이 아니라 {@code token} 이고,
+     * 만료도 {@code expires_in}(남은 초) 이 아니라 {@code expires_dt}(만료 시각) 이다.
+     * 이 차이를 놓치면 토큰이 매번 재발급되거나 만료를 놓친다.
+     *
+     * <p>호가 필드는 {@link KiwoomOrderBookParser} 가 규칙으로 직접 다루므로 여기 없다.
+     */
+    public static KiwoomFieldMap kiwoom() {
+        return builder()
+                .map(KiwoomField.TOKEN_VALUE, "token")
+                .map(KiwoomField.TOKEN_EXPIRES_IN, "expires_dt")
+
+                .map(KiwoomField.QUOTE_SYMBOL, "stk_cd")
+                .map(KiwoomField.QUOTE_PRICE, "cur_prc")
+                .map(KiwoomField.QUOTE_PREVIOUS_CLOSE, "base_pric")
+                .map(KiwoomField.QUOTE_BID_PRICE, "buy_fpr_bid")
+                .map(KiwoomField.QUOTE_ASK_PRICE, "sel_fpr_bid")
+                .map(KiwoomField.QUOTE_VOLUME, "trde_qty")
+
+                .map(KiwoomField.CANDLE_LIST, "stk_dt_pole_chart_qry")
+                .map(KiwoomField.CANDLE_DATE, "dt")
+                .map(KiwoomField.CANDLE_TIME, "cntr_tm")
+                .map(KiwoomField.CANDLE_OPEN, "open_pric")
+                .map(KiwoomField.CANDLE_HIGH, "high_pric")
+                .map(KiwoomField.CANDLE_LOW, "low_pric")
+                .map(KiwoomField.CANDLE_CLOSE, "cur_prc")
+                .map(KiwoomField.CANDLE_VOLUME, "trde_qty")
+
+                .map(KiwoomField.ACCOUNT_CASH, "entr")
+                .map(KiwoomField.ACCOUNT_POSITIONS, "acnt_evlt_remn_indv_tot")
+                .map(KiwoomField.POSITION_SYMBOL, "stk_cd")
+                .map(KiwoomField.POSITION_NAME, "stk_nm")
+                .map(KiwoomField.POSITION_QUANTITY, "rmnd_qty")
+                .map(KiwoomField.POSITION_AVERAGE_PRICE, "pur_pric")
+                .map(KiwoomField.POSITION_CURRENT_PRICE, "cur_prc")
+
+                .map(KiwoomField.ORDER_LIST, "oso")
+                .map(KiwoomField.ORDER_ID, "ord_no")
+                .map(KiwoomField.ORDER_SYMBOL, "stk_cd")
+                .map(KiwoomField.ORDER_NAME, "stk_nm")
+                .map(KiwoomField.ORDER_SIDE, "trde_tp")
+                .map(KiwoomField.ORDER_TYPE, "io_tp_nm")
+                .map(KiwoomField.ORDER_QUANTITY, "ord_qty")
+                .map(KiwoomField.ORDER_FILLED_QUANTITY, "cntr_qty")
+                .map(KiwoomField.ORDER_PRICE, "ord_pric")
+                .map(KiwoomField.ORDER_AVERAGE_FILLED_PRICE, "cntr_pric")
+                .map(KiwoomField.ORDER_STATUS, "ord_stt")
+                .build();
+    }
+
+    /**
      * 자리표시자 대응표. 실제 스펙으로 교체하기 전까지는 테스트와 개발에만 쓴다.
      */
     public static KiwoomFieldMap placeholder() {

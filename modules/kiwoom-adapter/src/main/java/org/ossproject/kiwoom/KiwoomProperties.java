@@ -88,6 +88,42 @@ public record KiwoomProperties(
     }
 
     /** 경로의 치환자를 채워 완전한 주소를 만든다. */
+    /**
+     * 실제 키움 서버 설정. 자리표시자가 아니라 검증된 주소·경로·필드명을 쓴다.
+     *
+     * <p>주소는 키움 공식 저장소의 {@code .env.example}, 경로와 {@code api-id} 는 공식
+     * 예제 헤더, 필드명은 공식 예제의 응답 매핑에서 확인한 값이다.
+     */
+    public static KiwoomProperties forEnvironment(KiwoomEnvironment environment) {
+        if (environment == null) {
+            throw new IllegalArgumentException("접속 환경은 필수입니다.");
+        }
+        Map<String, OrderStatus> statusCodes = new LinkedHashMap<>();
+        statusCodes.put("접수", OrderStatus.ACCEPTED);
+        statusCodes.put("확인", OrderStatus.ACCEPTED);
+        statusCodes.put("체결", OrderStatus.FILLED);
+        statusCodes.put("부분체결", OrderStatus.PARTIALLY_FILLED);
+        statusCodes.put("취소", OrderStatus.CANCELLED);
+        statusCodes.put("거부", OrderStatus.REJECTED);
+
+        return new KiwoomProperties(
+                environment.restBaseUrl(),
+                environment.webSocketUrl(),
+                KiwoomEndpoints.kiwoom(),
+                KiwoomFieldMap.kiwoom(),
+                statusCodes,
+                Map.of(OrderSide.BUY, "2", OrderSide.SELL, "1"),
+                Map.of(OrderType.LIMIT, "0", OrderType.MARKET, "3"),
+                Duration.ofSeconds(10),
+                environment.isPaperTrading());
+    }
+
+    /** WebSocket 주소만 바꾼 사본. 접속 경로를 덧붙일 때 쓴다. */
+    public KiwoomProperties withWebSocketUrl(URI newWebSocketUrl) {
+        return new KiwoomProperties(restBaseUrl, newWebSocketUrl, endpoints, fields,
+                orderStatusCodes, orderSideCodes, orderTypeCodes, requestTimeout, paperTrading);
+    }
+
     public URI resolve(String path, Map<String, String> pathVariables) {
         String resolved = path;
         if (pathVariables != null) {

@@ -4,14 +4,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.ossproject.application.port.ConnectionState;
 import org.ossproject.application.contract.MarketDataStreamPortContract;
+import org.ossproject.application.port.ConnectionState;
 import org.ossproject.application.port.MarketDataStreamPort;
 import org.ossproject.broker.BrokerTransientException;
 import org.ossproject.broker.resilience.RetryPolicy;
+import org.ossproject.finance.model.OrderBook;
 import org.ossproject.finance.model.Quote;
-import org.ossproject.kiwoom.KiwoomJsonMapper;
-import org.ossproject.kiwoom.KiwoomProperties;
 
 import java.math.BigDecimal;
 import java.net.URI;
@@ -31,8 +30,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class KiwoomMarketDataStreamTest extends MarketDataStreamPortContract {
 
     private static final Clock CLOCK =
-            Clock.fixed(Instant.parse("2026-08-08T01:00:00Z"), ZoneId.of("Asia/Seoul"));
-    private static final URI WS_URI = URI.create("wss://api.example.test/ws");
+            Clock.fixed(Instant.parse("2026-08-19T01:00:00Z"), ZoneId.of("Asia/Seoul"));
+    private static final URI WS_URI = URI.create("wss://mockapi.kiwoom.com:10000/api/dostk/websocket");
+
+    /** 실제 서버가 LOGIN 패킷을 받은 뒤 돌려주는 성공 응답. */
+    private static final String LOGIN_OK =
+            "{\"trnm\":\"LOGIN\",\"return_code\":0,\"return_msg\":\"정상\"}";
 
     /** 보낸 메시지를 기록하는 가짜 세션. */
     private static final class FakeSession implements WebSocketSession {
@@ -107,23 +110,23 @@ class KiwoomMarketDataStreamTest extends MarketDataStreamPortContract {
     private ImmediateScheduler scheduler;
     private KiwoomMarketDataStream stream;
     private List<Quote> quotes;
+    private List<OrderBook> books;
     private List<ConnectionState> states;
 
     @BeforeEach
     void setUp() {
-        KiwoomProperties properties = KiwoomProperties.placeholder(
-                URI.create("https://api.example.test"), WS_URI);
-        StreamProtocol protocol = new JsonStreamProtocol(
-                new KiwoomJsonMapper(new ObjectMapper(), properties, CLOCK), properties);
-
         connector = new FakeConnector();
         scheduler = new ImmediateScheduler();
-        stream = new KiwoomMarketDataStream(WS_URI, connector, protocol, scheduler,
-                new RetryPolicy(5, Duration.ofMillis(100), Duration.ofSeconds(2), 2.0, 0.0));
+        stream = new KiwoomMarketDataStream(WS_URI, connector,
+                new KiwoomWebSocketProtocol(new ObjectMapper(), CLOCK), scheduler,
+                new RetryPolicy(5, Duration.ofMillis(100), Duration.ofSeconds(2), 2.0, 0.0),
+                () -> "test-token");
 
         quotes = new ArrayList<>();
+        books = new ArrayList<>();
         states = new ArrayList<>();
         stream.addQuoteListener(quotes::add);
+        stream.addOrderBookListener(books::add);
         stream.addConnectionListener((state, detail) -> states.add(state));
     }
 
@@ -132,90 +135,186 @@ class KiwoomMarketDataStreamTest extends MarketDataStreamPortContract {
         return stream;
     }
 
-    @Test
-    @DisplayName("연결하면 상태가 연결 중을 거쳐 연결됨으로 바뀐다")
-    void connects() {
+    /** 연결하고 로그인까지 마쳐 실제로 구독 가능한 상태로 만든다. */
+    private void connectAndLogin() {
         stream.connect();
+        connector.lastHandler.onMessage(LOGIN_OK);
+    }
+
+    @Test
+    @DisplayName("연결하면 먼저 로그인 패킷을 보낸다")
+    void sendsLoginOnConnect() {
+        stream.connect();
+
+        assertEquals(1, connector.lastSession().sent.size());
+        String login = connector.lastSession().sent.get(0);
+        assertTrue(login.contains("\"trnm\":\"LOGIN\""));
+        assertTrue(login.contains("test-token"));
+    }
+
+    @Test
+    @DisplayName("로그인 응답을 받기 전에는 연결됨으로 보지 않는다")
+    void staysConnectingUntilLoginSucceeds() {
+        stream.connect();
+
+        assertEquals(ConnectionState.CONNECTING, stream.connectionState());
+
+        connector.lastHandler.onMessage(LOGIN_OK);
 
         assertEquals(ConnectionState.CONNECTED, stream.connectionState());
         assertEquals(List.of(ConnectionState.CONNECTING, ConnectionState.CONNECTED), states);
     }
 
     @Test
-    @DisplayName("연결 전에 구독한 종목은 연결 후에 한꺼번에 전송된다")
-    void sendsPendingSubscriptionsOnConnect() {
-        stream.subscribe(List.of("005930", "000660"));
+    @DisplayName("로그인에 실패하면 재연결 흐름으로 넘어간다")
+    void reconnectsWhenLoginFails() {
         stream.connect();
 
-        assertEquals(Set.of("005930", "000660"), stream.subscriptions());
-        assertEquals(1, connector.lastSession().sent.size());
-        String message = connector.lastSession().sent.get(0);
-        assertTrue(message.contains("005930"));
-        assertTrue(message.contains("000660"));
+        connector.lastHandler.onMessage(
+                "{\"trnm\":\"LOGIN\",\"return_code\":3,\"return_msg\":\"토큰 오류\"}");
+
+        assertTrue(states.contains(ConnectionState.RECONNECTING));
+        assertTrue(connector.attempts >= 2);
     }
 
     @Test
-    @DisplayName("연결 중 추가 구독은 즉시 전송된다")
-    void sendsSubscriptionWhileConnected() {
-        stream.connect();
+    @DisplayName("연결 전에 구독한 종목은 로그인 성공 후 한꺼번에 등록된다")
+    void registersPendingSubscriptionsAfterLogin() {
+        stream.subscribe(List.of("005930", "000660"));
+
+        connectAndLogin();
+
+        assertEquals(Set.of("005930", "000660"), stream.subscriptions());
+        String reg = connector.lastSession().sent.get(1);
+        assertTrue(reg.contains("\"trnm\":\"REG\""));
+        assertTrue(reg.contains("005930"));
+        assertTrue(reg.contains("000660"));
+        assertTrue(reg.contains("\"0D\""));
+    }
+
+    @Test
+    @DisplayName("연결 중 추가 구독은 기존 등록을 유지한 채 보낸다")
+    void addsSubscriptionWhileConnected() {
+        connectAndLogin();
+
         stream.subscribe(List.of("005930"));
 
-        assertEquals(1, connector.lastSession().sent.size());
-        assertTrue(connector.lastSession().sent.get(0).contains("subscribe"));
+        String reg = connector.lastSession().sent.get(1);
+        assertTrue(reg.contains("\"trnm\":\"REG\""));
+        assertTrue(reg.contains("\"refresh\":\"1\""));
     }
 
     @Test
     @DisplayName("이미 구독 중인 종목은 다시 보내지 않는다")
     void skipsDuplicateSubscription() {
-        stream.connect();
+        connectAndLogin();
+
         stream.subscribe(List.of("005930"));
         stream.subscribe(List.of("005930"));
 
-        assertEquals(1, connector.lastSession().sent.size());
+        // 로그인 패킷 + 등록 패킷 하나
+        assertEquals(2, connector.lastSession().sent.size());
     }
 
     @Test
-    @DisplayName("시세 메시지를 리스너에 전달한다")
-    void deliversQuotes() {
-        stream.connect();
+    @DisplayName("PING 을 받으면 같은 패킷을 되돌려보낸다")
+    void echoesPing() {
+        connectAndLogin();
+        int before = connector.lastSession().sent.size();
 
-        connector.lastHandler.onMessage(
-                "{\"symbol\":\"005930\",\"price\":\"73500\",\"volume\":\"18450230\"}");
+        connector.lastHandler.onMessage("{\"trnm\":\"PING\",\"seq\":\"7\"}");
+
+        List<String> sent = connector.lastSession().sent;
+        assertEquals(before + 1, sent.size());
+        assertEquals("{\"trnm\":\"PING\",\"seq\":\"7\"}", sent.get(sent.size() - 1));
+    }
+
+    @Test
+    @DisplayName("실시간 호가창을 리스너에 전달한다")
+    void deliversOrderBook() {
+        connectAndLogin();
+
+        connector.lastHandler.onMessage("""
+                {"trnm":"REAL","data":[{"type":"0D","item":"005930",
+                 "values":{"41":"-73500","61":"180","51":"73400","71":"310"}}]}""");
+
+        assertEquals(1, books.size());
+        assertEquals("005930", books.get(0).symbol());
+        assertEquals(0, new BigDecimal("73500").compareTo(books.get(0).bestAsk().orElseThrow()));
+    }
+
+    @Test
+    @DisplayName("실시간 체결을 현재가로 전달한다")
+    void deliversQuote() {
+        connectAndLogin();
+
+        connector.lastHandler.onMessage("""
+                {"trnm":"REAL","data":[{"type":"0B","item":"005930",
+                 "values":{"10":"-73500","13":"18450230","27":"73600","28":"73400"}}]}""");
 
         assertEquals(1, quotes.size());
-        assertEquals("005930", quotes.get(0).symbol());
         assertEquals(0, new BigDecimal("73500").compareTo(quotes.get(0).price()));
+        assertEquals(18_450_230L, quotes.get(0).cumulativeVolume());
     }
 
     @Test
-    @DisplayName("시세가 아닌 메시지는 무시하고 연결을 유지한다")
-    void ignoresNonQuoteMessages() {
-        stream.connect();
+    @DisplayName("호가 지원 여부를 알린다")
+    void reportsOrderBookSupport() {
+        assertTrue(stream.supportsOrderBook());
+    }
 
-        connector.lastHandler.onMessage("{\"type\":\"subscribed\",\"result\":\"ok\"}");
-        connector.lastHandler.onMessage("pong");
+    @Test
+    @DisplayName("알 수 없는 메시지는 무시하고 연결을 유지한다")
+    void ignoresUnknownMessages() {
+        connectAndLogin();
+
+        connector.lastHandler.onMessage("{\"trnm\":\"REG\",\"return_code\":0}");
         connector.lastHandler.onMessage("깨진 JSON {{{");
 
+        assertTrue(books.isEmpty());
         assertTrue(quotes.isEmpty());
         assertEquals(ConnectionState.CONNECTED, stream.connectionState());
     }
 
     @Test
-    @DisplayName("연결이 끊기면 재연결하고 구독을 복원한다")
+    @DisplayName("연결이 끊기면 재연결하고 구독을 대체 등록으로 복원한다")
     void reconnectsAndRestoresSubscriptions() {
         stream.subscribe(List.of("005930", "000660"));
-        stream.connect();
+        connectAndLogin();
         assertEquals(1, connector.attempts);
 
         connector.lastHandler.onClose(1006, "abnormal closure");
+        connector.lastHandler.onMessage(LOGIN_OK);
 
         assertEquals(2, connector.attempts);
         assertEquals(ConnectionState.CONNECTED, stream.connectionState());
-        // 새 세션이 구독을 다시 보냈다.
-        String restored = connector.lastSession().sent.get(0);
-        assertTrue(restored.contains("005930"));
-        assertTrue(restored.contains("000660"));
+
+        String reg = connector.lastSession().sent.get(1);
+        assertTrue(reg.contains("005930"));
+        assertTrue(reg.contains("000660"));
+        // 서버 쪽 등록이 사라졌으므로 유지가 아니라 대체로 보내야 한다.
+        assertTrue(reg.contains("\"refresh\":\"0\""));
         assertTrue(states.contains(ConnectionState.RECONNECTING));
+    }
+
+    @Test
+    @DisplayName("재연결마다 토큰을 다시 받아 만료된 토큰을 쓰지 않는다")
+    void refreshesTokenOnReconnect() {
+        List<String> issued = new ArrayList<>();
+        KiwoomMarketDataStream refreshing = new KiwoomMarketDataStream(WS_URI, connector,
+                new KiwoomWebSocketProtocol(new ObjectMapper(), CLOCK), scheduler,
+                new RetryPolicy(5, Duration.ofMillis(100), Duration.ofSeconds(2), 2.0, 0.0),
+                () -> {
+                    String token = "token-" + (issued.size() + 1);
+                    issued.add(token);
+                    return token;
+                });
+
+        refreshing.connect();
+        connector.lastHandler.onClose(1006, "abnormal closure");
+
+        assertEquals(2, issued.size());
+        assertTrue(connector.lastSession().sent.get(0).contains("token-2"));
     }
 
     @Test
@@ -226,7 +325,6 @@ class KiwoomMarketDataStreamTest extends MarketDataStreamPortContract {
 
         assertEquals(List.of(Duration.ofMillis(100), Duration.ofMillis(200), Duration.ofMillis(400)),
                 scheduler.delays);
-        assertEquals(ConnectionState.CONNECTED, stream.connectionState());
     }
 
     @Test
@@ -243,19 +341,18 @@ class KiwoomMarketDataStreamTest extends MarketDataStreamPortContract {
     @Test
     @DisplayName("전송에 실패하면 재연결 흐름으로 넘어간다")
     void reconnectsWhenSendFails() {
-        stream.connect();
+        connectAndLogin();
         connector.lastSession().sendFails = true;
 
         stream.subscribe(List.of("005930"));
 
         assertEquals(2, connector.attempts);
-        assertEquals(ConnectionState.CONNECTED, stream.connectionState());
     }
 
     @Test
     @DisplayName("사용자가 닫으면 재연결하지 않는다")
     void doesNotReconnectAfterClose() {
-        stream.connect();
+        connectAndLogin();
         stream.close();
 
         int attemptsAfterClose = connector.attempts;
@@ -267,30 +364,32 @@ class KiwoomMarketDataStreamTest extends MarketDataStreamPortContract {
     }
 
     @Test
-    @DisplayName("구독을 해제하면 목록에서 빠지고 해제 메시지를 보낸다")
+    @DisplayName("구독을 해제하면 목록에서 빠지고 해제 패킷을 보낸다")
     void unsubscribes() {
-        stream.connect();
+        connectAndLogin();
         stream.subscribe(List.of("005930", "000660"));
         stream.unsubscribe(List.of("005930"));
 
         assertEquals(Set.of("000660"), stream.subscriptions());
         List<String> sent = connector.lastSession().sent;
-        assertTrue(sent.get(sent.size() - 1).contains("unsubscribe"));
+        assertTrue(sent.get(sent.size() - 1).contains("\"trnm\":\"REMOVE\""));
     }
 
     @Test
     @DisplayName("리스너가 예외를 던져도 다른 리스너는 계속 받는다")
     void isolatesFailingListener() {
-        List<Quote> received = new ArrayList<>();
-        stream.addQuoteListener(quote -> {
+        List<OrderBook> received = new ArrayList<>();
+        stream.addOrderBookListener(book -> {
             throw new IllegalStateException("화면 갱신 실패");
         });
-        stream.addQuoteListener(received::add);
-        stream.connect();
+        stream.addOrderBookListener(received::add);
+        connectAndLogin();
 
-        connector.lastHandler.onMessage("{\"symbol\":\"005930\",\"price\":\"73500\"}");
+        connector.lastHandler.onMessage("""
+                {"trnm":"REAL","data":[{"type":"0D","item":"005930",
+                 "values":{"41":"73500","61":"180","51":"73400","71":"310"}}]}""");
 
         assertEquals(1, received.size());
-        assertFalse(quotes.isEmpty());
+        assertFalse(books.isEmpty());
     }
 }

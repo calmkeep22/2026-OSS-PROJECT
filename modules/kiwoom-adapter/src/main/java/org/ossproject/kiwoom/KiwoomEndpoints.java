@@ -33,6 +33,23 @@ public record KiwoomEndpoints(
         requirePath(orderListPath, "주문 내역 조회");
     }
 
+    /**
+     * 실제 키움 경로.
+     *
+     * <p>키움은 기능을 URL 이 아니라 {@code api-id} 헤더로 구분하므로 여러 기능이 같은
+     * 경로를 공유한다. 기능별 {@code api-id} 는 {@link KiwoomApi} 에 있다.
+     */
+    public static KiwoomEndpoints kiwoom() {
+        return new KiwoomEndpoints(
+                KiwoomApi.TOKEN.path(),
+                KiwoomApi.ORDER_BOOK.path(),
+                KiwoomApi.DAILY_CHART.path(),
+                KiwoomApi.BALANCE.path(),
+                KiwoomApi.BUY_ORDER.path(),
+                KiwoomApi.CANCEL_ORDER.path(),
+                KiwoomApi.UNFILLED_ORDERS.path());
+    }
+
     /** 자리표시자. 실제 스펙으로 교체해야 한다. */
     public static KiwoomEndpoints placeholder() {
         return new KiwoomEndpoints(

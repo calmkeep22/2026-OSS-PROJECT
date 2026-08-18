@@ -173,13 +173,49 @@ public final class KiwoomRestClient implements BrokerClient {
     }
 
     private HttpTextResponse send(HttpTextRequest.Builder builder) {
-        HttpTextRequest request = builder
-                .header("Authorization", tokenProvider.token().asBearerHeader())
-                .header("appkey", credentials.appKey())
+        return send(builder, null);
+    }
+
+    /**
+     * 요청을 보낸다.
+     *
+     * <p>키움은 기능을 URL 이 아니라 {@code api-id} 헤더로 구분한다. 이 헤더가 빠지면
+     * 경로가 맞아도 서버가 어떤 기능인지 알 수 없어 실패한다.
+     */
+    private HttpTextResponse send(HttpTextRequest.Builder builder, KiwoomApi api) {
+        builder.header("authorization", tokenProvider.token().asBearerHeader())
                 .header("Accept", "application/json")
-                .timeout(properties.requestTimeout())
-                .build();
-        return transport.send(request);
+                .timeout(properties.requestTimeout());
+        if (api != null && api.hasApiId()) {
+            builder.header("api-id", api.apiId());
+        }
+        return transport.send(builder.build());
+    }
+
+    /**
+     * 호가창을 조회한다.
+     *
+     * <p>화면을 처음 열 때 한 장을 받는 용도다. 이후 갱신은 실시간 스트림에 맡긴다.
+     * 호가를 반복 조회하면 호출 한도를 금방 소진한다.
+     */
+    public org.ossproject.finance.model.OrderBook fetchOrderBook(String symbol) {
+        requireSymbol(symbol);
+        URI uri = properties.resolve(KiwoomApi.ORDER_BOOK.path());
+        String body = "{\"stk_cd\":\"" + escape(symbol) + "\"}";
+
+        return executor.call("호가 조회", () -> {
+            HttpTextResponse response =
+                    send(HttpTextRequest.post(uri).jsonBody(body), KiwoomApi.ORDER_BOOK);
+            if (response.statusCode() == 401) {
+                tokenProvider.invalidate();
+                response = send(HttpTextRequest.post(uri).jsonBody(body), KiwoomApi.ORDER_BOOK);
+            }
+            if (!response.isSuccess()) {
+                throw KiwoomErrorMapper.toException("호가 조회", response);
+            }
+            return KiwoomOrderBookParser.fromRest(symbol, jsonMapper.parse(response.body()),
+                    java.time.Instant.now());
+        });
     }
 
     private String buildOrderBody(String accountNo, OrderCommand command) {

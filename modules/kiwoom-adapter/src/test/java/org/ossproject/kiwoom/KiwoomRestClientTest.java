@@ -105,7 +105,7 @@ class KiwoomRestClientTest {
         assertEquals("005930", quote.symbol());
         assertEquals(0, new BigDecimal("73500").compareTo(quote.price()));
         assertEquals("Bearer tokenvalue123456",
-                transport.requests.get(1).headers().get("Authorization"));
+                transport.requests.get(1).headers().get("authorization"));
     }
 
     @Test
@@ -135,7 +135,7 @@ class KiwoomRestClientTest {
 
         assertEquals(0, new BigDecimal("73500").compareTo(quote.price()));
         assertEquals("Bearer newtoken98765432",
-                transport.requests.get(3).headers().get("Authorization"));
+                transport.requests.get(3).headers().get("authorization"));
     }
 
     @Test
