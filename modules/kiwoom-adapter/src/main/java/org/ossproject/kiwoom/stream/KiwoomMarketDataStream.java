@@ -2,12 +2,13 @@ package org.ossproject.kiwoom.stream;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.ossproject.application.port.ConnectionListener;
+import org.ossproject.application.port.OrderBookListener;
 import org.ossproject.application.port.ConnectionState;
 import org.ossproject.application.port.MarketDataStreamPort;
 import org.ossproject.application.port.QuoteListener;
 import org.ossproject.broker.resilience.RetryPolicy;
+import org.ossproject.finance.model.OrderBook;
 import org.ossproject.finance.model.Quote;
-import org.ossproject.kiwoom.KiwoomJsonMapper;
 import org.ossproject.kiwoom.KiwoomProperties;
 
 import java.net.URI;
@@ -19,6 +20,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Supplier;
 
 /**
  * 키움 실시간 시세 스트림.
@@ -32,13 +34,22 @@ import java.util.concurrent.CopyOnWriteArrayList;
  */
 public final class KiwoomMarketDataStream implements MarketDataStreamPort {
 
+    /** 종목을 구독할 때 함께 등록하는 실시간 종류. 지금은 호가잔량만 쓴다. */
+    private static final List<KiwoomRealtimeType> SUBSCRIBED_TYPES =
+            List.of(KiwoomRealtimeType.TRADE, KiwoomRealtimeType.ORDER_BOOK);
+
+
     private final URI uri;
     private final WebSocketConnector connector;
-    private final StreamProtocol protocol;
+    private final KiwoomWebSocketProtocol protocol;
     private final ReconnectScheduler scheduler;
     private final RetryPolicy reconnectPolicy;
 
+    /** 재연결 때마다 새 토큰을 받아야 하므로 값이 아니라 공급자를 들고 있는다. */
+    private final Supplier<String> accessTokenSupplier;
+
     private final List<QuoteListener> quoteListeners = new CopyOnWriteArrayList<>();
+    private final List<OrderBookListener> orderBookListeners = new CopyOnWriteArrayList<>();
     private final List<ConnectionListener> connectionListeners = new CopyOnWriteArrayList<>();
 
     private final Object lock = new Object();
@@ -49,19 +60,24 @@ public final class KiwoomMarketDataStream implements MarketDataStreamPort {
     private int reconnectAttempt;
     private boolean closedByUser;
 
-    /** Creates a production stream while keeping transport and protocol details internal. */
-    public KiwoomMarketDataStream(KiwoomProperties properties) {
+    /**
+     * 실제 접속용 스트림을 만든다.
+     *
+     * @param accessTokenSupplier 로그인 패킷에 넣을 접근 토큰 공급자.
+     *                            재연결할 때마다 다시 호출되므로 만료된 토큰이 재사용되지 않는다
+     */
+    public KiwoomMarketDataStream(KiwoomProperties properties, Supplier<String> accessTokenSupplier) {
         this(properties.webSocketUrl(),
                 new JdkWebSocketConnector(),
-                new JsonStreamProtocol(
-                        new KiwoomJsonMapper(new ObjectMapper(), Clock.systemDefaultZone()),
-                        properties),
+                new KiwoomWebSocketProtocol(new ObjectMapper(), Clock.systemDefaultZone()),
                 ReconnectScheduler.daemon(),
-                RetryPolicy.defaults());
+                RetryPolicy.defaults(),
+                accessTokenSupplier);
     }
 
-    KiwoomMarketDataStream(URI uri, WebSocketConnector connector, StreamProtocol protocol,
-                           ReconnectScheduler scheduler, RetryPolicy reconnectPolicy) {
+    KiwoomMarketDataStream(URI uri, WebSocketConnector connector, KiwoomWebSocketProtocol protocol,
+                           ReconnectScheduler scheduler, RetryPolicy reconnectPolicy,
+                           Supplier<String> accessTokenSupplier) {
         if (uri == null) {
             throw new IllegalArgumentException("스트림 주소는 필수입니다.");
         }
@@ -80,8 +96,12 @@ public final class KiwoomMarketDataStream implements MarketDataStreamPort {
         this.uri = uri;
         this.connector = connector;
         this.protocol = protocol;
+        if (accessTokenSupplier == null) {
+            throw new IllegalArgumentException("접근 토큰 공급자는 필수입니다.");
+        }
         this.scheduler = scheduler;
         this.reconnectPolicy = reconnectPolicy;
+        this.accessTokenSupplier = accessTokenSupplier;
     }
 
     // ------------------------------------------------------------------
@@ -115,14 +135,34 @@ public final class KiwoomMarketDataStream implements MarketDataStreamPort {
             return;
         }
 
-        List<Runnable> events = new ArrayList<>();
-        Set<String> toResubscribe;
         synchronized (lock) {
             if (closedByUser) {
                 opened.close();
                 return;
             }
             session = opened;
+        }
+
+        // 연결만으로는 아무것도 받을 수 없다. 로그인에 성공해야 구독을 보낼 수 있으므로,
+        // CONNECTED 로 표시하는 것도 로그인 응답을 받은 뒤로 미룬다.
+        String token;
+        try {
+            token = accessTokenSupplier.get();
+        } catch (RuntimeException e) {
+            handleDisconnect("접근 토큰을 발급받지 못했습니다. " + e.getMessage());
+            return;
+        }
+        sendQuietly(protocol.loginMessage(token));
+    }
+
+    /** 로그인에 성공하면 연결됨으로 표시하고, 끊기기 전에 보던 종목을 다시 등록한다. */
+    private void onLoginSucceeded() {
+        List<Runnable> events = new ArrayList<>();
+        Set<String> toResubscribe;
+        synchronized (lock) {
+            if (closedByUser) {
+                return;
+            }
             reconnectAttempt = 0;
             changeState(ConnectionState.CONNECTED, null, events);
             toResubscribe = new LinkedHashSet<>(subscriptions);
@@ -130,7 +170,8 @@ public final class KiwoomMarketDataStream implements MarketDataStreamPort {
         runEvents(events);
 
         if (!toResubscribe.isEmpty()) {
-            sendQuietly(protocol.subscribeMessage(toResubscribe));
+            // 재연결이라면 서버 쪽 등록이 이미 사라졌으므로 대체 등록으로 보낸다.
+            sendQuietly(protocol.registerMessage(toResubscribe, SUBSCRIBED_TYPES, false));
         }
     }
 
@@ -183,7 +224,7 @@ public final class KiwoomMarketDataStream implements MarketDataStreamPort {
             connected = state == ConnectionState.CONNECTED && session != null;
         }
         if (connected && !added.isEmpty()) {
-            sendQuietly(protocol.subscribeMessage(added));
+            sendQuietly(protocol.registerMessage(added, SUBSCRIBED_TYPES, true));
         }
     }
 
@@ -203,7 +244,7 @@ public final class KiwoomMarketDataStream implements MarketDataStreamPort {
             connected = state == ConnectionState.CONNECTED && session != null;
         }
         if (connected && !removed.isEmpty()) {
-            sendQuietly(protocol.unsubscribeMessage(removed));
+            sendQuietly(protocol.removeMessage(removed, SUBSCRIBED_TYPES));
         }
     }
 
@@ -244,6 +285,23 @@ public final class KiwoomMarketDataStream implements MarketDataStreamPort {
     @Override
     public void removeQuoteListener(QuoteListener listener) {
         quoteListeners.remove(listener);
+    }
+
+    @Override
+    public boolean supportsOrderBook() {
+        return true;
+    }
+
+    @Override
+    public void addOrderBookListener(OrderBookListener listener) {
+        if (listener != null) {
+            orderBookListeners.add(listener);
+        }
+    }
+
+    @Override
+    public void removeOrderBookListener(OrderBookListener listener) {
+        orderBookListeners.remove(listener);
     }
 
     @Override
@@ -314,6 +372,16 @@ public final class KiwoomMarketDataStream implements MarketDataStreamPort {
         }
     }
 
+    private void notifyOrderBook(OrderBook orderBook) {
+        for (OrderBookListener listener : orderBookListeners) {
+            try {
+                listener.onOrderBook(orderBook);
+            } catch (RuntimeException ignored) {
+                // 한 리스너의 실패가 다른 리스너를 막지 않는다.
+            }
+        }
+    }
+
     private void notifyQuote(Quote quote) {
         for (QuoteListener listener : quoteListeners) {
             try {
@@ -329,7 +397,26 @@ public final class KiwoomMarketDataStream implements MarketDataStreamPort {
 
         @Override
         public void onMessage(String message) {
-            protocol.parseQuote(message).ifPresent(KiwoomMarketDataStream.this::notifyQuote);
+            for (KiwoomStreamEvent event : protocol.decode(message)) {
+                dispatch(event);
+            }
+        }
+
+        private void dispatch(KiwoomStreamEvent event) {
+            if (event instanceof KiwoomStreamEvent.Ping ping) {
+                // 응답하지 않으면 서버가 연결을 끊는다.
+                sendQuietly(ping.echo());
+            } else if (event instanceof KiwoomStreamEvent.LoginResult login) {
+                if (login.success()) {
+                    onLoginSucceeded();
+                } else {
+                    handleDisconnect("실시간 로그인에 실패했습니다. " + login.message());
+                }
+            } else if (event instanceof KiwoomStreamEvent.OrderBookUpdate update) {
+                notifyOrderBook(update.orderBook());
+            } else if (event instanceof KiwoomStreamEvent.QuoteUpdate update) {
+                notifyQuote(update.quote());
+            }
         }
 
         @Override

@@ -2,6 +2,7 @@ plugins { `java-library` }
 java { toolchain { languageVersion = JavaLanguageVersion.of(17) } }
 dependencies {
     api(project(":modules:broker-api"))
+    api(project(":modules:secret-store-api"))
     api(project(":modules:application"))
     api(project(":modules:finance-domain"))
 

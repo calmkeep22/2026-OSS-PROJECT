@@ -3,9 +3,11 @@ package org.ossproject.kiwoom;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.ossproject.application.port.AccountPort;
 import org.ossproject.application.port.CandleQueryPort;
+import org.ossproject.application.port.MarketDataStreamPort;
 import org.ossproject.application.port.OrderLifecyclePort;
 import org.ossproject.application.port.StockQueryPort;
 import org.ossproject.broker.BrokerCredentials;
+import org.ossproject.kiwoom.stream.KiwoomMarketDataStream;
 import org.ossproject.broker.resilience.CircuitBreaker;
 import org.ossproject.broker.resilience.ResilientExecutor;
 import org.ossproject.broker.resilience.RetryPolicy;
@@ -25,12 +27,14 @@ import java.util.Objects;
  * @param candles 차트 조회
  * @param account 예수금과 보유 종목
  * @param orders  주문 접수·취소와 상태 조회
+ * @param stream  실시간 체결·호가 스트림
  */
 public record KiwoomMarketAdapters(
         StockQueryPort stocks,
         CandleQueryPort candles,
         AccountPort account,
-        OrderLifecyclePort orders
+        OrderLifecyclePort orders,
+        MarketDataStreamPort stream
 ) {
 
     /** 모의투자 WebSocket 주소. */
@@ -42,6 +46,7 @@ public record KiwoomMarketAdapters(
         Objects.requireNonNull(candles, "candles");
         Objects.requireNonNull(account, "account");
         Objects.requireNonNull(orders, "orders");
+        Objects.requireNonNull(stream, "stream");
     }
 
     /**
@@ -68,17 +73,25 @@ public record KiwoomMarketAdapters(
                 new org.ossproject.kiwoom.http.RateLimitedHttpTransport(
                         new org.ossproject.kiwoom.http.JdkHttpTransport());
 
+        KiwoomTokenProvider tokenProvider = new KiwoomTokenProvider(transport, jsonMapper,
+                properties, BrokerCredentials.of(appKey, appSecret), clock);
         KiwoomRestClient client = new KiwoomRestClient(transport, jsonMapper, properties,
-                new KiwoomTokenProvider(transport, jsonMapper, properties,
-                        BrokerCredentials.of(appKey, appSecret), clock),
+                tokenProvider,
                 new ResilientExecutor(RetryPolicy.defaults(), CircuitBreaker.defaults(clock),
                         Sleeper.system()));
 
         KiwoomAccountAdapter account = new KiwoomAccountAdapter(client);
+
+        // 실시간 스트림은 REST 와 같은 토큰 공급자를 쓴다. 따로 발급받으면 한도를 두 배로
+        // 쓰게 되고, 한쪽만 만료되어 원인을 찾기 어려운 오류가 난다.
+        KiwoomMarketDataStream stream = new KiwoomMarketDataStream(
+                properties, () -> tokenProvider.token().value());
+
         return new KiwoomMarketAdapters(
                 new KiwoomStockQueryAdapter(client),
                 new KiwoomCandleQueryAdapter(client),
                 account,
-                new KiwoomOrderLifecycleAdapter(client, account, clock));
+                new KiwoomOrderLifecycleAdapter(client, account, clock),
+                stream);
     }
 }

@@ -9,8 +9,7 @@ package org.ossproject.kiwoom;
  *
  * <p>모든 TR은 POST 이며 요청과 응답 모두 JSON 이다.
  *
- * @param id   {@code api-id} 헤더에 넣는 8자리 TR 코드
- * @param path 업무 카테고리 경로
+ * <p>각 상수는 {@code api-id} 헤더에 넣는 TR 코드와 업무 카테고리 경로를 함께 갖는다.
  */
 public enum KiwoomTr {
 
