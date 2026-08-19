@@ -4,10 +4,14 @@
 .sidebar { -fx-background-color: #ffffff; -fx-border-color: #dfe3e8; -fx-border-width: 0 1 0 0; }
 .sidebar-scroll, .sidebar-scroll > .viewport { -fx-background-color: transparent; -fx-border-color: transparent; }
 .sidebar-title { -fx-font-size: 24px; -fx-font-weight: 700; -fx-text-fill: #191f28; }
+.nav-group-button { -fx-background-color: #f3f5f7; -fx-text-fill: #303947; -fx-alignment: center-left; -fx-padding: 10 12; -fx-font-weight: 800; -fx-cursor: hand; -fx-min-height: 44; }
+.nav-group-button:hover, .nav-group-button:expanded { -fx-background-color: #e8edf5; }
+.nav-group-button:current-group { -fx-text-fill: #1747b0; }
+.nav-group-children { -fx-padding: 0 0 4 0; }
 .nav-button { -fx-background-color: transparent; -fx-text-fill: #4e5968; -fx-alignment: center-left; -fx-padding: 10 13; -fx-font-weight: 600; -fx-cursor: hand; -fx-min-height: 42; }
+.nav-child-button { -fx-padding: 10 13 10 28; }
 .nav-button:hover { -fx-background-color: #e8edf5; }
 .nav-button:selected { -fx-background-color: #e8efff; -fx-text-fill: #2457e6; -fx-border-color: #3d6aff; -fx-border-width: 0 0 0 4; }
-.nav-group-label { -fx-text-fill: #6b7684; -fx-font-size: 12px; -fx-font-weight: 800; -fx-padding: 14 10 4 10; }
 .keyboard-help { -fx-background-color: #ffffff; -fx-border-color: #d1d6db; -fx-border-radius: 8; -fx-background-radius: 8; -fx-padding: 12; -fx-text-fill: #4e5968; }
 .top-bar { -fx-background-color: #ffffff; -fx-border-color: #dfe3e8; -fx-border-width: 0 0 1 0; }
 .top-bar .text-field { -fx-background-color: #f3f5f7; -fx-background-radius: 9; -fx-border-color: #d8dde3; -fx-border-radius: 9; -fx-padding: 10 13; }
@@ -99,6 +103,8 @@
 .high-contrast .title, .high-contrast .section-title, .high-contrast .sidebar-title,
 .high-contrast .metric-label, .high-contrast .metric-value, .high-contrast .metric-detail,
 .high-contrast .information-value { -fx-text-fill: #ffffff; }
+.high-contrast .nav-group-button { -fx-background-color: #000000; -fx-text-fill: #ffffff; -fx-border-color: #ffffff; }
+.high-contrast .nav-group-button:current-group, .high-contrast .nav-group-button:expanded { -fx-text-fill: #ffff00; -fx-border-color: #ffff00; }
 .high-contrast .nav-button:selected { -fx-text-fill: #ffff00; -fx-border-color: #ffff00; }
 .high-contrast .button:focused, .high-contrast .text-field:focused, .high-contrast .combo-box:focused,
 .high-contrast .spinner:focused, .high-contrast .table-view:focused, .high-contrast .list-view:focused,

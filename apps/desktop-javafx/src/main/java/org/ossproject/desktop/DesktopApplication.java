@@ -7,6 +7,7 @@ import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.collections.transformation.FilteredList;
+import javafx.css.PseudoClass;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
@@ -17,6 +18,7 @@ import javafx.scene.control.*;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.*;
 import javafx.stage.Stage;
 import javafx.util.StringConverter;
@@ -30,10 +32,6 @@ import org.ossproject.application.port.MarketApplicationPort;
 import org.ossproject.application.port.StockQueryPort;
 import org.ossproject.application.usecase.TradingUseCase;
 import org.ossproject.desktop.composition.DesktopServices;
-import org.ossproject.fake.FakeOrderBookFeed;
-import javafx.animation.Timeline;
-import javafx.animation.KeyFrame;
-import javafx.util.Duration;
 import org.ossproject.finance.model.*;
 import org.ossproject.desktop.chart.AccessibleChartController;
 import org.ossproject.desktop.chart.AccessibleChartView;
@@ -41,10 +39,12 @@ import org.ossproject.desktop.chart.CandlestickChartView;
 import org.ossproject.desktop.presentation.Formatters;
 import org.ossproject.desktop.navigation.OrderDraft;
 import org.ossproject.desktop.navigation.Screen;
+import org.ossproject.desktop.navigation.SidebarNavigationModel;
 import org.ossproject.desktop.controller.DesktopScreenController;
 import org.ossproject.sonification.port.SonificationPort;
 import org.ossproject.secret.SecretStore;
 import org.ossproject.desktop.viewmodel.DesktopSession;
+import org.ossproject.desktop.viewmodel.StockSearchItem;
 import org.ossproject.desktop.viewmodel.StockSearchViewModel;
 import org.ossproject.desktop.viewmodel.ConnectionViewModel;
 import org.ossproject.desktop.viewmodel.WatchlistViewModel;
@@ -74,10 +74,15 @@ import java.util.concurrent.CompletableFuture;
 import static org.ossproject.desktop.view.UiKit.*;
 
 public final class DesktopApplication extends Application {
+    private static final PseudoClass EXPANDED = PseudoClass.getPseudoClass("expanded");
+    private static final PseudoClass CURRENT_GROUP = PseudoClass.getPseudoClass("current-group");
+
     private final TradingUseCase tradingUseCase;
     private final MarketApplicationPort marketApplication;
     private final StockQueryPort stockAdapter;
     private final CandleQueryPort candleAdapter;
+    /** 시세 공급원 설명. 상태 표시줄에 그대로 보여 준다. */
+    private final String marketDataSource;
     private final SpeechPort speechPort;
     private final SpeechQueue speechQueue;
     private final SoundPort soundPort;
@@ -85,10 +90,17 @@ public final class DesktopApplication extends Application {
     private final SecretStore secretStore;
     private AccessibleChartController accessibleChartController;
     private AccessibleChartView accessibleChartView;
+    /** 청각 차트를 열지 못한 이유. 열려 있으면 {@code null}. */
+    private String chartUnavailableReason;
     private final Label status = new Label("준비됨");
     private final Label lastDataTime = new Label("마지막 시세 --:--:--");
     private final StackPane screenHost = new StackPane();
     private final Map<Screen, Button> navigationButtons = new EnumMap<>(Screen.class);
+    private final Map<Screen.NavigationGroup, Button> navigationGroupButtons =
+            new EnumMap<>(Screen.NavigationGroup.class);
+    private final Map<Screen.NavigationGroup, VBox> navigationGroupContents =
+            new EnumMap<>(Screen.NavigationGroup.class);
+    private final SidebarNavigationModel sidebarNavigation = new SidebarNavigationModel();
     private final DesktopSession session = new DesktopSession();
     private final StockSearchViewModel stockSearchViewModel;
     private final ConnectionViewModel connectionViewModel;
@@ -126,6 +138,7 @@ public final class DesktopApplication extends Application {
         this.marketApplication = services.market();
         this.stockAdapter = services.stocks();
         this.candleAdapter = services.candles();
+        this.marketDataSource = services.marketDataSource();
         this.speechPort = services.speech();
         this.speechQueue = services.speechQueue();
         this.soundPort = services.sounds();
@@ -165,15 +178,15 @@ public final class DesktopApplication extends Application {
         configureScreens();
         speechQueue.addListener(new SpeechListener() {
             @Override public void onStarted(SpeechRequest request) {
-                accessibleChartController.setSpeechActive(true);
+                setChartSpeechActive(true);
             }
 
             @Override public void onCompleted(SpeechRequest request) {
-                accessibleChartController.setSpeechActive(false);
+                setChartSpeechActive(false);
             }
 
             @Override public void onFailed(SpeechRequest request, RuntimeException error) {
-                accessibleChartController.setSpeechActive(false);
+                setChartSpeechActive(false);
                 Platform.runLater(() -> {
                     status.setText("음성 출력 실패: " + error.getMessage());
                     play(SoundCue.ERROR);
@@ -181,7 +194,7 @@ public final class DesktopApplication extends Application {
             }
 
             @Override public void onInterrupted(SpeechRequest request) {
-                accessibleChartController.setSpeechActive(false);
+                setChartSpeechActive(false);
                 Platform.runLater(() -> status.setText("음성 안내 중단: " + request.text()));
             }
         });
@@ -226,8 +239,9 @@ public final class DesktopApplication extends Application {
     private VBox createSidebar() {
         Label product = new Label("OpenStock\nAccess");
         product.getStyleClass().add("sidebar-title");
-        Label mode = new Label("모의투자 · UI 데모");
+        Label mode = new Label(marketDataSource.startsWith("키움") ? "키움 모의투자" : "미연결");
         mode.getStyleClass().add("mode-badge");
+        mode.setAccessibleText("실행 모드. " + marketDataSource);
         ComboBox<Screen> quickNavigation = new ComboBox<>(FXCollections.observableArrayList(
                 java.util.Arrays.stream(Screen.values()).filter(Screen::shownInSidebar).toList()));
         quickNavigation.setPromptText("화면 바로 이동");
@@ -243,25 +257,42 @@ public final class DesktopApplication extends Application {
             Screen selected = quickNavigation.getValue();
             if (selected != null) openNavigationScreen(selected);
         });
-        VBox nav = new VBox(4);
-        Screen.NavigationGroup currentGroup = null;
-        for (Screen screen : Screen.values()) {
-            if (!screen.shownInSidebar()) continue;
-            if (screen.navigationGroup() != currentGroup) {
-                currentGroup = screen.navigationGroup();
-                Label group = new Label(currentGroup.label());
-                group.getStyleClass().add("nav-group-label");
-                group.setAccessibleText(currentGroup.label() + " 메뉴 그룹");
-                nav.getChildren().add(group);
+        navigationButtons.clear();
+        navigationGroupButtons.clear();
+        navigationGroupContents.clear();
+        VBox nav = new VBox(6);
+        for (Screen.NavigationGroup group : Screen.NavigationGroup.values()) {
+            Button groupButton = new Button();
+            groupButton.getStyleClass().add("nav-group-button");
+            groupButton.setMaxWidth(Double.MAX_VALUE);
+            groupButton.setAccessibleHelp("Enter 또는 Space로 하위 메뉴를 열고 닫습니다. 오른쪽 방향키로 열고 왼쪽 방향키로 닫습니다.");
+            groupButton.setOnAction(event -> toggleNavigationGroup(group));
+            groupButton.setOnKeyPressed(event -> handleNavigationGroupKey(event, group));
+
+            VBox children = new VBox(3);
+            children.getStyleClass().add("nav-group-children");
+            for (Screen screen : sidebarNavigation.children(group)) {
+                Button button = new Button(screen.label());
+                button.getStyleClass().addAll("nav-button", "nav-child-button");
+                button.setMaxWidth(Double.MAX_VALUE);
+                button.setAccessibleText(group.label() + " 메뉴, " + screen.label() + " 화면 열기");
+                button.setAccessibleHelp("Enter 또는 Space로 화면을 엽니다. 왼쪽 방향키로 상위 메뉴로 이동합니다.");
+                button.setOnAction(event -> openNavigationScreen(screen));
+                button.setOnKeyPressed(event -> {
+                    if (event.getCode() == KeyCode.LEFT) {
+                        groupButton.requestFocus();
+                        event.consume();
+                    }
+                });
+                navigationButtons.put(screen, button);
+                children.getChildren().add(button);
             }
-            Button button = new Button(screen.label());
-            button.getStyleClass().add("nav-button");
-            button.setMaxWidth(Double.MAX_VALUE);
-            button.setAccessibleText(screen.label() + " 화면 열기");
-            button.setOnAction(event -> openNavigationScreen(screen));
-            navigationButtons.put(screen, button);
-            nav.getChildren().add(button);
+
+            navigationGroupButtons.put(group, groupButton);
+            navigationGroupContents.put(group, children);
+            nav.getChildren().addAll(groupButton, children);
         }
+        updateNavigationGroups(null);
         ScrollPane navScroll = new ScrollPane(nav);
         navScroll.getStyleClass().add("sidebar-scroll");
         navScroll.setFitToWidth(true);
@@ -281,6 +312,60 @@ public final class DesktopApplication extends Application {
     private void openNavigationScreen(Screen screen) {
         if (screen == Screen.TRADING) openOrder(OrderSide.BUY);
         else navigate(screen);
+    }
+
+    private void toggleNavigationGroup(Screen.NavigationGroup group) {
+        sidebarNavigation.toggle(group);
+        updateNavigationGroups(group);
+    }
+
+    private void handleNavigationGroupKey(KeyEvent event, Screen.NavigationGroup group) {
+        if (event.getCode() == KeyCode.RIGHT) {
+            if (sidebarNavigation.isExpanded(group)) {
+                sidebarNavigation.children(group).stream().findFirst()
+                        .map(navigationButtons::get)
+                        .ifPresent(Button::requestFocus);
+            } else {
+                sidebarNavigation.expand(group);
+                updateNavigationGroups(group);
+            }
+            event.consume();
+        } else if (event.getCode() == KeyCode.LEFT && sidebarNavigation.isExpanded(group)) {
+            sidebarNavigation.collapse(group);
+            updateNavigationGroups(group);
+            event.consume();
+        }
+    }
+
+    private void revealNavigationGroup(Screen screen) {
+        sidebarNavigation.reveal(screen);
+        updateNavigationGroups(null);
+    }
+
+    private void updateNavigationGroups(Screen.NavigationGroup changedGroup) {
+        Screen.NavigationGroup activeGroup = screenController == null
+                ? Screen.NavigationGroup.OVERVIEW
+                : screenController.currentScreen()
+                        .map(Screen::navigationGroup)
+                        .orElse(Screen.NavigationGroup.OVERVIEW);
+        for (Screen.NavigationGroup group : Screen.NavigationGroup.values()) {
+            boolean expanded = sidebarNavigation.isExpanded(group);
+            Button button = navigationGroupButtons.get(group);
+            VBox children = navigationGroupContents.get(group);
+            if (button == null || children == null) continue;
+            button.setText((expanded ? "▾  " : "▸  ") + group.label());
+            button.setAccessibleText(group.label() + " 메뉴, " + (expanded ? "펼쳐짐" : "접힘"));
+            button.pseudoClassStateChanged(EXPANDED, expanded);
+            button.pseudoClassStateChanged(CURRENT_GROUP, group == activeGroup);
+            children.setVisible(expanded);
+            children.setManaged(expanded);
+        }
+        if (changedGroup != null) {
+            Button changedButton = navigationGroupButtons.get(changedGroup);
+            if (changedButton != null) {
+                changedButton.notifyAccessibleAttributeChanged(AccessibleAttribute.TEXT);
+            }
+        }
     }
 
     private VBox createTopBar() {
@@ -305,14 +390,30 @@ public final class DesktopApplication extends Application {
         search.setMaxWidth(Double.MAX_VALUE);
         HBox.setHgrow(globalSearch, Priority.ALWAYS);
 
-        Label market = new Label("데모 시세 · 고정 스냅샷");
+        // 상단 표시는 실제 상태를 따른다. 연결되어 있는데 미연결로 보이거나 그 반대면,
+        // 화면을 볼 수 없는 사용자는 지금 값이 실제 시세인지 판단할 근거를 잃는다.
+        boolean live = marketDataSource.startsWith("키움");
+        Label market = new Label(live ? "조회 시세 · " + marketDataSource : marketDataSource);
         market.getStyleClass().addAll("status-chip", "mode-badge");
-        Button connection = new Button("키움 API · 미연결");
+        market.setAccessibleText("시세 출처. " + marketDataSource);
+        Button connection = new Button(live ? "키움 API · 연결됨" : "키움 API · 미연결");
         connection.getStyleClass().add("connection-button");
         connection.setOnAction(event -> navigate(Screen.CONNECTION));
-        Button alerts = new Button("알림 3");
+
+        Button alerts = new Button();
         alerts.setOnAction(event -> navigate(Screen.NOTIFICATIONS));
-        Button account = new Button("계좌 ****-1204");
+        Runnable refreshAlertCount = () -> {
+            int count = session.notifications().size();
+            alerts.setText("알림 " + count);
+            alerts.setAccessibleText(count == 0 ? "알림 없음" : "알림 " + count + "건");
+        };
+        session.notifications().addListener(
+                (javafx.collections.ListChangeListener<String>) change -> refreshAlertCount.run());
+        refreshAlertCount.run();
+
+        // 계좌번호는 증권사에서 받아야 알 수 있다. 임의의 번호를 보여 주지 않는다.
+        Button account = new Button("계좌");
+        account.setAccessibleText("계좌 화면 열기");
         account.setOnAction(event -> navigate(Screen.ACCOUNT));
 
         Region spacer = new Region(); HBox.setHgrow(spacer, Priority.ALWAYS);
@@ -345,8 +446,13 @@ public final class DesktopApplication extends Application {
     }
 
     private void focusSidebar() {
-        Button first = navigationButtons.get(Screen.DASHBOARD);
-        if (first != null) first.requestFocus();
+        Screen.NavigationGroup group = screenController == null
+                ? Screen.NavigationGroup.OVERVIEW
+                : screenController.currentScreen()
+                        .map(Screen::navigationGroup)
+                        .orElse(Screen.NavigationGroup.OVERVIEW);
+        Button groupButton = navigationGroupButtons.get(group);
+        if (groupButton != null) groupButton.requestFocus();
     }
 
     private boolean isDescendantOf(Node node, Node ancestor) {
@@ -372,17 +478,32 @@ public final class DesktopApplication extends Application {
                 status.setText(stockSearchViewModel.lastError());
                 return;
             }
-            var selected = stockSearchViewModel.exactMatch(query)
-                    .orElseGet(() -> result.count() == 1 ? stockSearchViewModel.items().get(0) : null);
-            if (selected == null) {
-                screenController.invalidate(Screen.SEARCH);
-                navigate(Screen.SEARCH);
-                status.setText(result.count() == 0 ? query + " 검색 결과가 없습니다."
-                        : query + " 검색 결과 " + result.count() + "건에서 종목을 선택해주세요.");
+            // 후보가 하나뿐이거나 종목코드가 정확히 일치할 때만 바로 연다. 종목명이 같아도
+            // "한화"처럼 다른 종목의 앞부분과 겹치면, 앱이 대신 골라 버리는 대신 목록을
+            // 보여 준다. 화면을 볼 수 없는 사용자가 다른 후보를 놓치지 않게 하기 위해서다.
+            StockSearchItem unambiguous = result.count() == 1
+                    ? stockSearchViewModel.items().get(0)
+                    : stockSearchViewModel.exactSymbolMatch(query).orElse(null);
+            if (unambiguous != null) {
+                stockSearchViewModel.setPreferredSymbol(null);
+                stockSearchViewModel.select(unambiguous);
+                navigate(Screen.STOCK_DETAIL);
                 return;
             }
-            stockSearchViewModel.select(selected);
-            navigate(Screen.STOCK_DETAIL);
+
+            var exact = stockSearchViewModel.exactMatch(query);
+            stockSearchViewModel.setPreferredSymbol(exact.map(StockSearchItem::symbol).orElse(null));
+            screenController.invalidate(Screen.SEARCH);
+            navigate(Screen.SEARCH);
+            if (result.count() == 0) {
+                status.setText(query + " 검색 결과가 없습니다.");
+            } else if (exact.isPresent()) {
+                status.setText(query + " 검색 결과 " + result.count() + "건입니다. "
+                        + exact.get().name() + " " + exact.get().symbol()
+                        + " 이(가) 선택되어 있습니다. Enter 키를 누르면 상세 화면을 엽니다.");
+            } else {
+                status.setText(query + " 검색 결과 " + result.count() + "건에서 종목을 선택해주세요.");
+            }
         });
     }
 
@@ -453,8 +574,8 @@ public final class DesktopApplication extends Application {
 
     private void showScreen(Screen screen) {
         if (screen == Screen.WATCHLIST || screen == Screen.US_MARKET) watchlistViewModel.refresh();
-        if (screen == Screen.RADIO
-                && !accessibleChartController.stock().symbol().equals(session.selectedStock().symbol())) {
+        if (screen == Screen.RADIO && (accessibleChartController == null
+                || !accessibleChartController.stock().symbol().equals(session.selectedStock().symbol()))) {
             rebuildAccessibleChart(session.selectedStock().symbol());
             screenController.invalidate(Screen.RADIO);
         }
@@ -462,19 +583,93 @@ public final class DesktopApplication extends Application {
         screenController.show(screen);
     }
 
+    /**
+     * 청각 차트를 다시 만든다.
+     *
+     * <p>시세를 받지 못해도 앱을 띄우지 못하게 하지는 않는다. 청각 차트를 못 여는 것과 앱을
+     * 아예 쓰지 못하는 것은 다른 문제이고, 나머지 접근성 기능은 시세 없이도 동작해야 한다.
+     * 실패는 감추지 않고 상태 표시줄로 알린다.
+     */
     private void rebuildAccessibleChart(String symbol) {
         if (accessibleChartController != null) {
             sonificationPreferences = accessibleChartController.preferences();
             accessibleChartController.close();
         }
-        accessibleChartController = new AccessibleChartController(
-                symbol, stockAdapter, candleAdapter, sonificationPort, this::requestSpeech, status::setText);
-        accessibleChartController.applyPreferences(sonificationPreferences);
-        accessibleChartController.setPreferencesListener(preferences -> {
-            sonificationPreferences = preferences;
-            scheduleStateSave();
+        accessibleChartController = null;
+        accessibleChartView = null;
+        try {
+            AccessibleChartController controller = new AccessibleChartController(
+                    symbol, stockAdapter, candleAdapter, sonificationPort, this::requestSpeech,
+                    status::setText);
+            controller.applyPreferences(sonificationPreferences);
+            controller.setPreferencesListener(preferences -> {
+                sonificationPreferences = preferences;
+                scheduleStateSave();
+            });
+            accessibleChartController = controller;
+            accessibleChartView = new AccessibleChartView(controller);
+            chartUnavailableReason = null;
+        } catch (RuntimeException failure) {
+            chartUnavailableReason = safeReason(failure);
+            status.setText("청각 차트를 준비하지 못했습니다. " + chartUnavailableReason);
+        }
+    }
+
+    /**
+     * 아직 증권사와 연동하지 않은 화면에 대신 보여 줄 안내.
+     *
+     * <p>값을 지어내 채우지 않는다. 화면을 볼 수 없는 사용자는 표에 있는 숫자가 실제 시장
+     * 값인지 확인할 방법이 없으므로, 없는 데이터는 없다고 말하는 편이 안전하다.
+     *
+     * @param what 어떤 데이터인지
+     * @param tr   연동에 사용할 키움 TR. 후속 작업을 알아볼 수 있게 함께 적는다
+     */
+    private javafx.scene.Node notConnectedPanel(String what, String tr) {
+        Label heading = new Label(what + " 데이터는 아직 연동되지 않았습니다.");
+        heading.getStyleClass().add("safety-note");
+        heading.setWrapText(true);
+        Label detail = new Label("실제 값을 받아오기 전까지 임의의 숫자를 표시하지 않습니다. "
+                + "연동 예정 항목: " + tr);
+        detail.setWrapText(true);
+        VBox panel = new VBox(10, heading, detail);
+        panel.setPadding(new Insets(20));
+        panel.setAccessibleText(what + " 데이터는 아직 연동되지 않았습니다. "
+                + "실제 값을 받아오기 전까지 임의의 숫자를 표시하지 않습니다.");
+        return panel;
+    }
+
+    /** 음성이 나가는 동안 청각 차트 음량을 낮춘다. 차트를 못 연 상태면 할 일이 없다. */
+    private void setChartSpeechActive(boolean active) {
+        AccessibleChartController controller = accessibleChartController;
+        if (controller != null) controller.setSpeechActive(active);
+    }
+
+    /** 사용자에게 보여 줄 수 있는 짧은 실패 사유. */
+    private static String safeReason(RuntimeException failure) {
+        String message = failure.getMessage();
+        return message == null || message.isBlank()
+                ? "시세를 불러오지 못했습니다." : message;
+    }
+
+    /** 청각 차트를 열 수 없을 때 대신 보여 줄 화면. 실패 사실을 텍스트로 전달한다. */
+    private javafx.scene.Node createChartUnavailableScreen() {
+        Label title = heading("청각 차트");
+        Label reason = new Label(chartUnavailableReason == null
+                ? "시세를 불러오지 못해 청각 차트를 열 수 없습니다."
+                : "시세를 불러오지 못해 청각 차트를 열 수 없습니다. " + chartUnavailableReason);
+        reason.setWrapText(true);
+        reason.getStyleClass().add("safety-note");
+        Button retry = new Button("다시 시도");
+        retry.setOnAction(event -> {
+            status.setText("청각 차트를 다시 준비하고 있습니다.");
+            rebuildAccessibleChart(session.selectedStock().symbol());
+            screenController.invalidate(Screen.RADIO);
+            screenController.show(Screen.RADIO);
         });
-        accessibleChartView = new AccessibleChartView(accessibleChartController);
+        VBox body = new VBox(18, title, reason, retry);
+        body.setPadding(new Insets(24));
+        body.setAccessibleText("청각 차트를 열 수 없습니다. " + reason.getText());
+        return body;
     }
 
     private void navigateBack() {
@@ -520,6 +715,7 @@ public final class DesktopApplication extends Application {
         backButton.disableProperty().bind(screenController.canGoBackProperty().not());
         screenController.currentScreenProperty().addListener((obs, old, screen) -> {
             if (screen == null) return;
+            revealNavigationGroup(screen);
             String location = switch (screen) {
                 case STOCK_DETAIL -> "종목 상세 · " + session.selectedStock().name();
                 case TRADING -> "주문 · " + session.selectedStock().name();
@@ -541,69 +737,64 @@ public final class DesktopApplication extends Application {
         screenController.register(Screen.ACCOUNT, this::createAccountScreen);
         screenController.register(Screen.US_MARKET, this::createUsMarketScreen);
         screenController.registerPreservingState(Screen.NOTIFICATIONS, this::createNotificationsScreen);
-        screenController.register(Screen.RADIO, () -> accessibleChartView.root());
+        screenController.register(Screen.RADIO, () -> accessibleChartView == null
+                ? createChartUnavailableScreen() : accessibleChartView.root());
         screenController.registerPreservingState(Screen.SETTINGS, this::createSettingsScreen);
     }
 
     private ScrollPane createDashboard() {
+        Account snapshot = tradingUseCase.account();
         Label title = heading("안녕하세요. 오늘의 투자 현황입니다");
-        Label description = new Label("모의투자 데이터 · 2026년 8월 10일 기준");
+        Label description = new Label("모의투자 계좌 " + snapshot.maskedAccountNo());
         description.getStyleClass().add("muted-text");
         VBox intro = new VBox(4, title, description);
         Button order = primaryButton("주문하기", () -> openOrder(OrderSide.BUY));
         Button listen = new Button("화면 요약 듣기");
+        // 읽어 주는 문장도 실제 계좌 값에서 만든다. 화면과 음성이 다르면 안 된다.
         listen.setOnAction(event -> requestSpeech(
-                "총 자산 5천 2백 34만원, 오늘 평가손익은 143만원 이익입니다. 코스피와 코스닥 모두 상승 중입니다.",
+                "총 자산 " + Formatters.won(snapshot.totalAssets())
+                        + ", 평가손익은 " + signedWon(snapshot.totalProfitLoss())
+                        + " 입니다. 보유 종목은 " + snapshot.positions().size() + "종목입니다.",
                 "dashboard-summary"));
         Region titleSpacer = new Region(); HBox.setHgrow(titleSpacer, Priority.ALWAYS);
         HBox header = new HBox(12, intro, titleSpacer, listen, order); header.setAlignment(Pos.CENTER_LEFT);
 
         FlowPane assets = wrappingRow(14,
-                summaryCard("총 자산", "52,340,000원", "전일 대비 +1.8%", "positive"),
-                summaryCard("평가손익", "+1,430,000원", "수익률 +2.81%", "positive"),
-                summaryCard("오늘 실현손익", "+230,000원", "체결 4건", "positive"),
-                summaryCard("주문 가능 금액", "8,200,000원", "D+2 8,450,000원", "neutral"));
-
-        FlowPane indices = wrappingRow(12,
-                compactMarketCard("KOSPI", "3,245.12", "+1.23%", true),
-                compactMarketCard("KOSDAQ", "912.32", "+0.83%", true),
-                compactMarketCard("NASDAQ", "18,425.30", "+0.42%", true),
-                compactMarketCard("USD/KRW", "1,348.20", "-0.31%", false));
+                summaryCard("총 자산", Formatters.won(snapshot.totalAssets()),
+                        "예수금 포함", "neutral"),
+                summaryCard("평가손익", signedWon(snapshot.totalProfitLoss()),
+                        "평가금액 " + Formatters.won(snapshot.totalMarketValue()),
+                        snapshot.totalProfitLoss().signum() >= 0 ? "positive" : "negative"),
+                summaryCard("주문 가능 금액", Formatters.won(snapshot.balance().available()),
+                        "예수금 " + Formatters.won(snapshot.balance().cash()), "neutral"));
 
         TableView<ObservableList<String>> holdings = textTable("홈 보유종목 요약",
-                List.of(
-                        row("삼성전자", "100주", "72,500원", "+6.30%"),
-                        row("SK하이닉스", "35주", "184,500원", "+4.12%"),
-                        row("NAVER", "20주", "205,000원", "-2.38%")
-                ), "종목", "수량", "현재가", "수익률");
+                snapshot.positions().stream().map(position -> row(
+                        position.name(),
+                        position.quantity() + "주",
+                        Formatters.won(position.currentPrice()),
+                        position.profitLossRate().toPlainString() + "%")).toList(),
+                "종목", "수량", "현재가", "수익률");
         holdings.setPrefHeight(210);
         holdings.setOnMouseClicked(event -> { if (event.getClickCount() == 2) openSelectedStock(holdings, 0); });
         holdings.setOnKeyPressed(event -> { if (event.getCode() == KeyCode.ENTER) openSelectedStock(holdings, 0); });
 
-        TableView<ObservableList<String>> ranking = textTable("오늘 시장 거래대금 상위",
-                List.of(
-                        row("1", "삼성전자", "2.1조", "+2.12%"),
-                        row("2", "SK하이닉스", "1.4조", "+1.42%"),
-                        row("3", "현대차", "8,420억", "+0.64%"),
-                        row("4", "NAVER", "6,850억", "-0.71%")
-                ), "순위", "종목", "거래대금", "등락률");
-        ranking.setPrefHeight(210);
-        ranking.setOnMouseClicked(event -> { if (event.getClickCount() == 2) openSelectedStock(ranking, 1); });
-        ranking.setOnKeyPressed(event -> { if (event.getCode() == KeyCode.ENTER) openSelectedStock(ranking, 1); });
-
         VBox left = card("보유종목", holdings, linkButton("계좌 전체 보기", Screen.ACCOUNT));
-        VBox right = card("오늘 시장", ranking, linkButton("랭킹 전체 보기", Screen.SCANNER));
+        // 지수와 거래대금 순위는 조회 TR 을 연동해야 채울 수 있다. 예시 숫자를 넣지 않는다.
+        VBox right = card("오늘 시장",
+                notConnectedPanel("지수와 거래대금 순위",
+                        "ka20003 전업종지수, ka10032 거래대금상위"),
+                linkButton("랭킹 전체 보기", Screen.SCANNER));
         SplitPane center = new SplitPane(left, right); center.setDividerPositions(0.5);
         left.setMinWidth(0); right.setMinWidth(0);
 
-        ListView<String> activity = new ListView<>(FXCollections.observableArrayList(
-                "14:32 · 삼성전자 매수 10주 중 5주가 체결되었습니다.",
-                "14:28 · 키움 실시간 시세 연결이 복구되었습니다.",
-                "13:55 · SK하이닉스 목표 가격 184,000원에 도달했습니다."));
+        // 알림은 사용자의 주문·체결에서 쌓인다. 세션이 비어 있으면 비어 있는 대로 보여 준다.
+        ListView<String> activity = new ListView<>(session.notifications());
         activity.setAccessibleText("최근 주문과 알림"); activity.setPrefHeight(145);
+        activity.setPlaceholder(new Label("최근 주문과 알림이 아직 없습니다."));
         VBox activityCard = card("최근 주문 · 알림", activity);
 
-        VBox body = new VBox(20, header, assets, indices, center, activityCard);
+        VBox body = new VBox(20, header, assets, center, activityCard);
         return scrollPage("홈 대시보드", body);
     }
 
@@ -614,23 +805,34 @@ public final class DesktopApplication extends Application {
     private ScrollPane createAccountScreen() {
         Account snapshot = tradingUseCase.account();
         Label title = heading("계좌");
-        ComboBox<String> account = new ComboBox<>(FXCollections.observableArrayList("모의계좌 ****-1204", "미국주식 모의계좌 ****-7781"));
-        account.setValue("모의계좌 ****-1204"); account.setAccessibleText("조회할 계좌 선택");
+        // 계좌번호는 접근 토큰에 연결된 것을 그대로 보여 준다. 목록을 지어내지 않는다.
+        Label accountNo = new Label("모의계좌 " + snapshot.maskedAccountNo());
+        accountNo.getStyleClass().add("status-chip");
+        accountNo.setAccessibleText("조회 중인 계좌. 모의계좌 " + snapshot.maskedAccountNo());
         Region spacer = new Region(); HBox.setHgrow(spacer, Priority.ALWAYS);
-        HBox header = new HBox(12, title, spacer, account); header.setAlignment(Pos.CENTER_LEFT);
+        HBox header = new HBox(12, title, spacer, accountNo); header.setAlignment(Pos.CENTER_LEFT);
 
+        // 값은 모의주문 엔진이 들고 있는 실제 계좌 상태에서 읽는다. 화면이 따로 계산하거나
+        // 예시 숫자를 적어 두지 않는다.
         FlowPane metrics = wrappingRow(14,
-                summaryCard("총 평가자산", "52,300,000원", "국내주식 + 예수금", "neutral"),
-                summaryCard("평가손익", "+3,100,000원", "수익률 +7.52%", "positive"),
-                summaryCard("총 매입금액", "41,200,000원", "보유 6종목", "neutral"),
-                summaryCard("예수금", "8,000,000원", "주문 가능 7,820,000원", "neutral"));
+                summaryCard("총 평가자산", Formatters.won(snapshot.totalAssets()),
+                        "보유 " + snapshot.positions().size() + "종목 + 예수금", "neutral"),
+                summaryCard("평가손익", signedWon(snapshot.totalProfitLoss()),
+                        "평가금액 " + Formatters.won(snapshot.totalMarketValue()),
+                        snapshot.totalProfitLoss().signum() >= 0 ? "positive" : "negative"),
+                summaryCard("예수금", Formatters.won(snapshot.balance().cash()),
+                        "주문 가능 " + Formatters.won(snapshot.balance().available()), "neutral"));
 
         TableView<ObservableList<String>> holdings = textTable("보유종목 표",
-                List.of(
-                        row("삼성전자", "100", "68,200원", "72,500원", "7,250,000원", "+430,000원", "+6.30%"),
-                        row("SK하이닉스", "35", "177,200원", "184,500원", "6,457,500원", "+255,500원", "+4.12%"),
-                        row("NAVER", "20", "210,000원", "205,000원", "4,100,000원", "-100,000원", "-2.38%")
-                ), "종목", "수량", "평균단가", "현재가", "평가금액", "손익", "수익률");
+                snapshot.positions().stream().map(position -> row(
+                        position.name(),
+                        position.quantity() + "",
+                        Formatters.won(position.averagePrice()),
+                        Formatters.won(position.currentPrice()),
+                        Formatters.won(position.marketValue()),
+                        signedWon(position.profitLoss()),
+                        position.profitLossRate().toPlainString() + "%")).toList(),
+                "종목", "수량", "평균단가", "현재가", "평가금액", "손익", "수익률");
         holdings.setPrefHeight(300);
         holdings.setOnMouseClicked(event -> { if (event.getClickCount() == 2) openSelectedStock(holdings, 0); });
         holdings.setOnKeyPressed(event -> { if (event.getCode() == KeyCode.ENTER) openSelectedStock(holdings, 0); });
@@ -640,25 +842,34 @@ public final class DesktopApplication extends Application {
         VBox holdingsPanel = new VBox(10, holdings, wrappingRow(8, holdingDetail, holdingBuy, holdingSell));
         holdingsPanel.setPadding(new Insets(10));
 
+        // 예수금과 주문 가능 금액은 모의주문 엔진이 들고 있는 잔고에서 읽는다.
+        // D+1·D+2 정산과 출금 가능 금액은 별도 TR 이라 연동 전까지 표시하지 않는다.
         VBox cash = new VBox(12,
-                informationRow("예수금", "8,000,000원"),
-                informationRow("D+1 예수금", "8,130,000원"),
-                informationRow("D+2 예수금", "8,450,000원"),
-                informationRow("출금 가능 금액", "7,650,000원"),
-                informationRow("주문 가능 금액", "7,820,000원"));
+                informationRow("예수금", Formatters.won(snapshot.balance().cash())),
+                informationRow("주문 대기 금액", Formatters.won(snapshot.balance().locked())),
+                informationRow("주문 가능 금액", Formatters.won(snapshot.balance().available())),
+                notConnectedPanel("D+1·D+2 예수금과 출금 가능 금액",
+                        "kt00001 예수금상세현황요청, kt00010 주문인출가능금액"));
         cash.setPadding(new Insets(20));
 
         TableView<ObservableList<String>> open = orderStatusTable(true);
         TableView<ObservableList<String>> fills = orderStatusTable(false);
         TableView<ObservableList<String>> history = textTable("주문내역",
-                List.of(row("08/10 14:30", "삼성전자", "매수", "72,400원", "10", "부분체결"),
-                        row("08/10 13:12", "NAVER", "매도", "시장가", "3", "체결")),
+                tradingUseCase.orders().stream().map(order -> row(
+                        orderTime(order), order.name(), order.side().displayName(),
+                        order.limitPrice() == null ? "시장가" : Formatters.won(order.limitPrice()),
+                        Long.toString(order.quantity()), order.status().displayName())).toList(),
                 "시간", "종목", "구분", "주문가", "수량", "상태");
+        history.setPlaceholder(new Label("주문 내역이 없습니다."));
+        // 기간별 누적 수익률은 증권사에서 받아야 한다. 현재 보유분의 평가손익만 실제 값으로
+        // 보여 주고, 기간 수익률은 연동 전까지 표시하지 않는다.
         VBox profit = new VBox(16,
-                new Label("모의투자 계좌의 기간별 누적 수익률입니다."),
-                progressMetric("1개월 누적 수익률", 0.68, "+6.80%"),
-                progressMetric("3개월 누적 수익률", 0.42, "+4.20%"),
-                progressMetric("1년 누적 수익률", 0.91, "+9.10%"));
+                informationRow("보유 종목 평가손익", signedWon(snapshot.totalProfitLoss())),
+                informationRow("매입금액", Formatters.won(snapshot.positions().stream()
+                        .map(Position::costBasis).reduce(BigDecimal.ZERO, BigDecimal::add))),
+                informationRow("평가금액", Formatters.won(snapshot.totalMarketValue())),
+                notConnectedPanel("기간별 누적 수익률과 실현손익",
+                        "ka10074 일자별실현손익, ka10085 계좌수익률, kt00016 일별계좌수익률상세"));
         profit.setPadding(new Insets(20));
         TableView<JournalEntry> journal = typedTable("매매일지", session.journalEntries(),
                 textColumn("날짜", JournalEntry::date),
@@ -702,8 +913,12 @@ public final class DesktopApplication extends Application {
                 sectionHeading(selectedDetail.name() + " · " + selectedDetail.symbol()),
                 styledLabel(stockDetailViewModel.formatPrice(selectedDetail.currentPrice()), "stock-price"),
                 new Label("전일 대비 " + signedChangeRate(selectedDetail)),
-                informationRow("매도 1호가", stockDetailViewModel.formatPrice(selectedDetail.currentPrice().add(selectedDetail.currentPrice().multiply(new BigDecimal("0.001")))) + " · 18,001주"),
-                informationRow("매수 1호가", stockDetailViewModel.formatPrice(selectedDetail.currentPrice().subtract(selectedDetail.currentPrice().multiply(new BigDecimal("0.001")))) + " · 15,321주"));
+                // 호가는 ka10004 로 따로 받아야 한다. 현재가에서 계산해 보여 주면 시장에 없는
+                // 가격으로 주문할 수 있으므로 연동 전까지 표시하지 않는다.
+                informationRow("시가", stockDetailViewModel.formatPrice(selectedDetail.open())),
+                informationRow("고가 / 저가",
+                        stockDetailViewModel.formatPrice(selectedDetail.high()) + " / "
+                                + stockDetailViewModel.formatPrice(selectedDetail.low())));
         quote.getStyleClass().add("panel-card"); quote.setPadding(new Insets(20)); quote.setPrefWidth(340);
 
         VBox orderForm = createOrderForm();
@@ -756,8 +971,10 @@ public final class DesktopApplication extends Application {
 
         FlowPane metrics = wrappingRow(12,
                 miniMetric("시가", stockDetailViewModel.formatPrice(detail.open())), miniMetric("고가", stockDetailViewModel.formatPrice(detail.high())),
-                miniMetric("저가", stockDetailViewModel.formatPrice(detail.low())), miniMetric("거래량", String.format("%,d", detail.volume())),
-                miniMetric("시가총액", "432.8조"), miniMetric("외국인", "54.1%"));
+                miniMetric("저가", stockDetailViewModel.formatPrice(detail.low())),
+                // 시가총액과 외국인 소진률은 ka10001 이 함께 주지만 아직 도메인 모델에 담지
+                // 않았다. 값을 지어내지 않고 항목 자체를 빼 둔다.
+                miniMetric("거래량", String.format("%,d", detail.volume())));
 
         FlowPane periods = wrappingRow(8);
         ToggleGroup periodGroup = new ToggleGroup();
@@ -812,61 +1029,15 @@ public final class DesktopApplication extends Application {
         chartRepresentations.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE); chartRepresentations.setPrefHeight(430);
         VBox chart = new VBox(12, periods, indicators, chartRepresentations, soundChart); chart.setPadding(new Insets(10));
 
-        BigDecimal quoteStep = selection.overseas() ? new BigDecimal("0.10") : new BigDecimal("100");
-        // TODO: 실제 키움 실시간 호가(0D)로 교체될 때까지는 가짜 피드로 10단계 호가를 흉내 낸다.
-        // 실제 시세와 동떨어지지 않도록 현재가 근처에서 시작한다.
-        FakeOrderBookFeed orderBookFeed = new FakeOrderBookFeed(
-                detail.symbol(), detail.currentPrice(), quoteStep, detail.symbol().hashCode());
-        TableView<ObservableList<String>> orderBook = textTable(detail.name() + " 10호가",
-                orderBookRows(orderBookFeed.getOrderBook(detail.symbol())),
-                "구분", "호가", "잔량", "잔량 변화");
-        orderBook.setPrefHeight(360);
-        Timeline orderBookTicker = new Timeline(new KeyFrame(Duration.seconds(1), tickEvent -> {
-            List<String[]> rows = orderBookRows(orderBookFeed.tick());
-            orderBook.getItems().setAll(rows.stream()
-                    .map(cells -> FXCollections.observableArrayList(cells))
-                    .toList());
-        }));
-        orderBookTicker.setCycleCount(Timeline.INDEFINITE);
-        orderBookTicker.play();
-        orderBook.sceneProperty().addListener((obs, oldScene, newScene) -> {
-            if (newScene == null) {
-                orderBookTicker.stop();
-            }
-        });
-        Runnable useSelectedQuote = () -> {
-            ObservableList<String> selected = orderBook.getSelectionModel().getSelectedItem();
-            if (selected == null || selected.size() < 2) {
-                status.setText("주문에 반영할 호가를 선택해주세요.");
-                orderBook.requestFocus();
-                return;
-            }
-            String selectedPrice = selected.get(1).replaceAll("[^0-9.]", "");
-            status.setText("선택한 호가 " + selected.get(1) + "을 주문 가격에 입력했습니다.");
-            OrderSide selectedSide = "매도".equals(selected.get(0)) ? OrderSide.BUY : OrderSide.SELL;
-            openOrderAtPrice(selectedSide, selectedPrice);
-        };
-        orderBook.setOnMouseClicked(event -> { if (event.getClickCount() == 2) useSelectedQuote.run(); });
-        orderBook.setOnKeyPressed(event -> { if (event.getCode() == KeyCode.ENTER) useSelectedQuote.run(); });
-
-        TableView<ObservableList<String>> trades = textTable(detail.name() + " 실시간 체결",
-                List.of(row("14:32:01", stockDetailViewModel.formatPrice(detail.currentPrice()), signedChangeRate(detail), "321", "108.3"),
-                        row("14:31:59", stockDetailViewModel.formatPrice(detail.currentPrice().subtract(quoteStep)), signedChangeRate(detail), "122", "107.9"),
-                        row("14:31:57", stockDetailViewModel.formatPrice(detail.currentPrice()), signedChangeRate(detail), "84", "108.1")),
-                "시간", "가격", "등락률", "체결량", "체결강도");
-        trades.setPrefHeight(330);
-
-        TableView<ObservableList<String>> supply = textTable(detail.name() + " 투자자 수급",
-                List.of(row("08/10", "+320,140", "-120,300", "+42,100"),
-                        row("08/09", "+240,050", "+30,120", "-18,920"),
-                        row("08/08", "-84,200", "+54,880", "+5,410")),
-                "날짜", "외국인", "기관", "프로그램");
-        supply.setPrefHeight(330);
-
-        GridPane info = new GridPane(); info.setHgap(24); info.setVgap(14); info.setPadding(new Insets(20));
-        addInfo(info, 0, 0, "PER", "18.42배"); addInfo(info, 1, 0, "PBR", "1.54배");
-        addInfo(info, 0, 1, "EPS", "3,935원"); addInfo(info, 1, 1, "52주 최고", "86,000원");
-        addInfo(info, 0, 2, "신용비율", "0.14%"); addInfo(info, 1, 2, "VI 상태", "정상");
+        // 호가·체결·수급·기업정보는 아직 연동하지 않았다. 예전에는 현재가에 임의의 값을
+        // 더해 호가를 만들어 보여 주고, 그 호가를 주문 가격으로 넣을 수도 있었다. 시장에
+        // 없는 가격으로 주문이 나갈 수 있어 표시 자체를 없앤다.
+        javafx.scene.Node orderBook = notConnectedPanel("호가", "ka10004 주식호가요청");
+        javafx.scene.Node trades = notConnectedPanel("체결", "ka10003 체결정보요청");
+        javafx.scene.Node supply = notConnectedPanel("투자자 수급",
+                "ka10059 종목별투자자기관별, ka10008 외국인 종목별 매매동향");
+        javafx.scene.Node info = notConnectedPanel("기업정보",
+                "ka10001 주식기본정보요청의 PER·EPS·PBR·시가총액");
 
         TabPane tabs = new TabPane(tab("차트", chart), tab("호가", orderBook), tab("체결", trades),
                 tab("수급", supply), tab("거래원", createBrokerAnalysisPanel()),
@@ -878,67 +1049,16 @@ public final class DesktopApplication extends Application {
 
     private ScrollPane createMarketScreen() {
         Label title = heading("국내 시장");
-        FlowPane marketSummary = wrappingRow(14,
-                summaryCard("KOSPI", "3,245.12", "+39.45 · +1.23%", "positive"),
-                summaryCard("KOSDAQ", "912.32", "+7.51 · +0.83%", "positive"),
-                summaryCard("상승 / 보합 / 하락", "1,203 / 103 / 832", "상승 종목 우세", "neutral"));
-
-        TableView<ObservableList<String>> movers = textTable("국내시장 주요 종목",
-                List.of(row("1", "삼성전자", "72,500원", "+2.12%", "18,320,122", "2.1조"),
-                        row("2", "SK하이닉스", "184,500원", "+1.42%", "5,821,330", "1.4조"),
-                        row("3", "한미반도체", "132,200원", "+6.82%", "3,129,443", "4,120억"),
-                        row("4", "NAVER", "205,000원", "-0.71%", "1,230,922", "2,540억")),
-                "순위", "종목", "현재가", "등락률", "거래량", "거래대금");
-        movers.setPrefHeight(350); movers.setOnMouseClicked(event -> { if (event.getClickCount() == 2) openSelectedStock(movers, 1); });
-        movers.setOnKeyPressed(event -> { if (event.getCode() == KeyCode.ENTER) openSelectedStock(movers, 1); });
-        Button openMarketStock = new Button("선택 종목 열기");
-        openMarketStock.setOnAction(event -> openSelectedStock(movers, 1));
-
-        ToggleGroup group = new ToggleGroup(); FlowPane filters = wrappingRow(8);
-        for (String value : List.of("거래량", "거래대금", "상승률", "하락률", "외국인", "기관", "프로그램")) {
-            ToggleButton button = new ToggleButton(value); button.setToggleGroup(group);
-            button.setOnAction(event -> sortMarketRows(movers, value));
-            if (value.equals("거래대금")) button.setSelected(true); filters.getChildren().add(button);
-        }
-        sortMarketRows(movers, "거래대금");
-        VBox domestic = new VBox(16, marketSummary, filters, movers, openMarketStock); domestic.setPadding(new Insets(12));
-        TableView<ObservableList<String>> sectors = textTable("업종 지수",
-                List.of(row("반도체", "4,820.31", "+3.40%", "54", "12"),
-                        row("자동차", "2,145.82", "+1.82%", "31", "8"),
-                        row("AI 소프트웨어", "1,884.20", "+1.35%", "26", "14"),
-                        row("바이오", "3,101.44", "-0.62%", "19", "42")),
-                "업종", "지수", "등락률", "상승", "하락");
-        TableView<ObservableList<String>> themes = textTable("테마 목록",
-                List.of(row("반도체", "+3.40%", "한미반도체", "+6.82%"),
-                        row("AI", "+2.70%", "NAVER", "+1.12%"),
-                        row("2차전지", "+1.20%", "에코프로", "+5.21%"),
-                        row("바이오", "-0.62%", "셀트리온", "-1.10%")),
-                "테마", "등락률", "대표 종목", "대표 등락률");
-        TableView<ObservableList<String>> etf = textTable("ETF 목록",
-                List.of(row("069500", "KODEX 200", "36,120원", "+1.02%", "0.08%", "6.4조"),
-                        row("133690", "TIGER 미국나스닥100", "126,450원", "+0.45%", "0.07%", "3.1조"),
-                        row("305720", "KODEX 2차전지", "12,830원", "+1.92%", "0.45%", "1.2조")),
-                "코드", "ETF", "현재가", "등락률", "보수", "순자산");
-        etf.setOnMouseClicked(event -> { if (event.getClickCount() == 2) showProductDetail("ETF", selectedName(etf, 1, "KODEX 200")); });
-        etf.setOnKeyPressed(event -> { if (event.getCode() == KeyCode.ENTER) showProductDetail("ETF", selectedName(etf, 1, "KODEX 200")); });
-        TableView<ObservableList<String>> elw = textTable("ELW 목록",
-                List.of(row("58K123", "삼성전자 콜", "125원", "+8.70%", "86일", "0.42"),
-                        row("57K882", "KOSPI200 풋", "210원", "-4.20%", "42일", "-0.36"),
-                        row("58K220", "SK하이닉스 콜", "95원", "+12.30%", "71일", "0.51")),
-                "코드", "종목", "현재가", "등락률", "잔존일", "델타");
-        elw.setOnMouseClicked(event -> { if (event.getClickCount() == 2) showProductDetail("ELW", selectedName(elw, 1, "삼성전자 콜")); });
-        elw.setOnKeyPressed(event -> { if (event.getCode() == KeyCode.ENTER) showProductDetail("ELW", selectedName(elw, 1, "삼성전자 콜")); });
-        VBox gold = new VBox(16,
-                wrappingRow(14, summaryCard("금 99.99 1g", "128,450원", "+0.74%", "positive"),
-                        summaryCard("매수 1호가", "128,440원", "잔량 1,820g", "neutral"),
-                        summaryCard("매도 1호가", "128,460원", "잔량 1,240g", "neutral")),
-                textTable("금현물 호가와 체결",
-                        List.of(row("14:31:58", "128,450원", "10g", "매수 체결"),
-                                row("14:31:42", "128,440원", "25g", "매도 체결")),
-                        "시간", "가격", "수량", "구분"),
-                new HBox(10, primaryButton("금현물 매수", () -> showCommodityOrderConfirmation("금현물", "매수")),
-                        primaryButton("금현물 매도", () -> showCommodityOrderConfirmation("금현물", "매도"))));
-        gold.setPadding(new Insets(12));
+        // 지수·순위·업종·테마·ETF·ELW·금현물은 모두 조회 TR 이 따로 있다. 연동 전까지는
+        // 예시 숫자를 채우지 않는다. 시장 화면의 숫자는 사용자가 종목을 고르는 근거가 되므로
+        // 지어낸 값이 특히 위험하다.
+        javafx.scene.Node domestic = notConnectedPanel("국내 지수와 순위",
+                "ka20003 전업종지수, ka10030 당일거래량상위, ka10032 거래대금상위");
+        javafx.scene.Node sectors = notConnectedPanel("업종 지수", "ka20001 업종현재가, ka20002 업종별주가");
+        javafx.scene.Node themes = notConnectedPanel("테마", "ka90001 테마그룹별, ka90002 테마구성종목");
+        javafx.scene.Node etf = notConnectedPanel("ETF", "ka40004 ETF전체시세, ka40002 ETF종목정보");
+        javafx.scene.Node elw = notConnectedPanel("ELW", "ka30005 ELW조건검색, ka30012 ELW종목상세정보");
+        javafx.scene.Node gold = notConnectedPanel("금현물", "ka50100 금현물 시세정보, ka50101 금현물 호가");
         TabPane marketTabs = new TabPane(tab("국내시장", domestic), tab("업종", sectors), tab("테마", themes),
                 tab("ETF", etf), tab("ELW", elw), tab("금현물", gold), tab("신용거래", createCreditTradingPanel()));
         marketTabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE); marketTabs.setPrefHeight(590);
@@ -971,94 +1091,33 @@ public final class DesktopApplication extends Application {
         return new ScannerScreenView(scannerViewModel, status::setText, this::openStockByQuery).create();
     }
 
+    /**
+     * 조건검색 화면.
+     *
+     * <p>조건식은 사용자가 키움 HTS 에서 만들어 둔 것을 불러와야 한다. 예전에는 조건식 이름과
+     * 검색 결과를 앱이 지어내 보여 주었는데, 사용자가 만들지도 않은 조건식이 자기 것처럼
+     * 보이면 실제 조건검색과 구분할 수 없다.
+     */
     private ScrollPane createConditionScreen() {
         Label title = heading("조건검색");
-        ComboBox<String> condition = new ComboBox<>(FXCollections.observableArrayList(
-                "거래량 돌파", "외국인 연속 순매수", "신고가 돌파", "단기 급등"));
-        condition.setValue("거래량 돌파"); condition.setPrefWidth(280);
-        CheckBox realtime = new CheckBox("실시간 편입·이탈 감시"); realtime.setSelected(true);
-        ObservableList<ObservableList<String>> resultRows = FXCollections.observableArrayList();
-        TableView<ObservableList<String>> results = textTable("조건검색 결과", resultRows,
-                "시간", "상태", "종목", "현재가", "등락률", "조건 값");
-        Label limit = new Label(); limit.getStyleClass().add("muted-text");
-        Runnable search = () -> {
-            List<String[]> selectedRows = switch (condition.getValue()) {
-                case "외국인 연속 순매수" -> List.of(
-                        row("14:30:10", "편입", "삼성전자", "72,500원", "+2.12%", "5일 연속 순매수"),
-                        row("14:11:42", "편입", "현대차", "281,000원", "+0.64%", "3일 연속 순매수"));
-                case "신고가 돌파" -> List.of(
-                        row("14:28:03", "편입", "한미반도체", "132,200원", "+6.82%", "52주 신고가"),
-                        row("13:52:17", "편입", "SK하이닉스", "184,500원", "+1.42%", "신고가 +0.4%"));
-                case "단기 급등" -> List.of(
-                        row("14:31:20", "편입", "한미반도체", "132,200원", "+6.82%", "10분 +4.1%"),
-                        row("14:20:03", "이탈", "에코프로", "98,200원", "-1.20%", "상승폭 축소"));
-                default -> List.of(
-                        row("14:31:20", "편입", "삼성전자", "72,500원", "+2.12%", "거래량 185%"),
-                        row("14:28:03", "편입", "한미반도체", "132,200원", "+6.82%", "거래량 312%"),
-                        row("14:12:44", "이탈", "NAVER", "205,000원", "-0.71%", "거래량 82%"));
-            };
-            resultRows.setAll(selectedRows.stream().map(values -> FXCollections.observableArrayList(values)).toList());
-            limit.setText("실시간 조건검색 " + (realtime.isSelected() ? "1" : "0") + " / 10개 사용 · 결과 " + resultRows.size() + " / 100종목");
-            status.setText(condition.getValue() + " 조건에서 " + resultRows.size() + "개 종목을 찾았습니다.");
-        };
-        Button run = primaryButton("조건 검색", search);
-        realtime.selectedProperty().addListener((obs, old, value) -> search.run());
-        FlowPane controls = wrappingRow(12, labeledControl("키움 조건식", condition), realtime, run); controls.setAlignment(Pos.BOTTOM_LEFT);
-        results.setPrefHeight(360);
-        results.setOnMouseClicked(event -> { if (event.getClickCount() == 2) openSelectedStock(results, 2); });
-        results.setOnKeyPressed(event -> { if (event.getCode() == KeyCode.ENTER) openSelectedStock(results, 2); });
-        Button openConditionStock = new Button("선택 종목 열기");
-        openConditionStock.setOnAction(event -> openSelectedStock(results, 2));
-        search.run();
-        return scrollPage("조건검색", new VBox(20, title, controls, limit, results, openConditionStock));
+        return scrollPage("조건검색", new VBox(20, title, notConnectedPanel("조건검색",
+                "ka10171 조건검색 목록조회, ka10172 조건검색 요청 일반, ka10173 조건검색 실시간")));
     }
 
     private ScrollPane createSupplyScreen() {
         Label title = heading("수급 분석");
-        FlowPane summary = wrappingRow(14,
-                summaryCard("외국인 순매수", "+2,430억원", "삼성전자 · 현대차 집중", "positive"),
-                summaryCard("기관 순매수", "+840억원", "반도체 · 금융", "positive"),
-                summaryCard("프로그램", "+960억원", "차익 +120 · 비차익 +840", "positive"));
-        TableView<ObservableList<String>> table = textTable("투자자별 순매수 상위",
-                List.of(row("삼성전자", "+320,140", "-120,300", "+42,100", "2.1조"),
-                        row("현대차", "+104,320", "+88,100", "+12,840", "8,420억"),
-                        row("SK하이닉스", "+82,100", "+54,200", "+18,210", "1.4조"),
-                        row("NAVER", "-38,920", "+30,120", "-4,820", "2,540억")),
-                "종목", "외국인", "기관", "프로그램", "거래대금");
-        table.setPrefHeight(350);
-        VBox program = new VBox(16,
-                wrappingRow(14, summaryCard("차익", "+120억원", "전일 대비 +42억", "positive"),
-                        summaryCard("비차익", "+840억원", "전일 대비 +180억", "positive"),
-                        summaryCard("전체", "+960억원", "순매수 우위", "positive")),
-                textTable("프로그램매매 시간대별 추이",
-                        List.of(row("14:30", "+120억", "+840억", "+960억"),
-                                row("14:00", "+84억", "+721억", "+805억"),
-                                row("13:30", "+35억", "+588억", "+623억")),
-                        "시간", "차익", "비차익", "전체"));
-        program.setPadding(new Insets(12));
-        VBox shortSelling = new VBox(16,
-                wrappingRow(14, summaryCard("시장 공매도 거래대금", "8,420억원", "전체의 3.8%", "neutral"),
-                        summaryCard("공매도 비중 증가", "42종목", "전일 대비 +8", "negative")),
-                textTable("공매도 비중 상위",
-                        List.of(row("셀트리온", "184,200원", "12.8%", "82,410", "+1.2%p"),
-                                row("LG에너지솔루션", "352,000원", "9.4%", "31,202", "+0.8%p"),
-                                row("NAVER", "205,000원", "7.2%", "54,129", "-0.3%p")),
-                        "종목", "현재가", "공매도 비중", "공매도량", "전일 대비"));
-        shortSelling.setPadding(new Insets(12));
-        VBox lending = new VBox(16,
-                wrappingRow(14, summaryCard("대차 잔고", "71.4조원", "전일 대비 +0.4조", "neutral"),
-                        summaryCard("대차 증가 상위", "삼성전자", "+1,240,000주", "negative")),
-                textTable("대차거래 증가 상위",
-                        List.of(row("삼성전자", "1,240,000", "48,210,000", "+2.64%"),
-                                row("SK하이닉스", "420,000", "12,840,000", "+3.38%"),
-                                row("에코프로", "188,200", "4,221,000", "+4.67%")),
-                        "종목", "증가량", "잔고", "증가율"));
-        lending.setPadding(new Insets(12));
-        TabPane tabs = new TabPane(tab("외국인 · 기관", table),
+        javafx.scene.Node investors = notConnectedPanel("외국인 · 기관 수급",
+                "ka10008 외국인 종목별 매매동향, ka10059 종목별투자자기관별, ka10131 기관외국인연속매매현황");
+        javafx.scene.Node program = notConnectedPanel("프로그램매매",
+                "ka90005 프로그램매매추이 시간대별, ka90006 프로그램매매차익잔고추이");
+        javafx.scene.Node shortSelling = notConnectedPanel("공매도", "ka10014 공매도추이요청");
+        javafx.scene.Node lending = notConnectedPanel("대차거래",
+                "ka10068 대차거래추이, ka10069 대차거래상위10종목");
+        TabPane tabs = new TabPane(tab("외국인 · 기관", investors),
                 tab("프로그램매매", program), tab("공매도", shortSelling), tab("대차거래", lending),
                 tab("거래원", createBrokerAnalysisPanel()));
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE); tabs.setPrefHeight(430);
-        return scrollPage("수급 분석", new VBox(20, title, summary, tabs));
+        return scrollPage("수급 분석", new VBox(20, title, tabs));
     }
 
     private ScrollPane createUsMarketScreen() {
@@ -1075,142 +1134,72 @@ public final class DesktopApplication extends Application {
         return scrollPage("미국주식", new VBox(20, titleRow, tabs));
     }
 
+    // 미국주식은 국내주식과 TR 체계가 완전히 다르다(usa*, ust*). 어댑터에 아직 구현하지
+    // 않았으므로 화면에 값을 지어내지 않는다. 특히 주문 화면은 실제로 주문을 보낼 수 없는데
+    // 보낼 수 있는 것처럼 보이면 안 된다.
+
     private VBox createUsHomePanel() {
-        FlowPane indices = wrappingRow(14,
-                summaryCard("NASDAQ", "18,425.30", "+0.42%", "positive"),
-                summaryCard("S&P 500", "5,582.10", "+0.31%", "positive"),
-                summaryCard("DOW", "40,125.22", "-0.12%", "negative"),
-                summaryCard("USD/KRW", "1,348.20", "-0.31%", "negative"));
-        TableView<ObservableList<String>> ranking = textTable("미국주식 랭킹",
-                List.of(row("NVDA", "NVIDIA", "$142.65", "+2.34%", "42.3M", "$3.5T"),
-                        row("AAPL", "Apple", "$228.40", "+0.83%", "31.8M", "$3.4T"),
-                        row("MSFT", "Microsoft", "$447.20", "+0.45%", "18.1M", "$3.3T"),
-                        row("TSLA", "Tesla", "$216.10", "-1.28%", "51.2M", "$690B")),
-                "티커", "종목", "현재가", "등락률", "거래량", "시가총액");
-        ranking.setPrefHeight(330);
-        Button fx = new Button("환전 화면 열기"); fx.setOnAction(event -> showFxDialog());
-        Button usOrder = primaryButton("미국주식 주문", () -> showUsOrderConfirmation("NVDA", "매수", 1, "142.50"));
-        HBox actions = new HBox(10, fx, usOrder);
-        VBox panel = new VBox(18, indices, ranking, actions); panel.setPadding(new Insets(12)); return panel;
+        VBox panel = new VBox(18, notConnectedPanel("미국 지수와 랭킹",
+                "usa10102 미국지수 리스트, usa20530 거래량상위, usa20540 거래대금상위"));
+        panel.setPadding(new Insets(12));
+        return panel;
     }
 
     private VBox createUsStockPanel() {
-        Label name = sectionHeading("NVIDIA · NVDA · NASDAQ");
-        Label price = styledLabel("$142.65 · +$3.26 · +2.34%", "stock-price");
-        FlowPane metrics = wrappingRow(12, miniMetric("시가", "$140.10"), miniMetric("고가", "$143.84"),
-                miniMetric("저가", "$139.72"), miniMetric("거래량", "42.3M"), miniMetric("시가총액", "$3.5T"));
-        TableView<ObservableList<String>> orderBook = textTable("NVIDIA 10호가",
-                List.of(row("매도", "$142.72", "18,420"), row("매도", "$142.70", "21,830"),
-                        row("매수", "$142.64", "14,221"), row("매수", "$142.62", "32,180")),
-                "구분", "가격", "잔량");
-        TableView<ObservableList<String>> trades = textTable("NVIDIA 체결",
-                List.of(row("09:32:01", "$142.65", "1,240", "매수"), row("09:31:59", "$142.62", "420", "매도")),
-                "현지 시간", "가격", "체결량", "구분");
-        TabPane detail = new TabPane(tab("차트", createChartPreview("NVDA 일봉 차트 UI")), tab("10호가", orderBook),
-                tab("체결", trades), tab("기업정보", createCompanyInfoPanel()));
-        detail.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE); detail.setPrefHeight(390);
-        VBox panel = new VBox(14, name, price, metrics, detail); panel.setPadding(new Insets(12)); return panel;
+        VBox panel = new VBox(14, notConnectedPanel("미국 종목 상세",
+                "usa20100 현재가 종목정보, usa20101 10호가, usa06012 일 차트"));
+        panel.setPadding(new Insets(12));
+        return panel;
     }
 
     private VBox createUsScannerPanel() {
-        ComboBox<String> exchange = new ComboBox<>(FXCollections.observableArrayList("NASDAQ", "NYSE", "AMEX")); exchange.setValue("NASDAQ");
-        ComboBox<String> condition = new ComboBox<>(FXCollections.observableArrayList("등락률", "거래량", "거래대금", "시가총액", "신고가", "갭", "연속상승"));
-        condition.setValue("등락률");
-        FlowPane filters = wrappingRow(10, labeledControl("거래소", exchange), labeledControl("조건", condition),
-                primaryButton("조회", () -> status.setText("미국주식 스캐너를 갱신했습니다.")));
-        filters.setAlignment(Pos.BOTTOM_LEFT);
-        TableView<ObservableList<String>> table = textTable("미국주식 스캐너",
-                List.of(row("1", "SMCI", "$724.30", "+8.42%", "12.8M", "거래량 급증"),
-                        row("2", "NVDA", "$142.65", "+2.34%", "42.3M", "신고가 근접"),
-                        row("3", "AMD", "$168.20", "+1.92%", "31.4M", "연속 상승")),
-                "순위", "티커", "현재가", "등락률", "거래량", "신호");
-        table.setPrefHeight(390); VBox panel = new VBox(16, filters, table); panel.setPadding(new Insets(12)); return panel;
+        VBox panel = new VBox(16, notConnectedPanel("미국주식 스캐너",
+                "usa20510 기간별 등락률상위, usa20530 거래량상위, usa24100 신고가/신저가"));
+        panel.setPadding(new Insets(12));
+        return panel;
     }
 
     private VBox createUsConditionPanel() {
-        ComboBox<String> condition = new ComboBox<>(FXCollections.observableArrayList("미국 기술주 돌파", "ETF 거래량 급증", "52주 신고가"));
-        condition.setValue("미국 기술주 돌파");
-        CheckBox realtime = new CheckBox("실시간 감시"); realtime.setSelected(true);
-        FlowPane controls = wrappingRow(12, condition, realtime, primaryButton("검색", () -> status.setText("미국 조건검색 결과 3건입니다.")));
-        TableView<ObservableList<String>> table = textTable("미국 조건검색 결과",
-                List.of(row("편입", "NVDA", "NVIDIA", "$142.65", "+2.34%"),
-                        row("편입", "AMD", "AMD", "$168.20", "+1.92%"),
-                        row("이탈", "TSLA", "Tesla", "$216.10", "-1.28%")),
-                "상태", "티커", "종목", "현재가", "등락률");
-        table.setPrefHeight(390); VBox panel = new VBox(16, controls, table); panel.setPadding(new Insets(12)); return panel;
+        VBox panel = new VBox(16, notConnectedPanel("미국 조건검색",
+                "usa20280 조건검색 목록조회, usa20281 조건검색 요청 일반"));
+        panel.setPadding(new Insets(12));
+        return panel;
     }
 
     private VBox createUsAccountPanel() {
-        FlowPane metrics = wrappingRow(12, summaryCard("미국주식 평가금액", "$24,820.50", "+$1,420.30", "positive"),
-                summaryCard("USD 예수금", "$3,280.40", "주문 가능 $3,120.00", "neutral"),
-                summaryCard("원화 환산", "37,890,000원", "환율 1,348.20원", "neutral"));
-        TableView<ObservableList<String>> holdings = textTable("미국주식 보유종목",
-                List.of(row("NVDA", "40", "$118.20", "$142.65", "+$978.00", "+20.68%"),
-                        row("AAPL", "25", "$210.40", "$228.40", "+$450.00", "+8.56%")),
-                "티커", "수량", "평균단가", "현재가", "평가손익", "수익률");
-        holdings.setPrefHeight(360); VBox panel = new VBox(16, metrics, holdings); panel.setPadding(new Insets(12)); return panel;
+        VBox panel = new VBox(16, notConnectedPanel("미국주식 계좌",
+                "ust21070 원장잔고확인, ust21110 해외주식 예수금, ust21120 통화별 예수금"));
+        panel.setPadding(new Insets(12));
+        return panel;
     }
 
     private VBox createUsWatchlistPanel() {
+        // 관심종목 자체는 사용자의 기록이라 그대로 보여 준다. 다만 미국주식 주문은 아직
+        // 연동하지 않았으므로 주문할 수 있는 것처럼 보이게 하지 않는다.
         return new WatchlistScreenView(watchlistViewModel, this::openWatchlistStock,
                 () -> startWatchlistSearch("미국"), status::setText)
-                .createUsPanel(selected -> showUsOrderConfirmation(selected.symbol(), "매수", 1,
-                        selected.displayPrice().replace("$", "").replace(",", "")));
+                .createUsPanel(selected -> status.setText(
+                        "미국주식 주문은 아직 연동되지 않았습니다. 연동 예정: ust20000 매수, ust20001 매도"));
     }
 
     private VBox createUsOrderPanel() {
-        ComboBox<String> side = new ComboBox<>(FXCollections.observableArrayList("매수", "매도")); side.setValue("매수");
-        ComboBox<String> type = new ComboBox<>(FXCollections.observableArrayList("지정가", "시장가")); type.setValue("지정가");
-        TextField ticker = new TextField("NVDA"); TextField price = new TextField("142.50"); Spinner<Integer> quantity = new Spinner<>(1, 10000, 1);
-        GridPane form = new GridPane(); form.setHgap(12); form.setVgap(12);
-        addField(form, 0, "티커", ticker); addField(form, 1, "매수 / 매도", side); addField(form, 2, "주문 유형", type);
-        addField(form, 3, "가격 USD", price); addField(form, 4, "수량", quantity);
-        Label safety = new Label("미국주식 주문은 통화·현지 시장·예상 원화금액까지 재확인합니다."); safety.getStyleClass().add("safety-note"); safety.setWrapText(true);
-        Button review = primaryButton("미국주식 주문 검토", () -> showUsOrderConfirmation(ticker.getText(), side.getValue(), quantity.getValue(), price.getText()));
-        VBox newOrder = new VBox(14, safety, form, informationRow("예상 주문금액", "$142.50 · 약 192,119원"), review);
-        newOrder.setPadding(new Insets(14));
-        TableView<ObservableList<String>> open = textTable("미국주식 미체결",
-                List.of(row("09:32", "NVDA", "매수", "$142.50", "2", "0", "2", "접수"),
-                        row("09:18", "AAPL", "매도", "$229.00", "3", "1", "2", "부분체결")),
-                "현지시간", "티커", "구분", "주문가", "수량", "체결", "잔여", "상태");
-        Button amend = new Button("선택 주문 정정"); amend.setOnAction(event -> showUsAmendDialog(open));
-        Button cancel = new Button("선택 주문 취소"); cancel.setOnAction(event -> cancelSelectedOrder(open));
-        VBox openPanel = new VBox(10, open, wrappingRow(8, amend, cancel)); openPanel.setPadding(new Insets(10));
-        TableView<ObservableList<String>> fills = textTable("미국주식 체결",
-                List.of(row("09:11", "MSFT", "매수", "$446.80", "2", "$893.60", "체결"),
-                        row("전일", "TSLA", "매도", "$218.20", "1", "$218.20", "체결")),
-                "현지시간", "티커", "구분", "체결가", "수량", "금액", "상태");
-        TabPane tabs = new TabPane(tab("신규 주문", newOrder), tab("미체결 · 정정 · 취소", openPanel), tab("체결", fills));
-        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE); tabs.setPrefHeight(480);
-        VBox panel = new VBox(tabs);
-        panel.setPadding(new Insets(18)); return panel;
+        VBox panel = new VBox(notConnectedPanel("미국주식 주문",
+                "ust20000 매수, ust20001 매도, ust20002 정정, ust20003 취소, ust21050 원장 미체결"));
+        panel.setPadding(new Insets(18));
+        return panel;
     }
 
     private VBox createUsResearchPanel() {
-        ListView<String> reports = new ListView<>(FXCollections.observableArrayList(
-                "2026-08-10 · NVIDIA · AI 가속기 수요와 하반기 전망",
-                "2026-08-08 · 반도체 산업 · 데이터센터 투자 사이클 점검",
-                "2026-08-05 · Apple · 서비스 매출과 신제품 전망"));
-        reports.setAccessibleText("미국주식 리서치 목록"); reports.setPrefHeight(330);
-        TextArea summary = new TextArea("AI 가속기 수요가 데이터센터 투자를 중심으로 이어지고 있습니다. 다음 실적에서 공급 일정과 마진 추이를 확인해야 합니다. 출처: 키움 미국주식 리서치 UI 예시.");
-        summary.setEditable(false); summary.setWrapText(true); summary.setPrefRowCount(5);
-        Button listen = new Button("선택 리서치 듣기");
-        listen.setOnAction(event -> requestSpeech(summary.getText(), "us-research-summary"));
-        VBox panel = new VBox(14, reports, summary, listen); panel.setPadding(new Insets(12)); return panel;
+        VBox panel = new VBox(14, notConnectedPanel("미국주식 리서치", "usa24300 미국주식 리서치"));
+        panel.setPadding(new Insets(12));
+        return panel;
     }
 
     private VBox createFxPanel() {
-        TextField amount = new TextField("1000000");
-        ComboBox<String> direction = new ComboBox<>(FXCollections.observableArrayList("KRW → USD", "USD → KRW")); direction.setValue("KRW → USD");
-        GridPane form = new GridPane(); form.setHgap(12); form.setVgap(12);
-        addField(form, 0, "환전 방향", direction); addField(form, 1, "환전 금액", amount);
-        VBox panel = new VBox(16,
-                wrappingRow(14, summaryCard("보유 KRW", "3,200,000원", "출금 가능 3,050,000원", "neutral"),
-                        summaryCard("보유 USD", "$3,280.40", "주문 가능 $3,120.00", "neutral"),
-                        summaryCard("현재 환율", "1,348.20원", "고시 환율 UI", "neutral")),
-                form, informationRow("예상 수령", "$741.73"),
-                primaryButton("환전 내용 검토", this::showFxDialog));
-        panel.setPadding(new Insets(12)); return panel;
+        VBox panel = new VBox(16, notConnectedPanel("환전",
+                "ust31301 환율조회, ust31300 환전 예상금액, ust31302 환전신청"));
+        panel.setPadding(new Insets(12));
+        return panel;
     }
 
     private ScrollPane createNotificationsScreen() {
@@ -1561,28 +1550,17 @@ public final class DesktopApplication extends Application {
     }
 
     private VBox createBrokerAnalysisPanel() {
-        TableView<ObservableList<String>> buy = textTable("매수 상위 거래원",
-                List.of(row("키움", "1,200,000", "28.4%"), row("미래", "980,000", "23.2%"), row("NH", "820,000", "19.4%")),
-                "매수 거래원", "수량", "비중");
-        TableView<ObservableList<String>> sell = textTable("매도 상위 거래원",
-                List.of(row("삼성", "1,040,000", "24.8%"), row("KB", "910,000", "21.7%"), row("한국", "760,000", "18.1%")),
-                "매도 거래원", "수량", "비중");
-        buy.setPrefHeight(250); sell.setPrefHeight(250);
-        SplitPane tables = new SplitPane(buy, sell); tables.setDividerPositions(0.5);
-        buy.setMinWidth(0); sell.setMinWidth(0);
-        VBox panel = new VBox(14, sectionHeading("삼성전자 거래원 분석"), tables); panel.setPadding(new Insets(12)); return panel;
+        VBox panel = new VBox(14, notConnectedPanel("거래원 분석",
+                "ka10040 당일주요거래원, ka10042 순매수거래원순위"));
+        panel.setPadding(new Insets(12));
+        return panel;
     }
 
     private VBox createStockProgramPanel() {
-        TableView<ObservableList<String>> table = textTable("삼성전자 프로그램매매",
-                List.of(row("14:30", "+18,420", "-12,100", "+6,320", "+42.8억"),
-                        row("14:00", "+15,820", "-11,240", "+4,580", "+31.2억"),
-                        row("13:30", "+12,210", "-9,840", "+2,370", "+16.1억")),
-                "시간", "매수", "매도", "순매수", "순매수 금액");
-        table.setPrefHeight(320);
-        VBox panel = new VBox(12, wrappingRow(12, summaryCard("당일 프로그램 순매수", "+42.8억원", "+6,320주", "positive"),
-                summaryCard("5일 누적", "+184억원", "순매수 지속", "positive")), table);
-        panel.setPadding(new Insets(12)); return panel;
+        VBox panel = new VBox(12, notConnectedPanel("프로그램매매",
+                "ka90004 종목별프로그램매매현황, ka90008 종목시간별프로그램매매추이"));
+        panel.setPadding(new Insets(12));
+        return panel;
     }
 
     private VBox createChartPreview(String accessibleName) {
@@ -1599,111 +1577,19 @@ public final class DesktopApplication extends Application {
         VBox panel = new VBox(12, indicators, chart); panel.setPadding(new Insets(10)); return panel;
     }
 
-    private GridPane createCompanyInfoPanel() {
-        GridPane grid = new GridPane(); grid.setHgap(28); grid.setVgap(16); grid.setPadding(new Insets(22));
-        addInfo(grid, 0, 0, "기업", "NVIDIA Corporation"); addInfo(grid, 1, 0, "산업", "Semiconductors");
-        addInfo(grid, 0, 1, "시가총액", "$3.5T"); addInfo(grid, 1, 1, "PER", "55.2배");
-        addInfo(grid, 0, 2, "52주 최고", "$152.89"); addInfo(grid, 1, 2, "52주 최저", "$45.01");
-        return grid;
-    }
-
-    private String selectedName(TableView<ObservableList<String>> table, int index, String fallback) {
-        ObservableList<String> selected = table.getSelectionModel().getSelectedItem();
-        return selected == null || selected.size() <= index ? fallback : selected.get(index);
-    }
-
-    private void sortMarketRows(TableView<ObservableList<String>> table, String criterion) {
-        int column = switch (criterion) {
-            case "거래량" -> 4;
-            case "거래대금" -> 5;
-            default -> 3;
-        };
-        java.util.Comparator<ObservableList<String>> comparator = java.util.Comparator.comparingDouble(
-                row -> numericMagnitude(row.get(column)));
-        if (!criterion.equals("하락률")) comparator = comparator.reversed();
-        FXCollections.sort(table.getItems(), comparator);
-        for (int i = 0; i < table.getItems().size(); i++) table.getItems().get(i).set(0, Integer.toString(i + 1));
-        table.refresh(); status.setText(criterion + " 기준으로 시장 종목을 정렬했습니다.");
-    }
-
-    private double numericMagnitude(String value) {
-        if (value == null) return 0;
-        double multiplier = value.contains("조") ? 1_000_000_000_000d : value.contains("억") ? 100_000_000d : 1d;
-        String normalized = value.replaceAll("[^0-9.+-]", "");
-        try { return normalized.isBlank() ? 0 : Double.parseDouble(normalized) * multiplier; }
-        catch (NumberFormatException ignored) { return 0; }
-    }
-
-    private void showProductDetail(String productType, String productName) {
-        Dialog<ButtonType> dialog = new Dialog<>(); dialog.setTitle(productType + " 상세");
-        dialog.setHeaderText(productName);
-        CandlestickChartView chart = new CandlestickChartView(dailyPriceHistory("005930", 30));
-        TableView<ObservableList<String>> quote = textTable(productName + " 호가",
-                List.of(row("매도", "36,140원", "8,240"), row("매도", "36,130원", "12,410"),
-                        row("매수", "36,120원", "9,820"), row("매수", "36,110원", "14,200")),
-                "구분", "가격", "잔량");
-        GridPane info = new GridPane(); info.setHgap(24); info.setVgap(14); info.setPadding(new Insets(18));
-        addInfo(info, 0, 0, "상품 구분", productType); addInfo(info, 1, 0, "현재가", "36,120원");
-        addInfo(info, 0, 1, "등락률", "+1.02%"); addInfo(info, 1, 1, "거래량", "1,284,220");
-        addInfo(info, 0, 2, "위험 등급", productType.equals("ELW") ? "매우 높음" : "보통");
-        TabPane tabs = new TabPane(tab("차트", chart), tab("호가", quote), tab("상품정보", info));
-        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE); tabs.setPrefHeight(480);
-        Button buy = primaryButton("매수 검토", () -> showCommodityOrderConfirmation(productName, "매수"));
-        Button sell = new Button("매도 검토"); sell.setOnAction(event -> showCommodityOrderConfirmation(productName, "매도"));
-        VBox content = new VBox(12, tabs, wrappingRow(8, buy, sell)); content.setPadding(new Insets(8));
-        dialog.getDialogPane().setContent(content); dialog.getDialogPane().getButtonTypes().setAll(ButtonType.CLOSE);
-        double maxWidth = javafx.stage.Screen.getPrimary().getVisualBounds().getWidth() * 0.82;
-        double maxHeight = javafx.stage.Screen.getPrimary().getVisualBounds().getHeight() * 0.82;
-        dialog.getDialogPane().setPrefSize(Math.min(920, maxWidth), Math.min(680, maxHeight));
-        dialog.showAndWait();
-    }
-
+    /**
+     * 신용거래 안내.
+     *
+     * <p>신용 한도와 이율은 계좌마다 다르고 증권사에서 받아야 하는 값이다. 원금 초과 손실이
+     * 가능한 거래라 예시 숫자를 보여 주는 것 자체가 위험하다.
+     */
     private VBox createCreditTradingPanel() {
-        Label warning = stateBanner("신용거래는 원금 초과 손실 가능성이 있습니다. 위험 안내를 확인해야 주문 검토가 활성화됩니다.", "warning");
-        CheckBox consent = new CheckBox("신용거래 위험과 이자 비용을 확인했습니다.");
-        ComboBox<String> type = new ComboBox<>(FXCollections.observableArrayList("유통융자", "자기융자", "대주")); type.setValue("유통융자");
-        TextField security = new TextField("삼성전자"); TextField price = new TextField("72,500");
-        Spinner<Integer> quantity = new Spinner<>(1, 100_000, 10);
-        GridPane form = new GridPane(); form.setHgap(12); form.setVgap(10);
-        addField(form, 0, "신용 구분", type); addField(form, 1, "종목", security); addField(form, 2, "가격", price); addField(form, 3, "수량", quantity);
-        Button review = primaryButton("신용주문 검토", () -> showCommodityOrderConfirmation(security.getText(), "신용 매수"));
-        review.disableProperty().bind(consent.selectedProperty().not());
-        VBox panel = new VBox(14, warning, wrappingRow(12, summaryCard("신용 한도", "10,000,000원", "사용 0원", "neutral"),
-                summaryCard("적용 이율", "연 7.5%", "UI 예시", "neutral"), summaryCard("상환 기한", "90일", "종목별 상이", "neutral")),
-                consent, form, informationRow("예상 신용 주문금액", "725,000원"), review);
-        panel.setPadding(new Insets(14)); return panel;
-    }
-
-    private void showUsOrderConfirmation(String ticker, String side, int quantity, String price) {
-        Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION);
-        confirmation.setTitle("미국주식 모의주문 재확인");
-        confirmation.setHeaderText(ticker + " " + quantity + "주를 " + side + "하시겠습니까?");
-        confirmation.setContentText("지정가: $" + price + "\n예상 주문금액: $" + price
-                + "\n예상 원화금액: 약 192,119원\n계좌: 미국주식 모의계좌 ****-7781\n\nUI 데모이며 실제 주문은 전송되지 않습니다.");
-        confirmation.showAndWait();
-    }
-
-    private void showUsAmendDialog(TableView<ObservableList<String>> table) {
-        ObservableList<String> selected = table.getSelectionModel().getSelectedItem();
-        if (selected == null) {
-            showInformation("주문을 선택하세요", "정정할 미국주식 미체결 주문을 선택해주세요.");
-            return;
-        }
-        TextInputDialog priceDialog = new TextInputDialog(selected.get(3).replace("$", ""));
-        priceDialog.setTitle("미국주식 모의주문 정정");
-        priceDialog.setHeaderText(selected.get(1) + " 정정 가격을 USD로 입력하세요.");
-        priceDialog.setContentText("정정 가격");
-        priceDialog.showAndWait().ifPresent(value -> {
-            try {
-                BigDecimal parsed = new BigDecimal(value.trim());
-                if (parsed.signum() <= 0) throw new IllegalArgumentException();
-                selected.set(3, "$" + parsed.setScale(2, java.math.RoundingMode.HALF_UP));
-                selected.set(7, "정정 접수"); table.refresh();
-                status.setText(selected.get(1) + " 미국주식 주문 정정을 모의 접수했습니다.");
-            } catch (RuntimeException invalid) {
-                showInformation("가격을 확인하세요", "0보다 큰 숫자를 입력해주세요.");
-            }
-        });
+        Label warning = stateBanner(
+                "신용거래는 원금 초과 손실 가능성이 있습니다. 한도와 이율은 계좌마다 다릅니다.", "warning");
+        VBox panel = new VBox(14, warning, notConnectedPanel("신용거래",
+                "kt20016 신용융자 가능종목, kt00012 신용보증금율별 주문가능수량, kt10006 신용 매수주문"));
+        panel.setPadding(new Insets(14));
+        return panel;
     }
 
     private void showAlertRuleDialog(AlertRule existing) {
@@ -1795,27 +1681,39 @@ public final class DesktopApplication extends Application {
         });
     }
 
-    private void showCommodityOrderConfirmation(String product, String side) {
-        Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION);
-        confirmation.setTitle(product + " 모의주문 재확인");
-        confirmation.setHeaderText(product + " 10g을 " + side + "하시겠습니까?");
-        confirmation.setContentText("가격: 128,450원/g\n예상 주문금액: 1,284,500원\n계좌: 금현물 모의계좌 ****-1204\n\nUI 데모이며 실제 주문은 전송되지 않습니다.");
-        confirmation.showAndWait();
+    /**
+     * 주문 상태 표.
+     *
+     * <p>모의주문 엔진이 들고 있는 실제 주문에서 만든다. 예전에는 예시 주문을 적어 두어,
+     * 사용자가 낸 주문과 앱이 넣어 둔 예시를 구분할 수 없었다.
+     */
+    private TableView<ObservableList<String>> orderStatusTable(boolean open) {
+        List<Order> orders = open
+                ? tradingUseCase.openOrders()
+                : tradingUseCase.orders().stream().filter(order -> order.status().isTerminal()).toList();
+        // 주문번호를 함께 보여 준다. 취소·정정은 이 번호로 원주문을 지정하고, 사용자도
+        // 증권사 화면과 대조할 수 있어야 한다.
+        List<String[]> rows = orders.stream().map(order -> row(
+                order.orderId(),
+                orderTime(order),
+                order.name(),
+                order.side().displayName(),
+                order.limitPrice() == null ? "시장가" : Formatters.won(order.limitPrice()),
+                Long.toString(order.quantity()),
+                Long.toString(order.filledQuantity()),
+                Long.toString(order.remainingQuantity()),
+                order.status().displayName())).toList();
+        TableView<ObservableList<String>> table = textTable(open ? "미체결 주문" : "체결·종료 주문", rows,
+                "주문번호", "시간", "종목", "구분", "주문가", "수량", "체결", "잔여", "상태");
+        table.setPlaceholder(new Label(open
+                ? "미체결 주문이 없습니다." : "체결되었거나 종료된 주문이 없습니다."));
+        return table;
     }
 
-    private TableView<ObservableList<String>> orderStatusTable(boolean open) {
-        if (open) {
-            return textTable("미체결 주문",
-                    List.of(row("14:30", "삼성전자", "매수", "72,400원", "10", "5", "5", "부분체결"),
-                            row("14:18", "SK하이닉스", "매수", "183,000원", "3", "0", "3", "접수"),
-                            row("14:02", "현대차", "매도", "281,000원", "2", "0", "2", "결과 확인 중")),
-                    "시간", "종목", "구분", "주문가", "수량", "체결", "잔여", "상태");
-        }
-        return textTable("체결 주문",
-                List.of(row("14:22", "NAVER", "매도", "시장가", "3", "3", "205,000원", "체결"),
-                        row("13:05", "삼성전자", "매수", "71,800원", "5", "5", "71,800원", "체결"),
-                        row("12:48", "카카오", "매수", "44,800원", "10", "0", "-", "거부 · 주문가능금액 부족")),
-                "시간", "종목", "구분", "주문가", "수량", "체결", "체결가", "상태");
+    /** 주문 접수 시각을 화면 표기로 바꾼다. */
+    private static String orderTime(Order order) {
+        return java.time.LocalDateTime.ofInstant(order.createdAt(), java.time.ZoneId.of("Asia/Seoul"))
+                .format(java.time.format.DateTimeFormatter.ofPattern("MM/dd HH:mm"));
     }
 
     private VBox createUiStatePanel() {
@@ -1833,8 +1731,10 @@ public final class DesktopApplication extends Application {
 
     private Node createStateContent(String state, ComboBox<String> selector) {
         if (state == null || state.equals("정상")) {
-            TableView<ObservableList<String>> table = textTable("정상 데이터 예시",
-                    List.of(row("삼성전자", "72,500원", "+2.12%"), row("SK하이닉스", "184,500원", "+1.42%")),
+            // 이 표는 화면 상태 구성요소를 확인하려는 견본이다. 실제 종목명을 쓰면 시세로
+            // 오해할 수 있어, 값이 아니라 자리라는 것이 드러나는 문자열을 쓴다.
+            TableView<ObservableList<String>> table = textTable("정상 상태 표 견본",
+                    List.of(row("종목 A", "가격 1", "등락률 1"), row("종목 B", "가격 2", "등락률 2")),
                     "종목", "현재가", "등락률"); table.setPrefHeight(260); return table;
         }
         if (state.equals("로딩 중")) {
@@ -1876,68 +1776,113 @@ public final class DesktopApplication extends Application {
         transition.setOnFinished(event -> selector.setValue("정상")); transition.play();
     }
 
+    /**
+     * 주문 정정 안내.
+     *
+     * <p>정정은 별도 TR(kt10002)이며 아직 연동하지 않았다. 예전에는 표의 글자만 바꿔 정정된
+     * 것처럼 보이게 했는데, 실제로는 원주문이 그대로 살아 있었다. 화면을 볼 수 없는 사용자는
+     * 정정되었다고 안내받고도 옛 가격으로 체결될 수 있었다.
+     *
+     * <p>연동 전까지는 취소 후 재주문으로 안내한다. 두 동작 모두 실제로 증권사에 전달된다.
+     */
     private void showAmendOrderDialog(TableView<ObservableList<String>> table) {
         ObservableList<String> selected = table.getSelectionModel().getSelectedItem();
         if (selected == null) {
             showInformation("주문을 선택하세요", "정정할 미체결 주문을 먼저 선택해주세요.");
             return;
         }
-        if (selected.get(7).contains("결과 확인")) {
-            showInformation("정정할 수 없습니다", "주문 결과를 확인 중입니다. 상태 동기화가 끝난 뒤 다시 시도해주세요.");
-            return;
-        }
-        Dialog<ButtonType> dialog = new Dialog<>(); dialog.setTitle("모의주문 정정");
-        dialog.setHeaderText(selected.get(1) + " 주문을 정정합니다.");
-        TextField price = new TextField(selected.get(3).replaceAll("[^0-9.]", ""));
-        Spinner<Integer> quantity = new Spinner<>(1, 1_000_000, Integer.parseInt(selected.get(6)));
-        GridPane form = new GridPane(); form.setHgap(12); form.setVgap(12);
-        form.add(informationRow("기존 주문", selected.get(3) + " · 잔여 " + selected.get(6) + "주"), 0, 0, 2, 1);
-        form.add(new Label("정정 가격"), 0, 1); form.add(price, 1, 1);
-        form.add(new Label("정정 수량"), 0, 2); form.add(quantity, 1, 2);
-        form.add(stateBanner("정정 주문도 최종 확인 후 한 번만 제출됩니다.", "warning"), 0, 3, 2, 1);
-        dialog.getDialogPane().setContent(form);
-        ButtonType submit = new ButtonType("정정 확인", ButtonBar.ButtonData.OK_DONE);
-        dialog.getDialogPane().getButtonTypes().setAll(submit, ButtonType.CANCEL);
-        dialog.showAndWait().filter(submit::equals).ifPresent(result -> {
-            selected.set(3, Formatters.won(new BigDecimal(price.getText().replace(",", ""))));
-            selected.set(4, Integer.toString(quantity.getValue()));
-            selected.set(6, Integer.toString(quantity.getValue()));
-            selected.set(7, "정정 접수");
-            table.refresh();
-            status.setText(selected.get(1) + " 주문 정정을 모의 접수했습니다.");
-            announce(selected.get(1) + " 주문 정정이 접수되었습니다.", SpeechPriority.ORDER, "amend-" + selected.get(0));
-        });
+        String message = "주문 정정은 아직 연동되지 않았습니다. 연동 예정: kt10002 주식 정정주문\n\n"
+                + "지금은 선택 주문을 취소한 뒤 새로 주문해주세요. 취소와 신규 주문은 실제로 "
+                + "키움 모의투자 계좌에 전달됩니다.\n\n"
+                + "선택한 주문번호: " + selected.get(0) + " · " + selected.get(2);
+        status.setText("주문 정정은 아직 연동되지 않았습니다. 취소 후 재주문해주세요.");
+        showInformation("주문 정정을 사용할 수 없습니다", message);
     }
 
+    /**
+     * 선택한 주문을 취소한다.
+     *
+     * <p>예전에는 표의 글자만 바꿔 취소한 것처럼 보이게 했다. 실제로는 취소되지 않았으므로,
+     * 화면을 볼 수 없는 사용자는 취소되었다고 안내받고도 주문이 살아 있는 상태였다.
+     * 이제 증권사에 취소를 보내고 결과를 다시 읽어 온다.
+     */
     private void cancelSelectedOrder(TableView<ObservableList<String>> table) {
         ObservableList<String> selected = table.getSelectionModel().getSelectedItem();
         if (selected == null) {
             showInformation("주문을 선택하세요", "취소할 미체결 주문을 먼저 선택해주세요.");
             return;
         }
-        if (selected.get(7).contains("결과 확인")) {
-            showInformation("취소할 수 없습니다", "주문 결과를 확인 중입니다. 중복 취소를 막기 위해 잠시 기다려주세요.");
-            return;
-        }
+        String orderId = selected.get(0);
+        String name = selected.get(2);
         Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION);
-        confirmation.setTitle("모의주문 취소 재확인");
-        confirmation.setHeaderText(selected.get(1) + " 잔여 " + selected.get(6) + "주를 취소하시겠습니까?");
-        confirmation.setContentText("원주문 가격: " + selected.get(3) + "\n계좌: 모의계좌 ****-1204\n\n실제 주문은 전송되지 않습니다.");
+        confirmation.setTitle("주문 취소 재확인");
+        confirmation.setHeaderText(name + " 잔여 " + selected.get(7) + "주를 취소하시겠습니까?");
+        confirmation.setContentText("주문번호: " + orderId + "\n원주문 가격: " + selected.get(4)
+                + "\n\n키움 모의투자 계좌로 취소 요청을 보냅니다.");
         confirmation.showAndWait().filter(ButtonType.OK::equals).ifPresent(result -> {
-            selected.set(6, "0"); selected.set(7, "취소"); table.refresh();
-            status.setText(selected.get(1) + " 주문을 모의 취소했습니다.");
+            try {
+                Order cancelled = tradingUseCase.cancel(orderId);
+                String message = name + " 주문번호 " + orderId + " 을(를) 취소했습니다. 상태 "
+                        + cancelled.status().displayName();
+                status.setText(message);
+                addNotification("주문", message);
+                announce(message, SpeechPriority.ORDER, "order-cancel-" + orderId);
+                play(SoundCue.SUCCESS);
+                screenController.invalidate(Screen.TRADING);
+                screenController.invalidate(Screen.ACCOUNT);
+            } catch (RuntimeException failure) {
+                String reason = failure.getMessage() == null || failure.getMessage().isBlank()
+                        ? failure.getClass().getSimpleName() : failure.getMessage();
+                // 취소 실패를 성공처럼 보이게 두면 안 된다. 주문은 아직 살아 있을 수 있다.
+                status.setText("주문 취소에 실패했습니다. " + reason);
+                addNotification("주문", "주문번호 " + orderId + " 취소에 실패했습니다. " + reason);
+                announce("주문 취소에 실패했습니다. " + reason, SpeechPriority.CRITICAL,
+                        "order-cancel-failed-" + orderId);
+                play(SoundCue.ERROR);
+                showInformation("주문을 취소하지 못했습니다", reason
+                        + "\n\n주문이 아직 남아 있을 수 있습니다. 미체결 목록을 다시 확인해주세요.");
+            }
         });
     }
 
+    /**
+     * 미체결 주문을 모두 취소한다.
+     *
+     * <p>한 건이라도 실패하면 몇 건이 남았는지 함께 알린다. 일부만 취소되었는데 전부
+     * 취소되었다고 안내하면, 남은 주문이 그대로 체결될 수 있다.
+     */
     private void cancelAllOrders(TableView<ObservableList<String>> table) {
+        List<String> orderIds = tradingUseCase.openOrders().stream().map(Order::orderId).toList();
+        if (orderIds.isEmpty()) {
+            showInformation("취소할 주문이 없습니다", "미체결 주문이 없습니다.");
+            return;
+        }
         Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION,
-                "결과 확인 중인 주문을 제외한 모든 미체결 주문을 취소하시겠습니까?", ButtonType.OK, ButtonType.CANCEL);
+                "미체결 주문 " + orderIds.size() + "건을 모두 취소하시겠습니까?",
+                ButtonType.OK, ButtonType.CANCEL);
         confirmation.setHeaderText("미체결 전량 취소 재확인");
         confirmation.showAndWait().filter(ButtonType.OK::equals).ifPresent(result -> {
-            table.getItems().stream().filter(row -> !row.get(7).contains("결과 확인")).forEach(row -> {
-                row.set(6, "0"); row.set(7, "취소");
-            });
-            table.refresh(); status.setText("미체결 주문을 모의 전량 취소했습니다.");
+            int cancelled = 0;
+            List<String> failures = new java.util.ArrayList<>();
+            for (String orderId : orderIds) {
+                try {
+                    tradingUseCase.cancel(orderId);
+                    cancelled++;
+                } catch (RuntimeException failure) {
+                    failures.add(orderId);
+                }
+            }
+            String message = failures.isEmpty()
+                    ? "미체결 주문 " + cancelled + "건을 취소했습니다."
+                    : "미체결 주문 " + cancelled + "건을 취소했고 " + failures.size()
+                            + "건은 취소하지 못했습니다. 주문번호 " + String.join(", ", failures);
+            status.setText(message);
+            addNotification("주문", message);
+            announce(message, failures.isEmpty() ? SpeechPriority.ORDER : SpeechPriority.CRITICAL,
+                    "order-cancel-all");
+            play(failures.isEmpty() ? SoundCue.SUCCESS : SoundCue.ERROR);
+            screenController.invalidate(Screen.TRADING);
+            screenController.invalidate(Screen.ACCOUNT);
         });
     }
 
@@ -1946,50 +1891,30 @@ public final class DesktopApplication extends Application {
         alert.setHeaderText(title); alert.showAndWait();
     }
 
-    private void showFxDialog() {
-        Dialog<ButtonType> dialog = new Dialog<>(); dialog.setTitle("환전 예상"); dialog.setHeaderText("KRW에서 USD로 환전");
-        TextField amount = new TextField("1000000");
-        GridPane form = new GridPane(); form.setHgap(12); form.setVgap(12);
-        form.add(new Label("보유 KRW"), 0, 0); form.add(new Label("3,200,000원"), 1, 0);
-        form.add(new Label("적용 환율"), 0, 1); form.add(new Label("1 USD = 1,348.20 KRW"), 1, 1);
-        form.add(new Label("환전 금액"), 0, 2); form.add(amount, 1, 2);
-        form.add(new Label("예상 수령"), 0, 3); form.add(new Label("약 741.73 USD"), 1, 3);
-        Label note = new Label("UI 데모이며 실제 환전은 신청되지 않습니다."); note.getStyleClass().add("safety-note");
-        form.add(note, 0, 4, 2, 1); dialog.getDialogPane().setContent(form);
-        dialog.getDialogPane().getButtonTypes().setAll(new ButtonType("환전 내용 확인", ButtonBar.ButtonData.OK_DONE), ButtonType.CANCEL);
-        dialog.showAndWait();
+    /**
+     * 알림을 쌓는다.
+     *
+     * <p>알림 화면의 분류 필터가 {@code · 분류 ·} 형태를 찾으므로 표기를 맞춘다. 읽지 않은
+     * 알림은 앞에 표시를 붙여, 목록을 소리로 훑을 때도 새 알림을 구분할 수 있게 한다.
+     *
+     * @param category 주문, 가격, 이상 감지, 연결 중 하나
+     */
+    private void addNotification(String category, String message) {
+        String stamp = java.time.LocalTime.now().format(
+                java.time.format.DateTimeFormatter.ofPattern("HH:mm"));
+        session.notifications().add(0, "새 알림 · " + stamp + " · " + category + " · " + message);
+        // 오래된 알림이 무한정 쌓이지 않게 한다.
+        while (session.notifications().size() > 200) {
+            session.notifications().remove(session.notifications().size() - 1);
+        }
+    }
+
+    /** 손익 금액을 부호와 함께 표기한다. */
+    private static String signedWon(BigDecimal value) {
+        return (value.signum() >= 0 ? "+" : "-") + Formatters.won(value.abs());
     }
 
     /** 조회 결과의 등락률을 부호와 함께 표기한다. 값을 새로 만들지 않는다. */
-    /**
-     * 호가창을 화면 표 행으로 변환한다.
-     *
-     * <p>매도는 먼 가격부터(화면 위쪽) 가까운 가격 순으로, 매수는 가까운 가격부터
-     * 먼 가격 순으로 늘어놓는다. 실제 호가창을 위아래로 훑을 때 익숙한 순서다.
-     */
-    private List<String[]> orderBookRows(OrderBook book) {
-        List<String[]> rows = new java.util.ArrayList<>();
-        List<OrderBookLevel> descendingAsks = new java.util.ArrayList<>(book.levels());
-        descendingAsks.sort((a, b) -> Integer.compare(b.level(), a.level()));
-        for (OrderBookLevel level : descendingAsks) {
-            if (level.hasAsk()) {
-                rows.add(row("매도", stockDetailViewModel.formatPrice(level.askPrice()),
-                        String.format("%,d", level.askSize()), signedQuantity(level.askDelta())));
-            }
-        }
-        for (OrderBookLevel level : book.levels()) {
-            if (level.hasBid()) {
-                rows.add(row("매수", stockDetailViewModel.formatPrice(level.bidPrice()),
-                        String.format("%,d", level.bidSize()), signedQuantity(level.bidDelta())));
-            }
-        }
-        return rows;
-    }
-
-    private static String signedQuantity(long delta) {
-        return (delta >= 0 ? "+" : "") + String.format("%,d", delta);
-    }
-
     private static String signedChangeRate(StockDetail detail) {
         BigDecimal rate = detail.changeRate().setScale(2, java.math.RoundingMode.HALF_UP);
         String sign = detail.direction() == PriceDirection.DOWN ? "-" : rate.signum() > 0 ? "+" : "";
@@ -2019,6 +1944,7 @@ public final class DesktopApplication extends Application {
                 Order receipt = tradingUseCase.submitConfirmed(request, referencePrice);
                 String receiptMessage = receipt.describe();
                 status.setText(receiptMessage + " 주문번호 " + receipt.orderId());
+                addNotification("주문", receiptMessage + " 주문번호 " + receipt.orderId());
                 announce(receiptMessage, SpeechPriority.ORDER, "order-" + receipt.orderId()); play(SoundCue.SUCCESS);
                 Alert completed = new Alert(Alert.AlertType.INFORMATION);
                 completed.setTitle("모의주문 접수 결과");
@@ -2030,19 +1956,30 @@ public final class DesktopApplication extends Application {
                 completed.showAndWait().filter(back::equals).ifPresent(resultButton -> navigateBack());
             });
         } catch (RuntimeException exception) {
-            status.setText("주문 입력 오류: " + exception.getMessage());
-            announce("주문 입력 오류. " + exception.getMessage(), SpeechPriority.CRITICAL, "order-input-error"); play(SoundCue.ERROR);
-            Alert alert = new Alert(Alert.AlertType.ERROR, exception.getMessage(), ButtonType.OK); alert.setHeaderText("주문 입력을 확인하세요."); alert.showAndWait();
+            String reason = exception.getMessage() == null || exception.getMessage().isBlank()
+                    ? exception.getClass().getSimpleName() : exception.getMessage();
+            status.setText("주문 입력 오류: " + reason);
+            // 실패도 알림에 남긴다. 소리로만 알리면 지나간 뒤에 확인할 방법이 없다.
+            addNotification("주문", "주문이 처리되지 않았습니다. " + reason);
+            announce("주문 입력 오류. " + reason, SpeechPriority.CRITICAL, "order-input-error"); play(SoundCue.ERROR);
+            Alert alert = new Alert(Alert.AlertType.ERROR, reason, ButtonType.OK); alert.setHeaderText("주문 입력을 확인하세요."); alert.showAndWait();
         }
     }
 
     private HBox createStatusBar() {
         status.setWrapText(true);
-        Label rest = new Label("REST 미연결"); rest.getStyleClass().addAll("status-item", "status-mock");
+        // 지금 보는 값이 실제 시세인지 가짜 데이터인지 항상 드러낸다. 화면을 볼 수 없는
+        // 사용자가 조회 결과의 출처를 확인할 수 있어야 한다.
+        boolean live = marketDataSource.startsWith("키움");
+        Label rest = new Label(live ? "REST " + marketDataSource : "REST 미연결");
+        rest.getStyleClass().addAll("status-item", live ? "status-live" : "status-mock");
+        rest.setAccessibleText(live
+                ? "시세 공급원. " + marketDataSource + " 에 연결되어 있습니다."
+                : "시세 공급원. 증권사에 연결되어 있지 않습니다. " + marketDataSource);
         Label realtime = new Label("실시간 미연결"); realtime.getStyleClass().addAll("status-item", "status-mock");
         Label mode = new Label("모의투자"); mode.getStyleClass().addAll("status-item", "status-mock");
         Label subscriptions = new Label("실시간 구독 0 / 200"); subscriptions.getStyleClass().add("status-item");
-        lastDataTime.setText("데모 시세 · 로컬 스냅샷");
+        lastDataTime.setText(live ? "조회 시세 · 요청 시점 기준" : "데모 시세 · 로컬 스냅샷");
         lastDataTime.getStyleClass().add("status-item");
         Region spacer = new Region(); HBox.setHgrow(spacer, Priority.ALWAYS);
         HBox bar = new HBox(14, status, spacer, rest, realtime, mode, subscriptions, lastDataTime);

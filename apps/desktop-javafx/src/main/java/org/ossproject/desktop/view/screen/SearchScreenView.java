@@ -69,7 +69,11 @@ public final class SearchScreenView {
                 emptyState.setText(result.count() == 0 ? message : "");
                 status.accept(message);
                 if (focusResults && result.count() > 0) {
-                    results.getSelectionModel().selectFirst();
+                    // 검색어와 정확히 일치하는 종목이 있으면 그걸 선택해 둔다. 없으면 첫 행.
+                    viewModel.preferredItem().ifPresentOrElse(
+                            preferred -> results.getSelectionModel().select(preferred),
+                            () -> results.getSelectionModel().selectFirst());
+                    results.scrollTo(results.getSelectionModel().getSelectedIndex());
                     Platform.runLater(results::requestFocus);
                 }
             });

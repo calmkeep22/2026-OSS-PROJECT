@@ -81,6 +81,7 @@ dependencies {
     implementation(project(":modules:sonification"))
     implementation(project(":modules:sonification-java-sound"))
     implementation(project(":modules:fake-adapters"))
+    implementation(project(":modules:kiwoom-adapter"))
     implementation(project(":modules:secret-store-api"))
     implementation(project(":modules:windows-secret-store"))
 
