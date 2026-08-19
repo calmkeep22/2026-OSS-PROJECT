@@ -1,14 +1,20 @@
 package org.ossproject.desktop.composition;
 
+import org.ossproject.application.port.AccountPort;
 import org.ossproject.application.port.CandleQueryPort;
+import org.ossproject.application.port.OrderLifecyclePort;
 import org.ossproject.application.port.StockQueryPort;
+import org.ossproject.finance.model.Account;
 import org.ossproject.finance.model.Candle;
 import org.ossproject.finance.model.CandleInterval;
+import org.ossproject.finance.model.Order;
+import org.ossproject.finance.model.OrderCommand;
 import org.ossproject.finance.model.SecuritySummary;
 import org.ossproject.finance.model.StockDetail;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * 증권사에 연결되지 않았을 때 쓰는 시세 조회 구현.
@@ -23,7 +29,8 @@ import java.util.Objects;
  * <p>가짜 어댑터는 테스트와 화면 개발에서 계속 쓴다. 다만 실행 중인 앱에서 실제 시세인 척
  * 하지 않게 한다.
  */
-final class UnavailableMarketData implements StockQueryPort, CandleQueryPort {
+final class UnavailableMarketData
+        implements StockQueryPort, CandleQueryPort, AccountPort, OrderLifecyclePort {
 
     private final String reason;
 
@@ -43,6 +50,36 @@ final class UnavailableMarketData implements StockQueryPort, CandleQueryPort {
 
     @Override
     public List<Candle> getCandles(String symbol, CandleInterval interval, int count) {
+        throw unavailable();
+    }
+
+    @Override
+    public Account getAccount() {
+        throw unavailable();
+    }
+
+    @Override
+    public Order submit(OrderCommand command) {
+        throw unavailable();
+    }
+
+    @Override
+    public Order cancel(String orderId) {
+        throw unavailable();
+    }
+
+    @Override
+    public Optional<Order> findOrder(String orderId) {
+        throw unavailable();
+    }
+
+    @Override
+    public List<Order> openOrders() {
+        throw unavailable();
+    }
+
+    @Override
+    public List<Order> orders() {
         throw unavailable();
     }
 
