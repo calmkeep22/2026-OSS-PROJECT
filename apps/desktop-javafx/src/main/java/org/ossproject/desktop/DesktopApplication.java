@@ -239,8 +239,9 @@ public final class DesktopApplication extends Application {
     private VBox createSidebar() {
         Label product = new Label("OpenStock\nAccess");
         product.getStyleClass().add("sidebar-title");
-        Label mode = new Label("모의투자 · UI 데모");
+        Label mode = new Label(marketDataSource.startsWith("키움") ? "키움 모의투자" : "미연결");
         mode.getStyleClass().add("mode-badge");
+        mode.setAccessibleText("실행 모드. " + marketDataSource);
         ComboBox<Screen> quickNavigation = new ComboBox<>(FXCollections.observableArrayList(
                 java.util.Arrays.stream(Screen.values()).filter(Screen::shownInSidebar).toList()));
         quickNavigation.setPromptText("화면 바로 이동");
@@ -389,14 +390,30 @@ public final class DesktopApplication extends Application {
         search.setMaxWidth(Double.MAX_VALUE);
         HBox.setHgrow(globalSearch, Priority.ALWAYS);
 
-        Label market = new Label("데모 시세 · 고정 스냅샷");
+        // 상단 표시는 실제 상태를 따른다. 연결되어 있는데 미연결로 보이거나 그 반대면,
+        // 화면을 볼 수 없는 사용자는 지금 값이 실제 시세인지 판단할 근거를 잃는다.
+        boolean live = marketDataSource.startsWith("키움");
+        Label market = new Label(live ? "조회 시세 · " + marketDataSource : marketDataSource);
         market.getStyleClass().addAll("status-chip", "mode-badge");
-        Button connection = new Button("키움 API · 미연결");
+        market.setAccessibleText("시세 출처. " + marketDataSource);
+        Button connection = new Button(live ? "키움 API · 연결됨" : "키움 API · 미연결");
         connection.getStyleClass().add("connection-button");
         connection.setOnAction(event -> navigate(Screen.CONNECTION));
-        Button alerts = new Button("알림 3");
+
+        Button alerts = new Button();
         alerts.setOnAction(event -> navigate(Screen.NOTIFICATIONS));
-        Button account = new Button("계좌 ****-1204");
+        Runnable refreshAlertCount = () -> {
+            int count = session.notifications().size();
+            alerts.setText("알림 " + count);
+            alerts.setAccessibleText(count == 0 ? "알림 없음" : "알림 " + count + "건");
+        };
+        session.notifications().addListener(
+                (javafx.collections.ListChangeListener<String>) change -> refreshAlertCount.run());
+        refreshAlertCount.run();
+
+        // 계좌번호는 증권사에서 받아야 알 수 있다. 임의의 번호를 보여 주지 않는다.
+        Button account = new Button("계좌");
+        account.setAccessibleText("계좌 화면 열기");
         account.setOnAction(event -> navigate(Screen.ACCOUNT));
 
         Region spacer = new Region(); HBox.setHgrow(spacer, Priority.ALWAYS);
@@ -788,10 +805,12 @@ public final class DesktopApplication extends Application {
     private ScrollPane createAccountScreen() {
         Account snapshot = tradingUseCase.account();
         Label title = heading("계좌");
-        ComboBox<String> account = new ComboBox<>(FXCollections.observableArrayList("모의계좌 ****-1204", "미국주식 모의계좌 ****-7781"));
-        account.setValue("모의계좌 ****-1204"); account.setAccessibleText("조회할 계좌 선택");
+        // 계좌번호는 접근 토큰에 연결된 것을 그대로 보여 준다. 목록을 지어내지 않는다.
+        Label accountNo = new Label("모의계좌 " + snapshot.maskedAccountNo());
+        accountNo.getStyleClass().add("status-chip");
+        accountNo.setAccessibleText("조회 중인 계좌. 모의계좌 " + snapshot.maskedAccountNo());
         Region spacer = new Region(); HBox.setHgrow(spacer, Priority.ALWAYS);
-        HBox header = new HBox(12, title, spacer, account); header.setAlignment(Pos.CENTER_LEFT);
+        HBox header = new HBox(12, title, spacer, accountNo); header.setAlignment(Pos.CENTER_LEFT);
 
         // 값은 모의주문 엔진이 들고 있는 실제 계좌 상태에서 읽는다. 화면이 따로 계산하거나
         // 예시 숫자를 적어 두지 않는다.
@@ -823,12 +842,14 @@ public final class DesktopApplication extends Application {
         VBox holdingsPanel = new VBox(10, holdings, wrappingRow(8, holdingDetail, holdingBuy, holdingSell));
         holdingsPanel.setPadding(new Insets(10));
 
+        // 예수금과 주문 가능 금액은 모의주문 엔진이 들고 있는 잔고에서 읽는다.
+        // D+1·D+2 정산과 출금 가능 금액은 별도 TR 이라 연동 전까지 표시하지 않는다.
         VBox cash = new VBox(12,
-                informationRow("예수금", "8,000,000원"),
-                informationRow("D+1 예수금", "8,130,000원"),
-                informationRow("D+2 예수금", "8,450,000원"),
-                informationRow("출금 가능 금액", "7,650,000원"),
-                informationRow("주문 가능 금액", "7,820,000원"));
+                informationRow("예수금", Formatters.won(snapshot.balance().cash())),
+                informationRow("주문 대기 금액", Formatters.won(snapshot.balance().locked())),
+                informationRow("주문 가능 금액", Formatters.won(snapshot.balance().available())),
+                notConnectedPanel("D+1·D+2 예수금과 출금 가능 금액",
+                        "kt00001 예수금상세현황요청, kt00010 주문인출가능금액"));
         cash.setPadding(new Insets(20));
 
         TableView<ObservableList<String>> open = orderStatusTable(true);
@@ -840,11 +861,15 @@ public final class DesktopApplication extends Application {
                         Long.toString(order.quantity()), order.status().displayName())).toList(),
                 "시간", "종목", "구분", "주문가", "수량", "상태");
         history.setPlaceholder(new Label("주문 내역이 없습니다."));
+        // 기간별 누적 수익률은 증권사에서 받아야 한다. 현재 보유분의 평가손익만 실제 값으로
+        // 보여 주고, 기간 수익률은 연동 전까지 표시하지 않는다.
         VBox profit = new VBox(16,
-                new Label("모의투자 계좌의 기간별 누적 수익률입니다."),
-                progressMetric("1개월 누적 수익률", 0.68, "+6.80%"),
-                progressMetric("3개월 누적 수익률", 0.42, "+4.20%"),
-                progressMetric("1년 누적 수익률", 0.91, "+9.10%"));
+                informationRow("보유 종목 평가손익", signedWon(snapshot.totalProfitLoss())),
+                informationRow("매입금액", Formatters.won(snapshot.positions().stream()
+                        .map(Position::costBasis).reduce(BigDecimal.ZERO, BigDecimal::add))),
+                informationRow("평가금액", Formatters.won(snapshot.totalMarketValue())),
+                notConnectedPanel("기간별 누적 수익률과 실현손익",
+                        "ka10074 일자별실현손익, ka10085 계좌수익률, kt00016 일별계좌수익률상세"));
         profit.setPadding(new Insets(20));
         TableView<JournalEntry> journal = typedTable("매매일지", session.journalEntries(),
                 textColumn("날짜", JournalEntry::date),
@@ -1666,7 +1691,10 @@ public final class DesktopApplication extends Application {
         List<Order> orders = open
                 ? tradingUseCase.openOrders()
                 : tradingUseCase.orders().stream().filter(order -> order.status().isTerminal()).toList();
+        // 주문번호를 함께 보여 준다. 취소·정정은 이 번호로 원주문을 지정하고, 사용자도
+        // 증권사 화면과 대조할 수 있어야 한다.
         List<String[]> rows = orders.stream().map(order -> row(
+                order.orderId(),
                 orderTime(order),
                 order.name(),
                 order.side().displayName(),
@@ -1676,7 +1704,7 @@ public final class DesktopApplication extends Application {
                 Long.toString(order.remainingQuantity()),
                 order.status().displayName())).toList();
         TableView<ObservableList<String>> table = textTable(open ? "미체결 주문" : "체결·종료 주문", rows,
-                "시간", "종목", "구분", "주문가", "수량", "체결", "잔여", "상태");
+                "주문번호", "시간", "종목", "구분", "주문가", "수량", "체결", "잔여", "상태");
         table.setPlaceholder(new Label(open
                 ? "미체결 주문이 없습니다." : "체결되었거나 종료된 주문이 없습니다."));
         return table;
@@ -1703,8 +1731,10 @@ public final class DesktopApplication extends Application {
 
     private Node createStateContent(String state, ComboBox<String> selector) {
         if (state == null || state.equals("정상")) {
-            TableView<ObservableList<String>> table = textTable("정상 데이터 예시",
-                    List.of(row("삼성전자", "72,500원", "+2.12%"), row("SK하이닉스", "184,500원", "+1.42%")),
+            // 이 표는 화면 상태 구성요소를 확인하려는 견본이다. 실제 종목명을 쓰면 시세로
+            // 오해할 수 있어, 값이 아니라 자리라는 것이 드러나는 문자열을 쓴다.
+            TableView<ObservableList<String>> table = textTable("정상 상태 표 견본",
+                    List.of(row("종목 A", "가격 1", "등락률 1"), row("종목 B", "가격 2", "등락률 2")),
                     "종목", "현재가", "등락률"); table.setPrefHeight(260); return table;
         }
         if (state.equals("로딩 중")) {
@@ -1746,74 +1776,137 @@ public final class DesktopApplication extends Application {
         transition.setOnFinished(event -> selector.setValue("정상")); transition.play();
     }
 
+    /**
+     * 주문 정정 안내.
+     *
+     * <p>정정은 별도 TR(kt10002)이며 아직 연동하지 않았다. 예전에는 표의 글자만 바꿔 정정된
+     * 것처럼 보이게 했는데, 실제로는 원주문이 그대로 살아 있었다. 화면을 볼 수 없는 사용자는
+     * 정정되었다고 안내받고도 옛 가격으로 체결될 수 있었다.
+     *
+     * <p>연동 전까지는 취소 후 재주문으로 안내한다. 두 동작 모두 실제로 증권사에 전달된다.
+     */
     private void showAmendOrderDialog(TableView<ObservableList<String>> table) {
         ObservableList<String> selected = table.getSelectionModel().getSelectedItem();
         if (selected == null) {
             showInformation("주문을 선택하세요", "정정할 미체결 주문을 먼저 선택해주세요.");
             return;
         }
-        if (selected.get(7).contains("결과 확인")) {
-            showInformation("정정할 수 없습니다", "주문 결과를 확인 중입니다. 상태 동기화가 끝난 뒤 다시 시도해주세요.");
-            return;
-        }
-        Dialog<ButtonType> dialog = new Dialog<>(); dialog.setTitle("모의주문 정정");
-        dialog.setHeaderText(selected.get(1) + " 주문을 정정합니다.");
-        TextField price = new TextField(selected.get(3).replaceAll("[^0-9.]", ""));
-        Spinner<Integer> quantity = new Spinner<>(1, 1_000_000, Integer.parseInt(selected.get(6)));
-        GridPane form = new GridPane(); form.setHgap(12); form.setVgap(12);
-        form.add(informationRow("기존 주문", selected.get(3) + " · 잔여 " + selected.get(6) + "주"), 0, 0, 2, 1);
-        form.add(new Label("정정 가격"), 0, 1); form.add(price, 1, 1);
-        form.add(new Label("정정 수량"), 0, 2); form.add(quantity, 1, 2);
-        form.add(stateBanner("정정 주문도 최종 확인 후 한 번만 제출됩니다.", "warning"), 0, 3, 2, 1);
-        dialog.getDialogPane().setContent(form);
-        ButtonType submit = new ButtonType("정정 확인", ButtonBar.ButtonData.OK_DONE);
-        dialog.getDialogPane().getButtonTypes().setAll(submit, ButtonType.CANCEL);
-        dialog.showAndWait().filter(submit::equals).ifPresent(result -> {
-            selected.set(3, Formatters.won(new BigDecimal(price.getText().replace(",", ""))));
-            selected.set(4, Integer.toString(quantity.getValue()));
-            selected.set(6, Integer.toString(quantity.getValue()));
-            selected.set(7, "정정 접수");
-            table.refresh();
-            status.setText(selected.get(1) + " 주문 정정을 모의 접수했습니다.");
-            announce(selected.get(1) + " 주문 정정이 접수되었습니다.", SpeechPriority.ORDER, "amend-" + selected.get(0));
-        });
+        String message = "주문 정정은 아직 연동되지 않았습니다. 연동 예정: kt10002 주식 정정주문\n\n"
+                + "지금은 선택 주문을 취소한 뒤 새로 주문해주세요. 취소와 신규 주문은 실제로 "
+                + "키움 모의투자 계좌에 전달됩니다.\n\n"
+                + "선택한 주문번호: " + selected.get(0) + " · " + selected.get(2);
+        status.setText("주문 정정은 아직 연동되지 않았습니다. 취소 후 재주문해주세요.");
+        showInformation("주문 정정을 사용할 수 없습니다", message);
     }
 
+    /**
+     * 선택한 주문을 취소한다.
+     *
+     * <p>예전에는 표의 글자만 바꿔 취소한 것처럼 보이게 했다. 실제로는 취소되지 않았으므로,
+     * 화면을 볼 수 없는 사용자는 취소되었다고 안내받고도 주문이 살아 있는 상태였다.
+     * 이제 증권사에 취소를 보내고 결과를 다시 읽어 온다.
+     */
     private void cancelSelectedOrder(TableView<ObservableList<String>> table) {
         ObservableList<String> selected = table.getSelectionModel().getSelectedItem();
         if (selected == null) {
             showInformation("주문을 선택하세요", "취소할 미체결 주문을 먼저 선택해주세요.");
             return;
         }
-        if (selected.get(7).contains("결과 확인")) {
-            showInformation("취소할 수 없습니다", "주문 결과를 확인 중입니다. 중복 취소를 막기 위해 잠시 기다려주세요.");
-            return;
-        }
+        String orderId = selected.get(0);
+        String name = selected.get(2);
         Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION);
-        confirmation.setTitle("모의주문 취소 재확인");
-        confirmation.setHeaderText(selected.get(1) + " 잔여 " + selected.get(6) + "주를 취소하시겠습니까?");
-        confirmation.setContentText("원주문 가격: " + selected.get(3) + "\n계좌: 모의계좌 ****-1204\n\n실제 주문은 전송되지 않습니다.");
+        confirmation.setTitle("주문 취소 재확인");
+        confirmation.setHeaderText(name + " 잔여 " + selected.get(7) + "주를 취소하시겠습니까?");
+        confirmation.setContentText("주문번호: " + orderId + "\n원주문 가격: " + selected.get(4)
+                + "\n\n키움 모의투자 계좌로 취소 요청을 보냅니다.");
         confirmation.showAndWait().filter(ButtonType.OK::equals).ifPresent(result -> {
-            selected.set(6, "0"); selected.set(7, "취소"); table.refresh();
-            status.setText(selected.get(1) + " 주문을 모의 취소했습니다.");
+            try {
+                Order cancelled = tradingUseCase.cancel(orderId);
+                String message = name + " 주문번호 " + orderId + " 을(를) 취소했습니다. 상태 "
+                        + cancelled.status().displayName();
+                status.setText(message);
+                addNotification("주문", message);
+                announce(message, SpeechPriority.ORDER, "order-cancel-" + orderId);
+                play(SoundCue.SUCCESS);
+                screenController.invalidate(Screen.TRADING);
+                screenController.invalidate(Screen.ACCOUNT);
+            } catch (RuntimeException failure) {
+                String reason = failure.getMessage() == null || failure.getMessage().isBlank()
+                        ? failure.getClass().getSimpleName() : failure.getMessage();
+                // 취소 실패를 성공처럼 보이게 두면 안 된다. 주문은 아직 살아 있을 수 있다.
+                status.setText("주문 취소에 실패했습니다. " + reason);
+                addNotification("주문", "주문번호 " + orderId + " 취소에 실패했습니다. " + reason);
+                announce("주문 취소에 실패했습니다. " + reason, SpeechPriority.CRITICAL,
+                        "order-cancel-failed-" + orderId);
+                play(SoundCue.ERROR);
+                showInformation("주문을 취소하지 못했습니다", reason
+                        + "\n\n주문이 아직 남아 있을 수 있습니다. 미체결 목록을 다시 확인해주세요.");
+            }
         });
     }
 
+    /**
+     * 미체결 주문을 모두 취소한다.
+     *
+     * <p>한 건이라도 실패하면 몇 건이 남았는지 함께 알린다. 일부만 취소되었는데 전부
+     * 취소되었다고 안내하면, 남은 주문이 그대로 체결될 수 있다.
+     */
     private void cancelAllOrders(TableView<ObservableList<String>> table) {
+        List<String> orderIds = tradingUseCase.openOrders().stream().map(Order::orderId).toList();
+        if (orderIds.isEmpty()) {
+            showInformation("취소할 주문이 없습니다", "미체결 주문이 없습니다.");
+            return;
+        }
         Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION,
-                "결과 확인 중인 주문을 제외한 모든 미체결 주문을 취소하시겠습니까?", ButtonType.OK, ButtonType.CANCEL);
+                "미체결 주문 " + orderIds.size() + "건을 모두 취소하시겠습니까?",
+                ButtonType.OK, ButtonType.CANCEL);
         confirmation.setHeaderText("미체결 전량 취소 재확인");
         confirmation.showAndWait().filter(ButtonType.OK::equals).ifPresent(result -> {
-            table.getItems().stream().filter(row -> !row.get(7).contains("결과 확인")).forEach(row -> {
-                row.set(6, "0"); row.set(7, "취소");
-            });
-            table.refresh(); status.setText("미체결 주문을 모의 전량 취소했습니다.");
+            int cancelled = 0;
+            List<String> failures = new java.util.ArrayList<>();
+            for (String orderId : orderIds) {
+                try {
+                    tradingUseCase.cancel(orderId);
+                    cancelled++;
+                } catch (RuntimeException failure) {
+                    failures.add(orderId);
+                }
+            }
+            String message = failures.isEmpty()
+                    ? "미체결 주문 " + cancelled + "건을 취소했습니다."
+                    : "미체결 주문 " + cancelled + "건을 취소했고 " + failures.size()
+                            + "건은 취소하지 못했습니다. 주문번호 " + String.join(", ", failures);
+            status.setText(message);
+            addNotification("주문", message);
+            announce(message, failures.isEmpty() ? SpeechPriority.ORDER : SpeechPriority.CRITICAL,
+                    "order-cancel-all");
+            play(failures.isEmpty() ? SoundCue.SUCCESS : SoundCue.ERROR);
+            screenController.invalidate(Screen.TRADING);
+            screenController.invalidate(Screen.ACCOUNT);
         });
     }
 
     private void showInformation(String title, String message) {
         Alert alert = new Alert(Alert.AlertType.INFORMATION, message, ButtonType.OK);
         alert.setHeaderText(title); alert.showAndWait();
+    }
+
+    /**
+     * 알림을 쌓는다.
+     *
+     * <p>알림 화면의 분류 필터가 {@code · 분류 ·} 형태를 찾으므로 표기를 맞춘다. 읽지 않은
+     * 알림은 앞에 표시를 붙여, 목록을 소리로 훑을 때도 새 알림을 구분할 수 있게 한다.
+     *
+     * @param category 주문, 가격, 이상 감지, 연결 중 하나
+     */
+    private void addNotification(String category, String message) {
+        String stamp = java.time.LocalTime.now().format(
+                java.time.format.DateTimeFormatter.ofPattern("HH:mm"));
+        session.notifications().add(0, "새 알림 · " + stamp + " · " + category + " · " + message);
+        // 오래된 알림이 무한정 쌓이지 않게 한다.
+        while (session.notifications().size() > 200) {
+            session.notifications().remove(session.notifications().size() - 1);
+        }
     }
 
     /** 손익 금액을 부호와 함께 표기한다. */
@@ -1851,6 +1944,7 @@ public final class DesktopApplication extends Application {
                 Order receipt = tradingUseCase.submitConfirmed(request, referencePrice);
                 String receiptMessage = receipt.describe();
                 status.setText(receiptMessage + " 주문번호 " + receipt.orderId());
+                addNotification("주문", receiptMessage + " 주문번호 " + receipt.orderId());
                 announce(receiptMessage, SpeechPriority.ORDER, "order-" + receipt.orderId()); play(SoundCue.SUCCESS);
                 Alert completed = new Alert(Alert.AlertType.INFORMATION);
                 completed.setTitle("모의주문 접수 결과");
@@ -1862,9 +1956,13 @@ public final class DesktopApplication extends Application {
                 completed.showAndWait().filter(back::equals).ifPresent(resultButton -> navigateBack());
             });
         } catch (RuntimeException exception) {
-            status.setText("주문 입력 오류: " + exception.getMessage());
-            announce("주문 입력 오류. " + exception.getMessage(), SpeechPriority.CRITICAL, "order-input-error"); play(SoundCue.ERROR);
-            Alert alert = new Alert(Alert.AlertType.ERROR, exception.getMessage(), ButtonType.OK); alert.setHeaderText("주문 입력을 확인하세요."); alert.showAndWait();
+            String reason = exception.getMessage() == null || exception.getMessage().isBlank()
+                    ? exception.getClass().getSimpleName() : exception.getMessage();
+            status.setText("주문 입력 오류: " + reason);
+            // 실패도 알림에 남긴다. 소리로만 알리면 지나간 뒤에 확인할 방법이 없다.
+            addNotification("주문", "주문이 처리되지 않았습니다. " + reason);
+            announce("주문 입력 오류. " + reason, SpeechPriority.CRITICAL, "order-input-error"); play(SoundCue.ERROR);
+            Alert alert = new Alert(Alert.AlertType.ERROR, reason, ButtonType.OK); alert.setHeaderText("주문 입력을 확인하세요."); alert.showAndWait();
         }
     }
 
