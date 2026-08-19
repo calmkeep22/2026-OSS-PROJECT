@@ -30,6 +30,10 @@ import org.ossproject.application.port.MarketApplicationPort;
 import org.ossproject.application.port.StockQueryPort;
 import org.ossproject.application.usecase.TradingUseCase;
 import org.ossproject.desktop.composition.DesktopServices;
+import org.ossproject.fake.FakeOrderBookFeed;
+import javafx.animation.Timeline;
+import javafx.animation.KeyFrame;
+import javafx.util.Duration;
 import org.ossproject.finance.model.*;
 import org.ossproject.desktop.chart.AccessibleChartController;
 import org.ossproject.desktop.chart.AccessibleChartView;
@@ -809,18 +813,27 @@ public final class DesktopApplication extends Application {
         VBox chart = new VBox(12, periods, indicators, chartRepresentations, soundChart); chart.setPadding(new Insets(10));
 
         BigDecimal quoteStep = selection.overseas() ? new BigDecimal("0.10") : new BigDecimal("100");
+        // TODO: 실제 키움 실시간 호가(0D)로 교체될 때까지는 가짜 피드로 10단계 호가를 흉내 낸다.
+        // 실제 시세와 동떨어지지 않도록 현재가 근처에서 시작한다.
+        FakeOrderBookFeed orderBookFeed = new FakeOrderBookFeed(
+                detail.symbol(), detail.currentPrice(), quoteStep, detail.symbol().hashCode());
         TableView<ObservableList<String>> orderBook = textTable(detail.name() + " 10호가",
-                List.of(
-                        row("매도", stockDetailViewModel.formatPrice(detail.currentPrice().add(quoteStep.multiply(new BigDecimal("4")))), "12,231", "+1,120"),
-                        row("매도", stockDetailViewModel.formatPrice(detail.currentPrice().add(quoteStep.multiply(new BigDecimal("3")))), "9,231", "-410"),
-                        row("매도", stockDetailViewModel.formatPrice(detail.currentPrice().add(quoteStep.multiply(new BigDecimal("2")))), "14,210", "+820"),
-                        row("매도", stockDetailViewModel.formatPrice(detail.currentPrice().add(quoteStep)), "21,910", "+2,103"),
-                        row("매수", stockDetailViewModel.formatPrice(detail.currentPrice().subtract(quoteStep)), "15,321", "+420"),
-                        row("매수", stockDetailViewModel.formatPrice(detail.currentPrice().subtract(quoteStep.multiply(new BigDecimal("2")))), "32,110", "+3,010"),
-                        row("매수", stockDetailViewModel.formatPrice(detail.currentPrice().subtract(quoteStep.multiply(new BigDecimal("3")))), "11,034", "-950"),
-                        row("매수", stockDetailViewModel.formatPrice(detail.currentPrice().subtract(quoteStep.multiply(new BigDecimal("4")))), "25,000", "+1,340")
-                ), "구분", "호가", "잔량", "잔량 변화");
+                orderBookRows(orderBookFeed.getOrderBook(detail.symbol())),
+                "구분", "호가", "잔량", "잔량 변화");
         orderBook.setPrefHeight(360);
+        Timeline orderBookTicker = new Timeline(new KeyFrame(Duration.seconds(1), tickEvent -> {
+            List<String[]> rows = orderBookRows(orderBookFeed.tick());
+            orderBook.getItems().setAll(rows.stream()
+                    .map(cells -> FXCollections.observableArrayList(cells))
+                    .toList());
+        }));
+        orderBookTicker.setCycleCount(Timeline.INDEFINITE);
+        orderBookTicker.play();
+        orderBook.sceneProperty().addListener((obs, oldScene, newScene) -> {
+            if (newScene == null) {
+                orderBookTicker.stop();
+            }
+        });
         Runnable useSelectedQuote = () -> {
             ObservableList<String> selected = orderBook.getSelectionModel().getSelectedItem();
             if (selected == null || selected.size() < 2) {
@@ -1948,6 +1961,35 @@ public final class DesktopApplication extends Application {
     }
 
     /** 조회 결과의 등락률을 부호와 함께 표기한다. 값을 새로 만들지 않는다. */
+    /**
+     * 호가창을 화면 표 행으로 변환한다.
+     *
+     * <p>매도는 먼 가격부터(화면 위쪽) 가까운 가격 순으로, 매수는 가까운 가격부터
+     * 먼 가격 순으로 늘어놓는다. 실제 호가창을 위아래로 훑을 때 익숙한 순서다.
+     */
+    private List<String[]> orderBookRows(OrderBook book) {
+        List<String[]> rows = new java.util.ArrayList<>();
+        List<OrderBookLevel> descendingAsks = new java.util.ArrayList<>(book.levels());
+        descendingAsks.sort((a, b) -> Integer.compare(b.level(), a.level()));
+        for (OrderBookLevel level : descendingAsks) {
+            if (level.hasAsk()) {
+                rows.add(row("매도", stockDetailViewModel.formatPrice(level.askPrice()),
+                        String.format("%,d", level.askSize()), signedQuantity(level.askDelta())));
+            }
+        }
+        for (OrderBookLevel level : book.levels()) {
+            if (level.hasBid()) {
+                rows.add(row("매수", stockDetailViewModel.formatPrice(level.bidPrice()),
+                        String.format("%,d", level.bidSize()), signedQuantity(level.bidDelta())));
+            }
+        }
+        return rows;
+    }
+
+    private static String signedQuantity(long delta) {
+        return (delta >= 0 ? "+" : "") + String.format("%,d", delta);
+    }
+
     private static String signedChangeRate(StockDetail detail) {
         BigDecimal rate = detail.changeRate().setScale(2, java.math.RoundingMode.HALF_UP);
         String sign = detail.direction() == PriceDirection.DOWN ? "-" : rate.signum() > 0 ? "+" : "";

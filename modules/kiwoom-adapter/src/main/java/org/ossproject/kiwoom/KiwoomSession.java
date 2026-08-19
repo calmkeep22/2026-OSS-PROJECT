@@ -42,16 +42,19 @@ public final class KiwoomSession implements AutoCloseable {
     private final BrokerCredentials credentials;
     private final KiwoomTokenProvider tokenProvider;
     private final ResilientExecutor executor;
+    private final KiwoomClient client;
     private final KiwoomMarketDataStream marketDataStream;
 
     private KiwoomSession(KiwoomEnvironment environment, KiwoomProperties properties,
                           BrokerCredentials credentials, KiwoomTokenProvider tokenProvider,
-                          ResilientExecutor executor, KiwoomMarketDataStream marketDataStream) {
+                          ResilientExecutor executor, KiwoomClient client,
+                          KiwoomMarketDataStream marketDataStream) {
         this.environment = environment;
         this.properties = properties;
         this.credentials = credentials;
         this.tokenProvider = tokenProvider;
         this.executor = executor;
+        this.client = client;
         this.marketDataStream = marketDataStream;
     }
 
@@ -87,12 +90,16 @@ public final class KiwoomSession implements AutoCloseable {
         ResilientExecutor executor = new ResilientExecutor(
                 RetryPolicy.defaults(), CircuitBreaker.defaults(clock), Sleeper.system());
 
+        KiwoomClient client = new KiwoomClient(transport, jsonMapper, properties, tokenProvider,
+                executor, clock);
+
         URI streamUri = URI.create(properties.webSocketUrl() + KiwoomApi.WEBSOCKET.path());
         KiwoomMarketDataStream stream =
                 new KiwoomMarketDataStream(properties.withWebSocketUrl(streamUri),
                         () -> tokenProvider.token().value());
 
-        return new KiwoomSession(environment, properties, credentials, tokenProvider, executor, stream);
+        return new KiwoomSession(environment, properties, credentials, tokenProvider, executor,
+                client, stream);
     }
 
     public KiwoomEnvironment environment() {
@@ -108,6 +115,11 @@ public final class KiwoomSession implements AutoCloseable {
         return marketDataStream;
     }
 
+    /** 시세·계좌·주문 REST 호출. */
+    public KiwoomClient client() {
+        return client;
+    }
+
     /** 재시도와 회로 차단이 걸린 실행기. REST 호출을 감쌀 때 쓴다. */
     public ResilientExecutor executor() {
         return executor;
@@ -120,11 +132,11 @@ public final class KiwoomSession implements AutoCloseable {
      * 저장해 두고 나중에 주문 시점에야 실패하는 상황을 막을 수 있다.
      */
     public void verifyCredentials() {
-        executor.run("접근 토큰 발급", tokenProvider::token);
+        client.authenticate();
     }
 
     public boolean isAuthenticated() {
-        return tokenProvider.hasValidToken();
+        return client.isAuthenticated();
     }
 
     @Override
