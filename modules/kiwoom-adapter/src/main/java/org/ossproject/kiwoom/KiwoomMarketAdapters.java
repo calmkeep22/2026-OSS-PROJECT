@@ -1,7 +1,9 @@
 package org.ossproject.kiwoom;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.ossproject.application.port.AccountPort;
 import org.ossproject.application.port.CandleQueryPort;
+import org.ossproject.application.port.OrderLifecyclePort;
 import org.ossproject.application.port.StockQueryPort;
 import org.ossproject.broker.BrokerCredentials;
 import org.ossproject.broker.resilience.CircuitBreaker;
@@ -21,8 +23,15 @@ import java.util.Objects;
  *
  * @param stocks  종목 검색과 상세 조회
  * @param candles 차트 조회
+ * @param account 예수금과 보유 종목
+ * @param orders  주문 접수·취소와 상태 조회
  */
-public record KiwoomMarketAdapters(StockQueryPort stocks, CandleQueryPort candles) {
+public record KiwoomMarketAdapters(
+        StockQueryPort stocks,
+        CandleQueryPort candles,
+        AccountPort account,
+        OrderLifecyclePort orders
+) {
 
     /** 모의투자 WebSocket 주소. */
     public static final URI MOCK_WEBSOCKET =
@@ -31,6 +40,8 @@ public record KiwoomMarketAdapters(StockQueryPort stocks, CandleQueryPort candle
     public KiwoomMarketAdapters {
         Objects.requireNonNull(stocks, "stocks");
         Objects.requireNonNull(candles, "candles");
+        Objects.requireNonNull(account, "account");
+        Objects.requireNonNull(orders, "orders");
     }
 
     /**
@@ -63,7 +74,11 @@ public record KiwoomMarketAdapters(StockQueryPort stocks, CandleQueryPort candle
                 new ResilientExecutor(RetryPolicy.defaults(), CircuitBreaker.defaults(clock),
                         Sleeper.system()));
 
+        KiwoomAccountAdapter account = new KiwoomAccountAdapter(client);
         return new KiwoomMarketAdapters(
-                new KiwoomStockQueryAdapter(client), new KiwoomCandleQueryAdapter(client));
+                new KiwoomStockQueryAdapter(client),
+                new KiwoomCandleQueryAdapter(client),
+                account,
+                new KiwoomOrderLifecycleAdapter(client, account, clock));
     }
 }

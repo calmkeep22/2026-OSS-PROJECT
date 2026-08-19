@@ -164,16 +164,31 @@ public final class KiwoomRestClient implements BrokerClient {
         return call("주문 접수", tr, body, jsonMapper::toOrderId);
     }
 
-    /** 주문을 취소한다. 잔량 전부를 취소한다. 재시도하지 않는다. */
+    /**
+     * 주문을 취소한다. 잔량 전부를 취소한다. 재시도하지 않는다.
+     *
+     * <p>취소 TR 은 종목코드도 함께 요구하므로 {@link #cancelOrder(String, String, String)} 를
+     * 쓰는 편이 안전하다. 이 메서드는 종목코드를 비워 보낸다.
+     */
     @Override
     public void cancelOrder(String accountNo, String brokerOrderId) {
+        cancelOrder(accountNo, brokerOrderId, "");
+    }
+
+    /**
+     * 종목코드까지 지정해 주문을 취소한다.
+     *
+     * @param symbol 원주문의 종목코드
+     */
+    public void cancelOrder(String accountNo, String brokerOrderId, String symbol) {
         requireAccountNo(accountNo);
         if (brokerOrderId == null || brokerOrderId.isBlank()) {
             throw new IllegalArgumentException("주문 번호는 필수입니다.");
         }
         String body = "{\"dmst_stex_tp\":\"" + properties.exchange() + "\","
                 + "\"orig_ord_no\":\"" + escape(brokerOrderId) + "\","
-                + "\"stk_cd\":\"\",\"cncl_qty\":\"0\"}";
+                + "\"stk_cd\":\"" + escape(symbol == null ? "" : symbol) + "\","
+                + "\"cncl_qty\":\"0\"}";
         call("주문 취소", KiwoomTr.ORDER_CANCEL, body, node -> null);
     }
 
