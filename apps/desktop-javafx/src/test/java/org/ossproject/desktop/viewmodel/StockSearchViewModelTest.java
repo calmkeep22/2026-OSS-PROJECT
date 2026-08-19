@@ -43,7 +43,10 @@ class StockSearchViewModelTest {
         StockSearchItem samsung = viewModel.findBestMatch("005930").toCompletableFuture().join();
 
         assertNotNull(samsung);
+        // 관심종목은 빈 상태로 시작하므로 첫 추가는 성공하고, 같은 종목을 다시 담으면 거부한다.
+        assertTrue(viewModel.addToWatchlist(samsung));
         assertFalse(viewModel.addToWatchlist(samsung));
+        assertEquals(1, session.watchlistItems().size());
     }
 
     @Test void showsPricesReportedByTheQueryPortWithoutRewritingThem() {
