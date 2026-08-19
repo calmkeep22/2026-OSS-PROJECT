@@ -35,6 +35,7 @@ public final class StockSearchViewModel {
     private String lastError = "";
     private String currentQuery = "";
     private String currentMarket = "전체";
+    private String preferredSymbol;
 
     public StockSearchViewModel(
             DesktopSession session,
@@ -121,6 +122,35 @@ public final class StockSearchViewModel {
         String normalized = query.strip();
         return items.stream().filter(item -> item.symbol().equalsIgnoreCase(normalized)
                 || item.name().equalsIgnoreCase(normalized)).findFirst();
+    }
+
+    /**
+     * 현재 검색 결과 중 종목코드가 정확히 일치하는 종목.
+     *
+     * <p>종목코드는 유일하므로 이 경우에는 곧바로 상세를 열어도 사용자가 다른 후보를 놓치지
+     * 않는다. 종목명은 "한화"처럼 여러 종목의 앞부분과 겹칠 수 있어 따로 구분한다.
+     */
+    public Optional<StockSearchItem> exactSymbolMatch(String query) {
+        if (query == null || query.isBlank()) return Optional.empty();
+        String normalized = query.strip();
+        return items.stream().filter(item -> item.symbol().equalsIgnoreCase(normalized)).findFirst();
+    }
+
+    /**
+     * 목록을 열 때 미리 선택해 둘 종목을 지정한다.
+     *
+     * <p>검색어와 정확히 일치하는 종목이 있지만 다른 후보도 있을 때 쓴다. 앱이 대신 골라
+     * 바로 열어 버리면 화면을 볼 수 없는 사용자는 다른 후보가 있었다는 사실을 알 수 없다.
+     * 목록을 보여 주되 해당 종목을 선택해 두면, 한 번 더 확인하고 바로 열 수 있다.
+     */
+    public void setPreferredSymbol(String symbol) {
+        preferredSymbol = symbol == null || symbol.isBlank() ? null : symbol.strip();
+    }
+
+    /** 미리 선택해 둘 종목. 지정하지 않았거나 현재 결과에 없으면 비어 있다. */
+    public Optional<StockSearchItem> preferredItem() {
+        if (preferredSymbol == null) return Optional.empty();
+        return items.stream().filter(item -> item.symbol().equalsIgnoreCase(preferredSymbol)).findFirst();
     }
 
     /** 검색어에 가장 가까운 종목. 없으면 {@code null}. */

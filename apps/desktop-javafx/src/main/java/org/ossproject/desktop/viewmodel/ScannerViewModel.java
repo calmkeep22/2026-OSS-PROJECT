@@ -4,21 +4,35 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
-/** 시장 스캐너의 필터·정렬 규칙. */
+/**
+ * 시장 스캐너의 필터·정렬 규칙.
+ *
+ * <p>종목 목록을 직접 들고 있지 않는다. 예전에는 화면에 보여 줄 종목과 등락률을 코드에
+ * 적어 두었는데, 화면을 볼 수 없는 사용자는 그 값이 실제 시장 순위인지 확인할 방법이 없다.
+ * 순위 조회 TR(ka10030 당일거래량상위, ka10032 거래대금상위 등)을 연동하기 전까지는 빈
+ * 목록을 돌려주고, 화면이 연동되지 않았음을 안내한다.
+ */
 public final class ScannerViewModel {
-    private final List<ScannerItem> items = List.of(
-            new ScannerItem("KOSPI", "005930", "삼성전자", "72,500원", 2.12, 18_320_122, 2_100_000, "거래량 급증"),
-            new ScannerItem("KOSPI", "000660", "SK하이닉스", "184,500원", 1.42, 5_821_330, 1_400_000, "기관 순매수"),
-            new ScannerItem("KOSDAQ", "042700", "한미반도체", "132,200원", 6.82, 3_129_443, 412_000, "신고가 근접"),
-            new ScannerItem("KOSPI", "035420", "NAVER", "205,000원", -0.71, 1_230_922, 254_000, "외국인 순매도"),
-            new ScannerItem("KOSPI", "005380", "현대차", "281,000원", 0.64, 2_992_101, 842_000, "프로그램 매수"),
-            new ScannerItem("KOSDAQ", "247540", "에코프로비엠", "192,400원", -3.11, 2_120_443, 406_000, "VI 근접"),
-            new ScannerItem("KOSPI", "373220", "LG에너지솔루션", "381,500원", 2.88, 1_084_201, 410_000, "거래대금 증가"),
-            new ScannerItem("KOSDAQ", "086520", "에코프로", "98,200원", -4.25, 4_220_104, 418_000, "신저가 근접"),
-            new ScannerItem("NASDAQ", "NVDA", "NVIDIA", "$142.65", 2.34, 42_381_210, 6_045_000, "52주 신고가"),
-            new ScannerItem("NASDAQ", "AAPL", "Apple", "$228.40", 0.83, 31_800_000, 7_260_000, "기관 순매수"),
-            new ScannerItem("NASDAQ", "TSLA", "Tesla", "$216.10", -1.28, 51_200_000, 11_064_000, "거래량 급증"),
-            new ScannerItem("NYSE", "PLTR", "Palantir", "$31.40", 4.76, 64_200_000, 2_015_000, "연속 상승"));
+    private final List<ScannerItem> items;
+
+    /** 순위 조회를 연동하기 전의 기본 상태. 결과가 비어 있다. */
+    public ScannerViewModel() {
+        this(List.of());
+    }
+
+    /**
+     * 조회 결과로 스캐너를 만든다.
+     *
+     * @param items 증권사에서 받은 순위 종목
+     */
+    public ScannerViewModel(List<ScannerItem> items) {
+        this.items = List.copyOf(java.util.Objects.requireNonNull(items, "items"));
+    }
+
+    /** 보여 줄 순위 데이터가 있는지 여부. */
+    public boolean hasData() {
+        return !items.isEmpty();
+    }
 
     public List<ScannerItem> filter(String market, String criterion, long minimumVolume) {
         List<ScannerItem> result = new ArrayList<>(items.stream()

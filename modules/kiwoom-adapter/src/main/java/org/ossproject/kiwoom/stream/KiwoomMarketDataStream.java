@@ -54,7 +54,7 @@ public final class KiwoomMarketDataStream implements MarketDataStreamPort {
         this(properties.webSocketUrl(),
                 new JdkWebSocketConnector(),
                 new JsonStreamProtocol(
-                        new KiwoomJsonMapper(new ObjectMapper(), properties, Clock.systemDefaultZone()),
+                        new KiwoomJsonMapper(new ObjectMapper(), Clock.systemDefaultZone()),
                         properties),
                 ReconnectScheduler.daemon(),
                 RetryPolicy.defaults());

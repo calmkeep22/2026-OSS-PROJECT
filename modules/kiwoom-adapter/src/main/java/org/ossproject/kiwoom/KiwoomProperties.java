@@ -1,45 +1,40 @@
 package org.ossproject.kiwoom;
 
-import org.ossproject.finance.model.OrderSide;
-import org.ossproject.finance.model.OrderStatus;
-import org.ossproject.finance.model.OrderType;
-
 import java.net.URI;
 import java.time.Duration;
-import java.util.LinkedHashMap;
-import java.util.Map;
 
 /**
  * 키움 어댑터 설정.
  *
- * <p>이 프로젝트는 증권사 스펙에 코드가 직접 묶이지 않도록, 주소·경로·필드명·코드값을
- * 모두 설정으로 뺐다. 공식 문서를 확인한 뒤 이 객체 하나만 채우면 어댑터 코드는 그대로
- * 동작한다.
+ * <p>REST 경로와 필드명은 더 이상 설정으로 두지 않는다. 공식 문서를 확인한 결과 키움은 TR 코드마다
+ * 요청 본문과 응답 구조가 다르기 때문에, 이름만 바꿔 끼우는 방식으로는 표현할 수 없다. TR 목록은
+ * {@link KiwoomTr} 에, 응답 해석은 {@link KiwoomJsonMapper} 에 명시한다.
  *
- * <p>실거래는 기본적으로 꺼져 있다. {@code paperTrading} 이 참이면 모의투자 서버로만
- * 요청을 보낸다.
+ * <p>{@code fields} 는 아직 실시간 시세 스트림이 사용한다. WebSocket 실시간 규격을 확인한 뒤
+ * 함께 정리한다.
  *
- * @param restBaseUrl      REST 기본 주소
- * @param webSocketUrl     실시간 스트림 주소
- * @param endpoints        엔드포인트 경로
- * @param fields           JSON 필드 대응표
- * @param orderStatusCodes 증권사 주문 상태 코드 → 도메인 상태
- * @param orderSideCodes   도메인 매수·매도 → 증권사 코드
- * @param orderTypeCodes   도메인 주문 유형 → 증권사 코드
- * @param requestTimeout   단일 요청 제한 시간
- * @param paperTrading     모의투자 여부. 기본값은 참
+ * @param restBaseUrl    REST 기본 주소
+ * @param webSocketUrl   실시간 스트림 주소
+ * @param fields         실시간 스트림이 쓰는 JSON 필드 대응표
+ * @param requestTimeout 단일 요청 제한 시간
+ * @param paperTrading   모의투자 여부. 기본값은 참
+ * @param exchange       국내거래소구분. {@code KRX}, {@code NXT}, {@code SOR}
+ * @param adjustedPrice  수정주가 적용 여부. 차트 조회의 {@code upd_stkpc_tp}
  */
 public record KiwoomProperties(
         URI restBaseUrl,
         URI webSocketUrl,
-        KiwoomEndpoints endpoints,
         KiwoomFieldMap fields,
-        Map<String, OrderStatus> orderStatusCodes,
-        Map<OrderSide, String> orderSideCodes,
-        Map<OrderType, String> orderTypeCodes,
         Duration requestTimeout,
-        boolean paperTrading
+        boolean paperTrading,
+        String exchange,
+        boolean adjustedPrice
 ) {
+    /** 모의투자 REST 주소. */
+    public static final URI MOCK_REST = URI.create("https://mockapi.kiwoom.com");
+    /** 실전 REST 주소. */
+    public static final URI LIVE_REST = URI.create("https://api.kiwoom.com");
+
     public KiwoomProperties {
         if (restBaseUrl == null) {
             throw new IllegalArgumentException("REST 주소는 필수입니다.");
@@ -47,70 +42,48 @@ public record KiwoomProperties(
         if (webSocketUrl == null) {
             throw new IllegalArgumentException("WebSocket 주소는 필수입니다.");
         }
-        if (endpoints == null) {
-            throw new IllegalArgumentException("엔드포인트 설정은 필수입니다.");
-        }
         if (fields == null) {
             throw new IllegalArgumentException("필드 대응표는 필수입니다.");
         }
         if (requestTimeout == null || requestTimeout.isNegative() || requestTimeout.isZero()) {
             throw new IllegalArgumentException("요청 제한 시간은 0보다 커야 합니다.");
         }
-        orderStatusCodes = Map.copyOf(orderStatusCodes == null ? Map.of() : orderStatusCodes);
-        orderSideCodes = Map.copyOf(orderSideCodes == null ? Map.of() : orderSideCodes);
-        orderTypeCodes = Map.copyOf(orderTypeCodes == null ? Map.of() : orderTypeCodes);
+        if (exchange == null || exchange.isBlank()) {
+            throw new IllegalArgumentException("국내거래소구분은 필수입니다.");
+        }
+        exchange = exchange.trim().toUpperCase(java.util.Locale.ROOT);
+        if (!exchange.equals("KRX") && !exchange.equals("NXT") && !exchange.equals("SOR")) {
+            throw new IllegalArgumentException(
+                    "국내거래소구분은 KRX, NXT, SOR 중 하나여야 합니다. 입력값 " + exchange);
+        }
     }
 
-    /**
-     * 자리표시자 설정.
-     *
-     * <p>주소와 경로, 필드명, 코드값이 모두 자리표시자다. 실제 서버에 붙이기 전에
-     * 공식 문서를 보고 교체해야 한다.
-     */
-    public static KiwoomProperties placeholder(URI restBaseUrl, URI webSocketUrl) {
-        Map<String, OrderStatus> statusCodes = new LinkedHashMap<>();
-        statusCodes.put("accepted", OrderStatus.ACCEPTED);
-        statusCodes.put("partially_filled", OrderStatus.PARTIALLY_FILLED);
-        statusCodes.put("filled", OrderStatus.FILLED);
-        statusCodes.put("cancelled", OrderStatus.CANCELLED);
-        statusCodes.put("rejected", OrderStatus.REJECTED);
-
-        return new KiwoomProperties(
-                restBaseUrl,
-                webSocketUrl,
-                KiwoomEndpoints.placeholder(),
-                KiwoomFieldMap.placeholder(),
-                statusCodes,
-                Map.of(OrderSide.BUY, "buy", OrderSide.SELL, "sell"),
-                Map.of(OrderType.LIMIT, "limit", OrderType.MARKET, "market"),
-                Duration.ofSeconds(10),
-                true);
+    /** 모의투자 기본 설정. */
+    public static KiwoomProperties mockTrading(URI webSocketUrl) {
+        return new KiwoomProperties(MOCK_REST, webSocketUrl, KiwoomFieldMap.placeholder(),
+                Duration.ofSeconds(10), true, "KRX", true);
     }
 
-    /** 경로의 치환자를 채워 완전한 주소를 만든다. */
-    public URI resolve(String path, Map<String, String> pathVariables) {
-        String resolved = path;
-        if (pathVariables != null) {
-            for (Map.Entry<String, String> entry : pathVariables.entrySet()) {
-                resolved = resolved.replace("{" + entry.getKey() + "}", entry.getValue());
-            }
+    /** 실전 기본 설정. 실거래 전송은 별도의 실행 인자로 한 번 더 막혀 있다. */
+    public static KiwoomProperties liveTrading(URI webSocketUrl) {
+        return new KiwoomProperties(LIVE_REST, webSocketUrl, KiwoomFieldMap.placeholder(),
+                Duration.ofSeconds(10), false, "KRX", true);
+    }
+
+    /** TR 경로를 붙인 완전한 주소. */
+    public URI resolve(KiwoomTr tr) {
+        if (tr == null) {
+            throw new IllegalArgumentException("TR 은 필수입니다.");
         }
         String base = restBaseUrl.toString();
         if (base.endsWith("/")) {
             base = base.substring(0, base.length() - 1);
         }
-        return URI.create(base + resolved);
+        return URI.create(base + tr.path());
     }
 
-    public URI resolve(String path) {
-        return resolve(path, Map.of());
-    }
-
-    /** 증권사 상태 코드를 도메인 상태로 옮긴다. 모르는 코드는 비어 있는 값으로 처리한다. */
-    public OrderStatus statusOf(String code) {
-        if (code == null) {
-            return null;
-        }
-        return orderStatusCodes.get(code.trim().toLowerCase(java.util.Locale.ROOT));
+    /** 차트 조회의 {@code upd_stkpc_tp} 값. */
+    public String adjustedPriceCode() {
+        return adjustedPrice ? "1" : "0";
     }
 }
