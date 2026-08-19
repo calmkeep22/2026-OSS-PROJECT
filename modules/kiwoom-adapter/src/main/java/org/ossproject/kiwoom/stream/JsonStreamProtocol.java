@@ -62,7 +62,7 @@ final class JsonStreamProtocol implements StreamProtocol {
             if (!node.hasNonNull(symbolField) || !node.hasNonNull(priceField)) {
                 return Optional.empty();
             }
-            return Optional.of(jsonMapper.toQuote(node));
+            return Optional.of(jsonMapper.toFieldMappedQuote(node, properties.fields()));
         } catch (RuntimeException e) {
             // 해석 실패로 스트림을 끊지 않는다.
             return Optional.empty();

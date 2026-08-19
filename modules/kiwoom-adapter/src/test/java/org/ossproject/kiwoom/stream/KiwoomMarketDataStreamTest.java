@@ -111,10 +111,9 @@ class KiwoomMarketDataStreamTest extends MarketDataStreamPortContract {
 
     @BeforeEach
     void setUp() {
-        KiwoomProperties properties = KiwoomProperties.placeholder(
-                URI.create("https://api.example.test"), WS_URI);
+        KiwoomProperties properties = KiwoomProperties.mockTrading(WS_URI);
         StreamProtocol protocol = new JsonStreamProtocol(
-                new KiwoomJsonMapper(new ObjectMapper(), properties, CLOCK), properties);
+                new KiwoomJsonMapper(new ObjectMapper(), CLOCK), properties);
 
         connector = new FakeConnector();
         scheduler = new ImmediateScheduler();

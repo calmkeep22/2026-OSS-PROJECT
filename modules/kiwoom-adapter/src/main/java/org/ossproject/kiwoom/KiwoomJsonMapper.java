@@ -16,23 +16,31 @@ import org.ossproject.finance.model.OrderStatus;
 import org.ossproject.finance.model.OrderType;
 import org.ossproject.finance.model.Position;
 import org.ossproject.finance.model.Quote;
+import org.ossproject.finance.model.StockDetail;
+import org.ossproject.finance.model.PriceDirection;
 
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalTime;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 
 /**
  * 키움 응답 JSON을 도메인 객체로 옮긴다.
  *
- * <p>필드 이름은 {@link KiwoomFieldMap} 에서 가져오므로 이 클래스는 특정 스펙에 묶이지 않는다.
- * 필요한 필드가 없거나 형식이 다르면 조용히 넘어가지 않고 {@link BrokerException} 을 던진다.
+ * <p>키움 값 표기에는 세 가지 특징이 있어 그대로 파싱하면 틀린다.
+ *
+ * <ul>
+ *   <li>숫자에 부호가 붙는다. {@code "+70700"}, {@code "-600"}</li>
+ *   <li>계좌 응답은 좌측을 0으로 채운다. {@code "000000017598258"}</li>
+ *   <li>계좌 응답의 종목코드에는 접두어가 붙는다. {@code "A005930"} (A:주식, J:ELW, Q:ETN)</li>
+ * </ul>
+ *
+ * <p>필요한 필드가 없거나 형식이 다르면 조용히 넘어가지 않고 {@link BrokerException} 을 던진다.
  * 금액이 잘못 파싱되어 엉뚱한 주문이 나가는 것보다 즉시 실패하는 편이 안전하다.
  */
 public final class KiwoomJsonMapper {
@@ -40,21 +48,16 @@ public final class KiwoomJsonMapper {
     private static final ZoneId MARKET_ZONE = ZoneId.of("Asia/Seoul");
 
     private final ObjectMapper objectMapper;
-    private final KiwoomProperties properties;
     private final Clock clock;
 
-    public KiwoomJsonMapper(ObjectMapper objectMapper, KiwoomProperties properties, Clock clock) {
+    public KiwoomJsonMapper(ObjectMapper objectMapper, Clock clock) {
         if (objectMapper == null) {
             throw new IllegalArgumentException("ObjectMapper 는 필수입니다.");
-        }
-        if (properties == null) {
-            throw new IllegalArgumentException("설정은 필수입니다.");
         }
         if (clock == null) {
             throw new IllegalArgumentException("시계는 필수입니다.");
         }
         this.objectMapper = objectMapper;
-        this.properties = properties;
         this.clock = clock;
     }
 
@@ -68,230 +71,320 @@ public final class KiwoomJsonMapper {
     }
 
     // ------------------------------------------------------------------
-    // 시세
+    // 시세 (ka10001 주식기본정보요청)
     // ------------------------------------------------------------------
 
-    public Quote toQuote(JsonNode node) {
-        String symbol = text(node, KiwoomField.QUOTE_SYMBOL);
+    /** 기본정보 응답을 실시간 틱 모양으로 옮긴다. 호가는 별도 TR 이라 비운다. */
+    public Quote toQuote(JsonNode root) {
+        BigDecimal current = decimal(root, "cur_prc");
+        BigDecimal previousClose = optionalDecimal(root, "base_pric")
+                .filter(value -> value.signum() > 0)
+                .orElseGet(() -> previousCloseFrom(current, optionalDecimal(root, "pred_pre")));
         return new Quote(
-                symbol,
-                decimal(node, KiwoomField.QUOTE_PRICE),
-                optionalDecimal(node, KiwoomField.QUOTE_PREVIOUS_CLOSE).orElse(null),
-                optionalDecimal(node, KiwoomField.QUOTE_BID_PRICE).orElse(null),
-                optionalDecimal(node, KiwoomField.QUOTE_ASK_PRICE).orElse(null),
-                optionalLong(node, KiwoomField.QUOTE_BID_SIZE).orElse(0L),
-                optionalLong(node, KiwoomField.QUOTE_ASK_SIZE).orElse(0L),
-                optionalLong(node, KiwoomField.QUOTE_VOLUME).orElse(0L),
+                text(root, "stk_cd"),
+                current.abs(),
+                previousClose == null ? null : previousClose.abs(),
+                null,
+                null,
+                0L,
+                0L,
+                optionalLong(root, "trde_qty").orElse(0L),
                 clock.instant());
     }
 
+    /**
+     * 실시간 스트림 메시지를 틱으로 옮긴다.
+     *
+     * <p>WebSocket 실시간 규격은 REST 와 필드 이름이 다르고 아직 확인하지 못했다. 그때까지는
+     * {@link KiwoomFieldMap} 의 대응표를 그대로 쓴다. 규격을 확인하면 이 메서드와
+     * {@code JsonStreamProtocol} 을 함께 정리한다.
+     */
+    public Quote toFieldMappedQuote(JsonNode node, KiwoomFieldMap fields) {
+        if (fields == null) {
+            throw new IllegalArgumentException("필드 대응표는 필수입니다.");
+        }
+        return new Quote(
+                text(node, fields.nameOf(KiwoomField.QUOTE_SYMBOL)),
+                decimal(node, fields.nameOf(KiwoomField.QUOTE_PRICE)).abs(),
+                optionalDecimal(node, fields.nameOf(KiwoomField.QUOTE_PREVIOUS_CLOSE)).orElse(null),
+                optionalDecimal(node, fields.nameOf(KiwoomField.QUOTE_BID_PRICE)).orElse(null),
+                optionalDecimal(node, fields.nameOf(KiwoomField.QUOTE_ASK_PRICE)).orElse(null),
+                optionalLong(node, fields.nameOf(KiwoomField.QUOTE_BID_SIZE)).orElse(0L),
+                optionalLong(node, fields.nameOf(KiwoomField.QUOTE_ASK_SIZE)).orElse(0L),
+                optionalLong(node, fields.nameOf(KiwoomField.QUOTE_VOLUME)).orElse(0L),
+                clock.instant());
+    }
+
+    /** 기본정보 응답을 화면용 상세로 옮긴다. */
+    public StockDetail toStockDetail(JsonNode root) {
+        BigDecimal current = decimal(root, "cur_prc").abs();
+        BigDecimal change = optionalDecimal(root, "pred_pre").orElse(BigDecimal.ZERO);
+        BigDecimal rate = optionalDecimal(root, "flu_rt").orElse(BigDecimal.ZERO);
+        return new StockDetail(
+                text(root, "stk_cd"),
+                optionalText(root, "stk_nm").orElseGet(() -> text(root, "stk_cd")),
+                current,
+                change.abs(),
+                rate.abs(),
+                directionOf(root, change),
+                optionalDecimal(root, "open_pric").map(BigDecimal::abs).orElse(current),
+                optionalDecimal(root, "high_pric").map(BigDecimal::abs).orElse(current),
+                optionalDecimal(root, "low_pric").map(BigDecimal::abs).orElse(current),
+                optionalLong(root, "trde_qty").orElse(0L),
+                clock.instant());
+    }
+
+    /**
+     * 등락 방향.
+     *
+     * <p>{@code pre_sig} 는 1:상한가 2:상승 3:보합 4:하한가 5:하락 이다. 값이 없으면 전일대비
+     * 부호로 판단한다.
+     */
+    private PriceDirection directionOf(JsonNode root, BigDecimal change) {
+        Optional<String> sign = optionalText(root, "pre_sig").or(() -> optionalText(root, "pred_pre_sig"));
+        if (sign.isPresent()) {
+            return switch (sign.get().trim()) {
+                case "1", "2" -> PriceDirection.UP;
+                case "4", "5" -> PriceDirection.DOWN;
+                case "3" -> PriceDirection.FLAT;
+                default -> fromSignum(change);
+            };
+        }
+        return fromSignum(change);
+    }
+
+    private static PriceDirection fromSignum(BigDecimal change) {
+        if (change == null || change.signum() == 0) return PriceDirection.FLAT;
+        return change.signum() > 0 ? PriceDirection.UP : PriceDirection.DOWN;
+    }
+
+    private static BigDecimal previousCloseFrom(BigDecimal current, Optional<BigDecimal> change) {
+        return change.map(value -> current.abs().subtract(value)).filter(value -> value.signum() > 0)
+                .orElse(null);
+    }
+
     // ------------------------------------------------------------------
-    // 봉
+    // 봉 (ka10080 분봉 / ka10081 일봉 / ka10082 주봉 / ka10083 월봉)
     // ------------------------------------------------------------------
 
+    /**
+     * 차트 응답을 오래된 것부터 정렬해 돌려준다.
+     *
+     * <p>키움은 최신 봉을 먼저 준다. 도메인 계약은 오름차순이므로 여기서 뒤집는다.
+     * 봉의 종가는 {@code cur_prc} 다.
+     */
     public List<Candle> toCandles(JsonNode root, CandleInterval interval) {
-        JsonNode list = arrayNode(root, KiwoomField.CANDLE_LIST);
+        JsonNode list = candleArray(root, interval);
         List<Candle> candles = new ArrayList<>(list.size());
         for (JsonNode node : list) {
             candles.add(toCandle(node, interval));
         }
-        // 증권사는 최신순으로 주는 경우가 많다. 도메인 계약은 오래된 것부터다.
         candles.sort((left, right) -> left.timestamp().compareTo(right.timestamp()));
         return List.copyOf(candles);
     }
 
-    public Candle toCandle(JsonNode node, CandleInterval interval) {
+    private JsonNode candleArray(JsonNode root, CandleInterval interval) {
+        String field = interval.isIntraday() ? "stk_min_pole_chart_qry" : chartFieldOf(interval);
+        JsonNode node = root.get(field);
+        if (node == null || node.isNull()) {
+            return objectMapper.createArrayNode();
+        }
+        if (!node.isArray()) {
+            throw new BrokerException("차트 응답의 " + field + " 는 배열이어야 합니다.");
+        }
+        return node;
+    }
+
+    private static String chartFieldOf(CandleInterval interval) {
+        return switch (interval) {
+            case DAY -> "stk_dt_pole_chart_qry";
+            case WEEK -> "stk_stk_pole_chart_qry";
+            case MONTH -> "stk_mth_pole_chart_qry";
+            default -> throw new IllegalArgumentException("일/주/월봉이 아닙니다: " + interval);
+        };
+    }
+
+    private Candle toCandle(JsonNode node, CandleInterval interval) {
+        BigDecimal close = decimal(node, "cur_prc").abs();
+        BigDecimal open = optionalDecimal(node, "open_pric").map(BigDecimal::abs).orElse(close);
+        BigDecimal high = optionalDecimal(node, "high_pric").map(BigDecimal::abs).orElse(close);
+        BigDecimal low = optionalDecimal(node, "low_pric").map(BigDecimal::abs).orElse(close);
         return new Candle(
-                parseTimestamp(node, interval),
+                candleTimestamp(node, interval),
                 interval,
-                decimal(node, KiwoomField.CANDLE_OPEN),
-                decimal(node, KiwoomField.CANDLE_HIGH),
-                decimal(node, KiwoomField.CANDLE_LOW),
-                decimal(node, KiwoomField.CANDLE_CLOSE),
-                optionalLong(node, KiwoomField.CANDLE_VOLUME).orElse(0L));
+                open,
+                high.max(open).max(close),
+                low.min(open).min(close),
+                close,
+                optionalLong(node, "trde_qty").orElse(0L));
     }
 
-    /** {@code yyyyMMdd} 또는 {@code yyyy-MM-dd} 형식의 날짜와 선택적 시각을 조합한다. */
-    private Instant parseTimestamp(JsonNode node, CandleInterval interval) {
-        String rawDate = text(node, KiwoomField.CANDLE_DATE);
-        LocalDate date = parseDate(rawDate);
-        LocalTime time = LocalTime.MIDNIGHT;
-        if (interval.isIntraday() && properties.fields().has(KiwoomField.CANDLE_TIME)) {
-            time = optionalText(node, KiwoomField.CANDLE_TIME)
-                    .map(KiwoomJsonMapper::parseTime)
-                    .orElse(LocalTime.MIDNIGHT);
+    /** 분봉은 {@code cntr_tm}({@code yyyyMMddHHmmss}), 그 외는 {@code dt}({@code yyyyMMdd}) 를 쓴다. */
+    private Instant candleTimestamp(JsonNode node, CandleInterval interval) {
+        if (interval.isIntraday()) {
+            String raw = text(node, "cntr_tm").trim();
+            try {
+                if (raw.length() >= 14) {
+                    return LocalDateTime.of(
+                            Integer.parseInt(raw.substring(0, 4)),
+                            Integer.parseInt(raw.substring(4, 6)),
+                            Integer.parseInt(raw.substring(6, 8)),
+                            Integer.parseInt(raw.substring(8, 10)),
+                            Integer.parseInt(raw.substring(10, 12)),
+                            Integer.parseInt(raw.substring(12, 14))).atZone(MARKET_ZONE).toInstant();
+                }
+            } catch (RuntimeException invalid) {
+                throw new BrokerException("분봉 체결시간을 해석하지 못했습니다. 입력값 " + raw, invalid);
+            }
+            throw new BrokerException("분봉 체결시간 형식이 올바르지 않습니다. 입력값 " + raw);
         }
-        return date.atTime(time).atZone(MARKET_ZONE).toInstant();
-    }
-
-    private static LocalDate parseDate(String raw) {
-        String value = raw.trim();
+        String raw = text(node, "dt").trim();
         try {
-            if (value.matches("\\d{8}")) {
-                return LocalDate.of(Integer.parseInt(value.substring(0, 4)),
-                        Integer.parseInt(value.substring(4, 6)),
-                        Integer.parseInt(value.substring(6, 8)));
-            }
-            return LocalDate.parse(value);
-        } catch (RuntimeException e) {
-            throw new BrokerException("봉 날짜 형식을 해석하지 못했습니다. 입력값 " + value, e);
-        }
-    }
-
-    private static LocalTime parseTime(String raw) {
-        String value = raw.trim();
-        try {
-            if (value.matches("\\d{6}")) {
-                return LocalTime.of(Integer.parseInt(value.substring(0, 2)),
-                        Integer.parseInt(value.substring(2, 4)),
-                        Integer.parseInt(value.substring(4, 6)));
-            }
-            if (value.matches("\\d{4}")) {
-                return LocalTime.of(Integer.parseInt(value.substring(0, 2)),
-                        Integer.parseInt(value.substring(2, 4)));
-            }
-            return LocalTime.parse(value);
-        } catch (RuntimeException e) {
-            throw new BrokerException("봉 시각 형식을 해석하지 못했습니다. 입력값 " + value, e);
+            LocalDate date = LocalDate.of(
+                    Integer.parseInt(raw.substring(0, 4)),
+                    Integer.parseInt(raw.substring(4, 6)),
+                    Integer.parseInt(raw.substring(6, 8)));
+            return date.atStartOfDay(MARKET_ZONE).toInstant();
+        } catch (RuntimeException invalid) {
+            throw new BrokerException("봉 일자를 해석하지 못했습니다. 입력값 " + raw, invalid);
         }
     }
 
     // ------------------------------------------------------------------
-    // 계좌
+    // 계좌 (kt00001 예수금 + kt00018 잔고)
     // ------------------------------------------------------------------
 
-    public Account toAccount(String accountNo, JsonNode root) {
-        Balance balance = Balance.of(decimal(root, KiwoomField.ACCOUNT_CASH));
+    /**
+     * 예수금과 보유 종목을 한 계좌로 합친다.
+     *
+     * @param deposit kt00001 응답
+     * @param balance kt00018 응답
+     */
+    public Account toAccount(String accountNo, JsonNode deposit, JsonNode balance) {
+        BigDecimal cash = optionalDecimal(deposit, "entr").orElse(BigDecimal.ZERO);
         List<Position> positions = new ArrayList<>();
-        for (JsonNode node : arrayNode(root, KiwoomField.ACCOUNT_POSITIONS)) {
-            long quantity = longValue(node, KiwoomField.POSITION_QUANTITY);
-            if (quantity <= 0) {
-                continue;
+        JsonNode holdings = balance == null ? null : balance.get("acnt_evlt_remn_indv_tot");
+        if (holdings != null && holdings.isArray()) {
+            for (JsonNode node : holdings) {
+                long quantity = optionalLong(node, "rmnd_qty").orElse(0L);
+                if (quantity <= 0) {
+                    continue;
+                }
+                BigDecimal averagePrice = optionalDecimal(node, "pur_pric")
+                        .map(BigDecimal::abs).orElse(BigDecimal.ZERO);
+                BigDecimal currentPrice = optionalDecimal(node, "cur_prc")
+                        .map(BigDecimal::abs).orElse(averagePrice);
+                positions.add(new Position(
+                        stripSecurityPrefix(text(node, "stk_cd")),
+                        optionalText(node, "stk_nm").orElseGet(() -> text(node, "stk_cd")),
+                        quantity,
+                        0L,
+                        averagePrice,
+                        currentPrice));
             }
-            BigDecimal averagePrice = decimal(node, KiwoomField.POSITION_AVERAGE_PRICE);
-            BigDecimal currentPrice = optionalDecimal(node, KiwoomField.POSITION_CURRENT_PRICE)
-                    .orElse(averagePrice);
-            positions.add(new Position(
-                    text(node, KiwoomField.POSITION_SYMBOL),
-                    text(node, KiwoomField.POSITION_NAME),
-                    quantity,
-                    0L,
-                    averagePrice,
-                    currentPrice));
         }
-        return new Account(accountNo, balance, positions);
+        return new Account(accountNo, Balance.of(cash.max(BigDecimal.ZERO)), positions);
+    }
+
+    /** 계좌 응답의 {@code A005930} 형태에서 접두어를 떼어 낸다. */
+    static String stripSecurityPrefix(String rawCode) {
+        String value = rawCode.trim();
+        if (value.length() == 7 && Character.isLetter(value.charAt(0))
+                && value.substring(1).chars().allMatch(Character::isDigit)) {
+            return value.substring(1);
+        }
+        return value;
     }
 
     // ------------------------------------------------------------------
-    // 주문
+    // 주문 (kt00009 계좌별주문체결현황요청)
     // ------------------------------------------------------------------
 
     public List<Order> toOrders(JsonNode root) {
+        JsonNode list = root.get("acnt_ord_cntr_prst_array");
+        if (list == null || !list.isArray()) {
+            return List.of();
+        }
         List<Order> orders = new ArrayList<>();
-        for (JsonNode node : arrayNode(root, KiwoomField.ORDER_LIST)) {
+        for (JsonNode node : list) {
             orders.add(toOrder(node));
         }
         return List.copyOf(orders);
     }
 
     /**
-     * 증권사 주문 한 건을 도메인 주문으로 옮긴다.
+     * 주문 한 건을 도메인 주문으로 옮긴다.
      *
-     * <p>증권사는 체결 목록을 따로 주므로, 여기서는 체결 수량과 평균 단가를 합성 체결
-     * 한 건으로 표현한다. 체결 이력 자체는 실시간 스트림에서 채운다.
+     * <p>키움은 주문 상태 코드를 따로 주지 않는다. 주문수량과 체결수량, 정정·취소구분으로
+     * 상태를 판단한다. 체결 이력은 합성 한 건으로 표현하고, 개별 체결은 실시간 스트림이 채운다.
      */
     public Order toOrder(JsonNode node) {
-        String orderId = text(node, KiwoomField.ORDER_ID);
-        OrderSide side = parseSide(text(node, KiwoomField.ORDER_SIDE));
-        OrderType type = parseType(optionalText(node, KiwoomField.ORDER_TYPE).orElse(null));
-        long quantity = longValue(node, KiwoomField.ORDER_QUANTITY);
-        BigDecimal limitPrice = type == OrderType.LIMIT
-                ? decimal(node, KiwoomField.ORDER_PRICE)
-                : null;
+        String orderId = text(node, "ord_no");
+        String symbol = stripSecurityPrefix(text(node, "stk_cd"));
+        String name = optionalText(node, "stk_nm").orElse(symbol);
+        long quantity = optionalLong(node, "ord_qty").orElse(0L);
+        long filled = optionalLong(node, "cntr_qty").orElse(0L);
+        BigDecimal unitPrice = optionalDecimal(node, "ord_uv").map(BigDecimal::abs)
+                .filter(value -> value.signum() > 0).orElse(null);
+        OrderSide side = sideOf(node);
+        OrderType type = unitPrice == null ? OrderType.MARKET : OrderType.LIMIT;
 
-        OrderCommand command = new OrderCommand(
-                text(node, KiwoomField.ORDER_SYMBOL),
-                optionalText(node, KiwoomField.ORDER_NAME).orElse(text(node, KiwoomField.ORDER_SYMBOL)),
-                side, type, quantity, limitPrice);
+        if (quantity <= 0) {
+            throw new BrokerException("주문 " + orderId + " 의 주문수량을 해석하지 못했습니다.");
+        }
 
+        OrderCommand command = new OrderCommand(symbol, name, side, type, quantity, unitPrice);
         Instant now = clock.instant();
-        Order order = Order.create(orderId, command, now);
+        Order order = Order.create(orderId, command, now).accept(now);
 
-        String rawStatus = optionalText(node, KiwoomField.ORDER_STATUS).orElse(null);
-        OrderStatus status = properties.statusOf(rawStatus);
-        if (status == null) {
-            throw new BrokerException("알 수 없는 주문 상태 코드입니다. 입력값 " + rawStatus
-                    + ". KiwoomProperties 의 상태 코드 대응표를 확인해 주세요.");
-        }
-
-        if (status == OrderStatus.REJECTED) {
-            return order.reject("증권사가 주문을 거부했습니다.", now);
-        }
-
-        order = order.accept(now);
-
-        long filledQuantity = optionalLong(node, KiwoomField.ORDER_FILLED_QUANTITY).orElse(0L);
-        if (filledQuantity > 0) {
-            BigDecimal fillPrice = optionalDecimal(node, KiwoomField.ORDER_AVERAGE_FILLED_PRICE)
-                    .or(() -> Optional.ofNullable(limitPrice))
+        if (filled > 0) {
+            BigDecimal fillPrice = optionalDecimal(node, "cntr_uv").map(BigDecimal::abs)
+                    .filter(value -> value.signum() > 0)
+                    .or(() -> Optional.ofNullable(unitPrice))
                     .orElseThrow(() -> new BrokerException(
                             "체결 단가를 알 수 없어 주문 " + orderId + " 을(를) 해석하지 못했습니다."));
             order = order.applyExecution(new Execution(
-                    orderId + "-AGG", orderId, command.symbol(), side, filledQuantity, fillPrice, now));
+                    orderId + "-AGG", orderId, symbol, side, Math.min(filled, quantity), fillPrice, now));
         }
 
-        if (status == OrderStatus.CANCELLED && !order.isTerminal()) {
+        if (isCancelled(node) && !order.isTerminal()) {
             order = order.cancel(now);
         }
         return order;
     }
 
-    private OrderSide parseSide(String raw) {
-        String value = raw.trim().toLowerCase(Locale.ROOT);
-        for (var entry : properties.orderSideCodes().entrySet()) {
-            if (entry.getValue().toLowerCase(Locale.ROOT).equals(value)) {
-                return entry.getKey();
-            }
-        }
-        throw new BrokerException("알 수 없는 매매 구분 코드입니다. 입력값 " + raw);
+    /** {@code io_tp_nm}(현금매수/현금매도) 또는 {@code trde_tp} 로 매매 구분을 읽는다. */
+    private OrderSide sideOf(JsonNode node) {
+        String label = optionalText(node, "io_tp_nm").orElse("");
+        if (label.contains("매도")) return OrderSide.SELL;
+        if (label.contains("매수")) return OrderSide.BUY;
+        String trade = optionalText(node, "trde_tp").orElse("");
+        if (trade.contains("매도")) return OrderSide.SELL;
+        if (trade.contains("매수")) return OrderSide.BUY;
+        throw new BrokerException("주문의 매매 구분을 해석하지 못했습니다. io_tp_nm=" + label);
     }
 
-    private OrderType parseType(String raw) {
-        if (raw == null) {
-            return OrderType.LIMIT;
-        }
-        String value = raw.trim().toLowerCase(Locale.ROOT);
-        for (var entry : properties.orderTypeCodes().entrySet()) {
-            if (entry.getValue().toLowerCase(Locale.ROOT).equals(value)) {
-                return entry.getKey();
-            }
-        }
-        throw new BrokerException("알 수 없는 주문 유형 코드입니다. 입력값 " + raw);
+    private boolean isCancelled(JsonNode node) {
+        return optionalText(node, "mdfy_cncl_tp").map(value -> value.contains("취소")).orElse(false);
+    }
+
+    /** 주문 접수 응답에서 주문번호를 읽는다. */
+    public String toOrderId(JsonNode root) {
+        return optionalText(root, "ord_no").orElseThrow(() -> new BrokerException(
+                "주문 응답에 ord_no 항목이 없어 주문 번호를 확인하지 못했습니다."));
     }
 
     // ------------------------------------------------------------------
     // 공통 읽기 도우미
     // ------------------------------------------------------------------
 
-    private JsonNode arrayNode(JsonNode parent, KiwoomField field) {
-        String name = properties.fields().nameOf(field);
-        JsonNode node = parent.get(name);
-        if (node == null || node.isNull()) {
-            return objectMapper.createArrayNode();
-        }
-        if (!node.isArray()) {
-            throw new BrokerException("필드 " + name + " 는 배열이어야 합니다.");
-        }
-        return node;
-    }
-
-    private String text(JsonNode parent, KiwoomField field) {
+    private String text(JsonNode parent, String field) {
         return optionalText(parent, field).orElseThrow(() -> missing(field));
     }
 
-    private Optional<String> optionalText(JsonNode parent, KiwoomField field) {
-        String name = properties.fields().nameOf(field);
-        JsonNode node = parent.get(name);
+    private Optional<String> optionalText(JsonNode parent, String field) {
+        if (parent == null) return Optional.empty();
+        JsonNode node = parent.get(field);
         if (node == null || node.isNull()) {
             return Optional.empty();
         }
@@ -299,32 +392,39 @@ public final class KiwoomJsonMapper {
         return value == null || value.isBlank() ? Optional.empty() : Optional.of(value);
     }
 
-    private BigDecimal decimal(JsonNode parent, KiwoomField field) {
+    private BigDecimal decimal(JsonNode parent, String field) {
         return optionalDecimal(parent, field).orElseThrow(() -> missing(field));
     }
 
-    private Optional<BigDecimal> optionalDecimal(JsonNode parent, KiwoomField field) {
-        return optionalText(parent, field).map(value -> {
+    /**
+     * 부호와 0-패딩을 걷어 내고 숫자로 읽는다.
+     *
+     * <p>{@code "+70700"}, {@code "-00000000196888"}, {@code "000000000000003"} 이 모두 들어온다.
+     */
+    private Optional<BigDecimal> optionalDecimal(JsonNode parent, String field) {
+        return optionalText(parent, field).flatMap(raw -> {
+            String value = raw.replace(",", "").trim();
+            if (value.isEmpty()) return Optional.empty();
+            boolean negative = value.startsWith("-");
+            if (negative || value.startsWith("+")) {
+                value = value.substring(1);
+            }
+            if (value.isEmpty()) return Optional.empty();
             try {
-                // 증권사는 부호와 천 단위 구분자를 붙여 보내기도 한다.
-                return new BigDecimal(value.replace(",", "").replace("+", "").trim());
-            } catch (NumberFormatException e) {
-                throw new BrokerException("필드 " + properties.fields().nameOf(field)
-                        + " 의 숫자 형식을 해석하지 못했습니다. 입력값 " + value, e);
+                BigDecimal parsed = new BigDecimal(value);
+                return Optional.of(negative ? parsed.negate() : parsed);
+            } catch (NumberFormatException notANumber) {
+                throw new BrokerException(
+                        "필드 " + field + " 의 숫자 형식을 해석하지 못했습니다. 입력값 " + raw, notANumber);
             }
         });
     }
 
-    private long longValue(JsonNode parent, KiwoomField field) {
-        return optionalLong(parent, field).orElseThrow(() -> missing(field));
-    }
-
-    private Optional<Long> optionalLong(JsonNode parent, KiwoomField field) {
+    private Optional<Long> optionalLong(JsonNode parent, String field) {
         return optionalDecimal(parent, field).map(BigDecimal::longValue);
     }
 
-    private BrokerException missing(KiwoomField field) {
-        return new BrokerException("증권사 응답에 필수 항목 "
-                + properties.fields().nameOf(field) + " 이(가) 없습니다.");
+    private BrokerException missing(String field) {
+        return new BrokerException("증권사 응답에 필수 항목 " + field + " 이(가) 없습니다.");
     }
 }

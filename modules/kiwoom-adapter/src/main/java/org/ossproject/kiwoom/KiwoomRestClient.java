@@ -3,7 +3,6 @@ package org.ossproject.kiwoom;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.ossproject.broker.BrokerAuthException;
 import org.ossproject.broker.BrokerClient;
-import org.ossproject.broker.BrokerCredentials;
 import org.ossproject.broker.BrokerException;
 import org.ossproject.broker.SensitiveDataMasker;
 import org.ossproject.broker.resilience.ResilientExecutor;
@@ -12,50 +11,55 @@ import org.ossproject.finance.model.Candle;
 import org.ossproject.finance.model.CandleInterval;
 import org.ossproject.finance.model.Order;
 import org.ossproject.finance.model.OrderCommand;
+import org.ossproject.finance.model.OrderSide;
 import org.ossproject.finance.model.OrderType;
 import org.ossproject.finance.model.Quote;
+import org.ossproject.finance.model.StockDetail;
 import org.ossproject.kiwoom.http.HttpTextRequest;
 import org.ossproject.kiwoom.http.HttpTextResponse;
 import org.ossproject.kiwoom.http.HttpTransport;
 
-import java.net.URI;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
-import java.util.Map;
 import java.util.function.Function;
 
 /**
  * 키움 REST 클라이언트.
  *
- * <p>모든 호출은 {@link ResilientExecutor} 를 거쳐 재시도와 회로 차단이 적용된다.
- * 401 응답을 받으면 토큰을 한 번 재발급받고 다시 시도한다. 토큰이 만료되었을 뿐인데
- * 사용자에게 인증 실패라고 알리는 상황을 막기 위해서다.
+ * <p>모든 TR은 POST 이고, 어떤 조회인지는 {@code api-id} 헤더가 정한다. 경로는 업무 카테고리
+ * 하나뿐이라 경로만 봐서는 무슨 요청인지 알 수 없다. TR 목록은 {@link KiwoomTr} 를 참고한다.
  *
- * <p>이 클래스는 주소·경로·필드명을 {@link KiwoomProperties} 에서만 읽는다. 공식 문서에
- * 맞춰 설정만 채우면 코드 수정 없이 동작한다.
+ * <p>모든 호출은 {@link ResilientExecutor} 를 거쳐 재시도와 회로 차단이 적용된다. 401 응답을
+ * 받으면 토큰을 한 번 재발급받고 다시 시도한다. 토큰이 만료되었을 뿐인데 사용자에게 인증
+ * 실패라고 알리는 상황을 막기 위해서다.
+ *
+ * <p>주문 전송은 재시도하지 않는다. 응답을 못 받은 주문을 다시 보내면 중복 체결이 날 수 있다.
  */
 public final class KiwoomRestClient implements BrokerClient {
 
     private static final String BROKER_ID = "kiwoom";
+    private static final DateTimeFormatter BASE_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
+    private static final ZoneId MARKET_ZONE = ZoneId.of("Asia/Seoul");
 
     private final HttpTransport transport;
     private final KiwoomJsonMapper jsonMapper;
     private final KiwoomProperties properties;
     private final KiwoomTokenProvider tokenProvider;
-    private final BrokerCredentials credentials;
     private final ResilientExecutor executor;
 
     public KiwoomRestClient(HttpTransport transport, KiwoomJsonMapper jsonMapper,
                             KiwoomProperties properties, KiwoomTokenProvider tokenProvider,
-                            BrokerCredentials credentials, ResilientExecutor executor) {
+                            ResilientExecutor executor) {
         if (transport == null || jsonMapper == null || properties == null
-                || tokenProvider == null || credentials == null || executor == null) {
+                || tokenProvider == null || executor == null) {
             throw new IllegalArgumentException("키움 클라이언트 구성 요소가 누락되었습니다.");
         }
         this.transport = transport;
         this.jsonMapper = jsonMapper;
         this.properties = properties;
         this.tokenProvider = tokenProvider;
-        this.credentials = credentials;
         this.executor = executor;
     }
 
@@ -77,9 +81,17 @@ public final class KiwoomRestClient implements BrokerClient {
     @Override
     public Quote fetchQuote(String symbol) {
         requireSymbol(symbol);
-        URI uri = properties.resolve(properties.endpoints().quotePath(), Map.of("symbol", symbol));
-        return executor.call("현재가 조회",
-                () -> withAuthRetry("현재가 조회", () -> HttpTextRequest.get(uri), jsonMapper::toQuote));
+        String body = "{\"stk_cd\":\"" + escape(symbol) + "\"}";
+        return executor.call("현재가 조회", () ->
+                call("현재가 조회", KiwoomTr.STOCK_BASIC_INFO, body, jsonMapper::toQuote));
+    }
+
+    /** 화면용 상세. {@link #fetchQuote(String)} 와 같은 TR 을 쓰지만 더 많은 값을 담는다. */
+    public StockDetail fetchStockDetail(String symbol) {
+        requireSymbol(symbol);
+        String body = "{\"stk_cd\":\"" + escape(symbol) + "\"}";
+        return executor.call("종목 상세 조회", () ->
+                call("종목 상세 조회", KiwoomTr.STOCK_BASIC_INFO, body, jsonMapper::toStockDetail));
     }
 
     @Override
@@ -91,114 +103,120 @@ public final class KiwoomRestClient implements BrokerClient {
         if (count <= 0) {
             throw new IllegalArgumentException("조회 개수는 1 이상이어야 합니다.");
         }
-        URI base = properties.resolve(properties.endpoints().candlePath(), Map.of("symbol", symbol));
-        URI uri = URI.create(base + "?interval=" + interval.name() + "&count=" + count);
-        return executor.call("봉 조회",
-                () -> withAuthRetry("봉 조회", () -> HttpTextRequest.get(uri),
-                        node -> jsonMapper.toCandles(node, interval)));
+        KiwoomTr tr = KiwoomTr.chartFor(interval);
+        String today = LocalDate.now(MARKET_ZONE).format(BASE_DATE);
+        String body = interval.isIntraday()
+                ? "{\"stk_cd\":\"" + escape(symbol) + "\",\"tic_scope\":\""
+                        + KiwoomTr.tickScopeOf(interval) + "\",\"upd_stkpc_tp\":\""
+                        + properties.adjustedPriceCode() + "\"}"
+                : "{\"stk_cd\":\"" + escape(symbol) + "\",\"base_dt\":\"" + today
+                        + "\",\"upd_stkpc_tp\":\"" + properties.adjustedPriceCode() + "\"}";
+
+        return executor.call("봉 조회", () -> {
+            List<Candle> candles = call("봉 조회", tr, body, node -> jsonMapper.toCandles(node, interval));
+            // 키움은 한 번에 주는 개수를 지정할 수 없다. 최신 count 개만 남긴다.
+            return candles.size() <= count
+                    ? candles
+                    : List.copyOf(candles.subList(candles.size() - count, candles.size()));
+        });
     }
 
     @Override
     public Account fetchAccount(String accountNo) {
         requireAccountNo(accountNo);
-        URI uri = properties.resolve(properties.endpoints().accountPath(),
-                Map.of("accountNo", accountNo));
-        return executor.call("잔고 조회",
-                () -> withAuthRetry("잔고 조회", () -> HttpTextRequest.get(uri),
-                        node -> jsonMapper.toAccount(accountNo, node)));
+        String depositBody = "{\"qry_tp\":\"2\"}";
+        String balanceBody = "{\"qry_tp\":\"1\",\"dmst_stex_tp\":\"" + properties.exchange() + "\"}";
+        return executor.call("잔고 조회", () -> {
+            JsonNode deposit = call("예수금 조회", KiwoomTr.DEPOSIT_DETAIL, depositBody, node -> node);
+            JsonNode balance = call("잔고 조회", KiwoomTr.BALANCE_DETAIL, balanceBody, node -> node);
+            return jsonMapper.toAccount(accountNo, deposit, balance);
+        });
     }
 
     @Override
     public List<Order> fetchOrders(String accountNo) {
         requireAccountNo(accountNo);
-        URI uri = properties.resolve(properties.endpoints().orderListPath(),
-                Map.of("accountNo", accountNo));
-        return executor.call("주문 내역 조회",
-                () -> withAuthRetry("주문 내역 조회", () -> HttpTextRequest.get(uri), jsonMapper::toOrders));
+        String body = "{\"ord_dt\":\"\",\"stk_bond_tp\":\"1\",\"mrkt_tp\":\"0\",\"sell_tp\":\"0\","
+                + "\"qry_tp\":\"0\",\"stk_cd\":\"\",\"fr_ord_no\":\"\",\"dmst_stex_tp\":\""
+                + properties.exchange() + "\"}";
+        return executor.call("주문 내역 조회", () ->
+                call("주문 내역 조회", KiwoomTr.ORDER_STATUS, body, jsonMapper::toOrders));
     }
 
+    /**
+     * 주문을 접수하고 증권사 주문번호를 돌려준다.
+     *
+     * <p>매수와 매도는 서로 다른 TR 이다. 재시도하지 않는다.
+     */
     @Override
     public String placeOrder(String accountNo, OrderCommand command) {
         requireAccountNo(accountNo);
         if (command == null) {
             throw new IllegalArgumentException("주문 요청은 필수입니다.");
         }
-        URI uri = properties.resolve(properties.endpoints().orderPath());
-        String body = buildOrderBody(accountNo, command);
-
-        return executor.call("주문 접수", () -> withAuthRetry("주문 접수",
-                () -> HttpTextRequest.post(uri).jsonBody(body),
-                node -> {
-                    String name = properties.fields().nameOf(KiwoomField.ORDER_ID);
-                    JsonNode idNode = node.get(name);
-                    if (idNode == null || idNode.isNull() || idNode.asText().isBlank()) {
-                        throw new BrokerException(
-                                "주문 응답에 " + name + " 항목이 없어 주문 번호를 확인하지 못했습니다.");
-                    }
-                    return idNode.asText();
-                }));
+        KiwoomTr tr = command.side() == OrderSide.SELL ? KiwoomTr.ORDER_SELL : KiwoomTr.ORDER_BUY;
+        String body = "{\"dmst_stex_tp\":\"" + properties.exchange() + "\","
+                + "\"stk_cd\":\"" + escape(command.symbol()) + "\","
+                + "\"ord_qty\":\"" + command.quantity() + "\","
+                + "\"ord_uv\":\"" + limitPriceOf(command) + "\","
+                + "\"trde_tp\":\"" + tradeTypeOf(command) + "\","
+                + "\"cond_uv\":\"\"}";
+        return call("주문 접수", tr, body, jsonMapper::toOrderId);
     }
 
+    /** 주문을 취소한다. 잔량 전부를 취소한다. 재시도하지 않는다. */
     @Override
     public void cancelOrder(String accountNo, String brokerOrderId) {
         requireAccountNo(accountNo);
         if (brokerOrderId == null || brokerOrderId.isBlank()) {
             throw new IllegalArgumentException("주문 번호는 필수입니다.");
         }
-        URI uri = properties.resolve(properties.endpoints().orderCancelPath());
-        String body = "{\"accountNo\":\"" + escape(accountNo)
-                + "\",\"orderId\":\"" + escape(brokerOrderId) + "\"}";
+        String body = "{\"dmst_stex_tp\":\"" + properties.exchange() + "\","
+                + "\"orig_ord_no\":\"" + escape(brokerOrderId) + "\","
+                + "\"stk_cd\":\"\",\"cncl_qty\":\"0\"}";
+        call("주문 취소", KiwoomTr.ORDER_CANCEL, body, node -> null);
+    }
 
-        executor.run("주문 취소", () -> withAuthRetry("주문 취소",
-                () -> HttpTextRequest.post(uri).jsonBody(body), node -> null));
+    /** 지정가는 주문단가를 보내고 시장가는 빈 값을 보낸다. */
+    private static String limitPriceOf(OrderCommand command) {
+        return command.type() == OrderType.LIMIT && command.limitPrice() != null
+                ? command.limitPrice().stripTrailingZeros().toPlainString()
+                : "";
+    }
+
+    /** {@code trde_tp} 는 0:보통(지정가), 3:시장가 다. */
+    private static String tradeTypeOf(OrderCommand command) {
+        return command.type() == OrderType.MARKET ? "3" : "0";
     }
 
     /**
-     * 요청을 보내고, 401 이면 토큰을 재발급받아 한 번만 다시 시도한다.
+     * TR 을 호출하고 응답 본문을 해석한다.
      *
-     * @param requestFactory 헤더를 붙이기 전 요청 빌더. 재시도 시 새 토큰으로 다시 만든다
+     * <p>401 이면 토큰을 재발급받아 한 번만 다시 시도한다. HTTP 성공이라도 {@code return_code}
+     * 를 확인한다. 키움은 업무 오류를 200 응답으로 알리기 때문이다.
      */
-    private <T> T withAuthRetry(String operation,
-                                java.util.function.Supplier<HttpTextRequest.Builder> requestFactory,
-                                Function<JsonNode, T> parser) {
-        HttpTextResponse response = send(requestFactory.get());
+    private <T> T call(String operation, KiwoomTr tr, String body, Function<JsonNode, T> parser) {
+        HttpTextResponse response = send(tr, body);
         if (response.statusCode() == 401) {
             tokenProvider.invalidate();
-            response = send(requestFactory.get());
+            response = send(tr, body);
         }
         if (!response.isSuccess()) {
             throw KiwoomErrorMapper.toException(operation, response);
         }
-        return parser.apply(jsonMapper.parse(response.body()));
+        JsonNode root = jsonMapper.parse(response.body());
+        KiwoomErrorMapper.requireSuccessBody(operation, root, response);
+        return parser.apply(root);
     }
 
-    private HttpTextResponse send(HttpTextRequest.Builder builder) {
-        HttpTextRequest request = builder
-                .header("Authorization", tokenProvider.token().asBearerHeader())
-                .header("appkey", credentials.appKey())
-                .header("Accept", "application/json")
+    private HttpTextResponse send(KiwoomTr tr, String body) {
+        HttpTextRequest request = HttpTextRequest.post(properties.resolve(tr))
+                .header("authorization", tokenProvider.token().asBearerHeader())
+                .header("api-id", tr.id())
+                .jsonBody(body)
                 .timeout(properties.requestTimeout())
                 .build();
         return transport.send(request);
-    }
-
-    private String buildOrderBody(String accountNo, OrderCommand command) {
-        String sideCode = properties.orderSideCodes().get(command.side());
-        String typeCode = properties.orderTypeCodes().get(command.type());
-        if (sideCode == null || typeCode == null) {
-            throw new BrokerException(
-                    "매매 구분 또는 주문 유형 코드가 설정되지 않았습니다. KiwoomProperties 를 확인해 주세요.");
-        }
-        StringBuilder sb = new StringBuilder("{")
-                .append("\"accountNo\":\"").append(escape(accountNo)).append("\",")
-                .append("\"symbol\":\"").append(escape(command.symbol())).append("\",")
-                .append("\"side\":\"").append(escape(sideCode)).append("\",")
-                .append("\"orderType\":\"").append(escape(typeCode)).append("\",")
-                .append("\"quantity\":").append(command.quantity());
-        if (command.type() == OrderType.LIMIT) {
-            sb.append(",\"price\":").append(command.limitPrice().toPlainString());
-        }
-        return sb.append('}').toString();
     }
 
     private static void requireSymbol(String symbol) {
