@@ -175,6 +175,8 @@ class KiwoomRestClientTest {
                 "허용된 요청 개수를 초과하였습니다[1700:허용된 API 요청 개수를 초과하였습니다. 유량=1, API ID=ka10001]"));
         assertEquals("8020", KiwoomErrorMapper.documentedCodeOf(
                 "인증 실패[8020:입력파라미터로 appkey 또는 secretkey가 들어오지 않았습니다.]"));
+        // 코드 뒤에 콜론이 아니라 닫는 대괄호가 오는 형태도 실제 응답에서 확인했다.
+        assertEquals("2000", KiwoomErrorMapper.documentedCodeOf("[2000](RC4058:모의투자 장종료)"));
         assertEquals(null, KiwoomErrorMapper.documentedCodeOf("코드가 없는 메시지"));
     }
 

@@ -69,12 +69,16 @@ public final class KiwoomErrorMapper {
     /**
      * 공식 문서 오류코드가 담기는 위치.
      *
-     * <p>{@code return_code} 는 문서의 오류코드가 아니라 큰 분류다. 문서 표의 네 자리 코드는
-     * {@code return_msg} 안에 {@code [1700:허용된 API 요청 개수를 초과하였습니다...]} 형태로
-     * 들어온다. 실제 응답으로 확인한 사항이다.
+     * <p>{@code return_code} 는 문서의 오류코드가 아니라 큰 분류다. 문서 표의 코드는
+     * {@code return_msg} 안 대괄호에 들어온다. 실제 응답에서 두 가지 형태를 확인했다.
+     *
+     * <pre>
+     *   허용된 요청 개수를 초과하였습니다[1700:허용된 API 요청 개수를 초과하였습니다...]
+     *   [2000](RC4058:모의투자 장종료)
+     * </pre>
      */
     private static final java.util.regex.Pattern DOCUMENTED_CODE =
-            java.util.regex.Pattern.compile("\\[(\\d{3,4}):");
+            java.util.regex.Pattern.compile("\\[(\\d{3,4})[:\\]]");
 
     /**
      * 본문의 오류 코드를 확인하고 실패면 예외를 던진다.
