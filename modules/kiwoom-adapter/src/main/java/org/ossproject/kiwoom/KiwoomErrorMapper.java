@@ -67,9 +67,21 @@ public final class KiwoomErrorMapper {
     }
 
     /**
-     * 본문의 {@code return_code} 를 확인하고 실패면 예외를 던진다.
+     * 공식 문서 오류코드가 담기는 위치.
      *
-     * <p>HTTP 200 이라도 업무 오류일 수 있으므로 모든 응답이 이 검사를 거쳐야 한다.
+     * <p>{@code return_code} 는 문서의 오류코드가 아니라 큰 분류다. 문서 표의 네 자리 코드는
+     * {@code return_msg} 안에 {@code [1700:허용된 API 요청 개수를 초과하였습니다...]} 형태로
+     * 들어온다. 실제 응답으로 확인한 사항이다.
+     */
+    private static final java.util.regex.Pattern DOCUMENTED_CODE =
+            java.util.regex.Pattern.compile("\\[(\\d{3,4}):");
+
+    /**
+     * 본문의 오류 코드를 확인하고 실패면 예외를 던진다.
+     *
+     * <p>HTTP 200 이라도 업무 오류일 수 있으므로 모든 응답이 이 검사를 거쳐야 한다. 성공 여부는
+     * {@code return_code == 0} 으로 판단하고, 어떤 오류인지는 {@code return_msg} 안의 문서
+     * 코드로 판단한다.
      *
      * @param operation 사용자에게 보여 줄 작업 이름
      * @param root      파싱된 응답 본문
@@ -81,26 +93,40 @@ public final class KiwoomErrorMapper {
             // 일부 TR은 return_code 를 주지 않는다. 그 경우 HTTP 상태로만 판단한다.
             return;
         }
-        String code = codeNode.asText().trim();
-        if ("0".equals(code)) {
+        String returnCode = codeNode.asText().trim();
+        if ("0".equals(returnCode)) {
             return;
         }
 
         JsonNode messageNode = root.get("return_msg");
-        String message = messageNode == null || messageNode.isNull()
-                ? "" : SensitiveDataMasker.mask(messageNode.asText().trim());
-        String detail = operation + " 실패. 코드 " + code + (message.isBlank() ? "" : ". " + message);
+        String rawMessage = messageNode == null || messageNode.isNull() ? "" : messageNode.asText().trim();
+        String message = SensitiveDataMasker.mask(rawMessage);
+        String documented = documentedCodeOf(rawMessage);
 
-        if (AUTH_CODES.contains(code)) {
-            throw new BrokerAuthException(detail);
-        }
-        if (RATE_LIMIT_CODES.contains(code)) {
-            throw new BrokerRateLimitException(detail, parseRetryAfter(response));
-        }
-        if (TRANSIENT_CODES.contains(code)) {
-            throw new BrokerTransientException(detail);
+        String shown = documented == null ? returnCode : documented;
+        String detail = operation + " 실패. 코드 " + shown + (message.isBlank() ? "" : ". " + message);
+
+        if (documented != null) {
+            if (AUTH_CODES.contains(documented)) {
+                throw new BrokerAuthException(detail);
+            }
+            if (RATE_LIMIT_CODES.contains(documented)) {
+                throw new BrokerRateLimitException(detail, parseRetryAfter(response));
+            }
+            if (TRANSIENT_CODES.contains(documented)) {
+                throw new BrokerTransientException(detail);
+            }
         }
         throw new BrokerException(detail);
+    }
+
+    /** {@code return_msg} 안에서 문서 오류코드를 뽑는다. 없으면 {@code null}. */
+    static String documentedCodeOf(String returnMessage) {
+        if (returnMessage == null || returnMessage.isBlank()) {
+            return null;
+        }
+        java.util.regex.Matcher matcher = DOCUMENTED_CODE.matcher(returnMessage);
+        return matcher.find() ? matcher.group(1) : null;
     }
 
     /** {@code Retry-After} 헤더는 초 단위 숫자로 온다고 가정한다. */
