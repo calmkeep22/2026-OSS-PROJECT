@@ -23,6 +23,8 @@ public enum KiwoomTr {
     STOCK_BASIC_INFO("ka10001", "/api/dostk/stkinfo"),
     /** 주식호가요청. 매도·매수 최우선 호가와 잔량. */
     ORDER_BOOK("ka10004", "/api/dostk/mrkcond"),
+    /** 종목정보 리스트. 시장별 종목 코드와 이름. 현재가는 주지 않는다. */
+    SECURITY_LIST("ka10099", "/api/dostk/stkinfo"),
 
     /** 주식분봉차트조회요청. */
     CHART_MINUTE("ka10080", "/api/dostk/chart"),

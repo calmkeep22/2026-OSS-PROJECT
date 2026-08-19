@@ -190,6 +190,21 @@ public final class KiwoomRestClient implements BrokerClient {
     }
 
     /**
+     * 도메인 모델로 옮기지 않는 TR 을 호출하고 응답 본문을 그대로 돌려준다.
+     *
+     * <p>종목 목록처럼 이 클라이언트가 전용 메서드를 두지 않는 조회에 쓴다. 재시도와 회로
+     * 차단, 토큰 재발급, 본문 오류 검사는 다른 호출과 똑같이 적용된다.
+     *
+     * @param operation 사용자에게 보여 줄 작업 이름
+     */
+    public JsonNode callRaw(String operation, KiwoomTr tr, String body) {
+        if (tr == null) {
+            throw new IllegalArgumentException("TR 은 필수입니다.");
+        }
+        return executor.call(operation, () -> call(operation, tr, body, node -> node));
+    }
+
+    /**
      * TR 을 호출하고 응답 본문을 해석한다.
      *
      * <p>401 이면 토큰을 재발급받아 한 번만 다시 시도한다. HTTP 성공이라도 {@code return_code}
