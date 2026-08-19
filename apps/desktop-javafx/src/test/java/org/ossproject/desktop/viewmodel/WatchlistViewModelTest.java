@@ -17,8 +17,26 @@ class WatchlistViewModelTest {
                 Runnable::run);
     }
 
-    @Test void preventsDeletingUsedGroupAndRenamesRowsTogether() {
+    /**
+     * 관심종목을 담아 둔 세션.
+     *
+     * <p>앱은 빈 관심종목으로 시작하므로 테스트가 필요한 기록을 직접 만든다.
+     */
+    private DesktopSession sessionWith(WatchlistItem... items) {
         DesktopSession session = new DesktopSession();
+        for (WatchlistItem item : items) {
+            if (!session.watchlistGroups().contains(item.group())) {
+                session.watchlistGroups().add(item.group());
+            }
+        }
+        session.watchlistItems().setAll(items);
+        return session;
+    }
+
+    @Test void preventsDeletingUsedGroupAndRenamesRowsTogether() {
+        DesktopSession session = sessionWith(
+                new WatchlistItem("반도체", "국내", "005930", "삼성전자", "KRX", "KRW", "75,000원"),
+                new WatchlistItem("반도체", "국내", "000660", "SK하이닉스", "KRX", "KRW", "없음"));
         WatchlistViewModel viewModel = viewModel(session);
 
         assertEquals(WatchlistViewModel.GroupDeleteResult.IN_USE, viewModel.deleteGroup("반도체"));
@@ -27,8 +45,19 @@ class WatchlistViewModelTest {
                 .allMatch(item -> item.group().equals("반도체 핵심")));
     }
 
-    @Test void addsEditsMovesAlertsRemovesAndRefreshesTypedItems() {
+    @Test void startsWithNoWatchlistRecords() {
         DesktopSession session = new DesktopSession();
+
+        assertTrue(session.watchlistItems().isEmpty(), "관심종목은 사용자가 담기 전까지 비어 있어야 합니다");
+        assertTrue(session.alertRules().isEmpty());
+        assertTrue(session.journalEntries().isEmpty());
+        assertEquals(java.util.List.of(DesktopSession.ALL_GROUP), session.watchlistGroups());
+    }
+
+    @Test void addsEditsMovesAlertsRemovesAndRefreshesTypedItems() {
+        DesktopSession session = sessionWith(
+                new WatchlistItem("반도체", "국내", "005930", "삼성전자", "KRX", "KRW", "없음"));
+        session.watchlistGroups().addAll("미국 기술주", "AI");
         WatchlistViewModel viewModel = viewModel(session);
         WatchlistItem added = new WatchlistItem(
                 "미국 기술주", "미국", "AAPL", "Apple", "NASDAQ", "USD", "없음");

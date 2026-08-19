@@ -18,26 +18,15 @@ public final class DesktopSession {
 
     private final ObjectProperty<StockSelection> selectedStock =
             new SimpleObjectProperty<>(StockSelection.samsungElectronics());
-    private final ObservableList<String> watchlistGroups = FXCollections.observableArrayList(
-            ALL_GROUP, "반도체", "AI", "배당주", "미국 기술주");
-    private final ObservableList<WatchlistItem> watchlistItems = FXCollections.observableArrayList(
-            new WatchlistItem("반도체", "국내", "005930", "삼성전자", "KRX", "KRW", "75,000원"),
-            new WatchlistItem("반도체", "국내", "000660", "SK하이닉스", "KRX", "KRW", "없음"),
-            new WatchlistItem("AI", "국내", "035420", "NAVER", "KRX", "KRW", "200,000원"),
-            new WatchlistItem("미국 기술주", "미국", "NVDA", "NVIDIA", "NASDAQ", "USD", "$150"));
-    private final ObservableList<AlertRule> alertRules = FXCollections.observableArrayList(
-            new AlertRule("삼성전자", "가격 이상", "75,000원", true),
-            new AlertRule("SK하이닉스", "등락률 이상", "3.00%", true),
-            new AlertRule("테마반도체", "거래량 급증", "평균 3배", false));
-    private final ObservableList<String> notifications = FXCollections.observableArrayList(
-            "새 알림 · 14:32 · 주문 · 삼성전자 매수 10주 중 5주가 체결되었습니다.",
-            "새 알림 · 14:28 · 연결 · 실시간 시세 연결이 복구되었습니다.",
-            "새 알림 · 13:55 · 가격 · SK하이닉스가 목표 가격 184,000원에 도달했습니다.",
-            "12:42 · 이상 감지 · 테마반도체 거래량이 최근 평균의 3.1배입니다.",
-            "11:18 · 주문 · NAVER 매도 3주가 전량 체결되었습니다.");
-    private final ObservableList<JournalEntry> journalEntries = FXCollections.observableArrayList(
-            new JournalEntry("08/10", "삼성전자", "2,100,000원", "2,200,000원", "+100,000원", "돌파 매매", "수익"),
-            new JournalEntry("08/09", "NAVER", "1,300,000원", "1,280,000원", "-20,000원", "재료", "리스크관리"));
+    // 관심종목·알림 규칙·알림 목록·매매일지는 모두 사용자가 만드는 기록이다. 예전에는
+    // 화면이 비어 보이지 않도록 삼성전자와 체결 알림 같은 표본을 미리 넣어 두었는데,
+    // 화면을 볼 수 없는 사용자는 그것이 자기 기록인지 앱이 넣어 둔 예시인지 구분할 수 없다.
+    // 빈 상태로 시작하고 저장된 기록이 있으면 restore 가 채운다.
+    private final ObservableList<String> watchlistGroups = FXCollections.observableArrayList(ALL_GROUP);
+    private final ObservableList<WatchlistItem> watchlistItems = FXCollections.observableArrayList();
+    private final ObservableList<AlertRule> alertRules = FXCollections.observableArrayList();
+    private final ObservableList<String> notifications = FXCollections.observableArrayList();
+    private final ObservableList<JournalEntry> journalEntries = FXCollections.observableArrayList();
 
     public ObjectProperty<StockSelection> selectedStockProperty() { return selectedStock; }
     public StockSelection selectedStock() { return selectedStock.get(); }
