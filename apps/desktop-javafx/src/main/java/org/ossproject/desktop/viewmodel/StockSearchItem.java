@@ -27,23 +27,44 @@ public record StockSearchItem(SecuritySummary summary) {
     public String name() { return summary.name(); }
     public String exchange() { return summary.exchange(); }
 
-    /** 통화에 맞춘 현재가 표기. */
+    /** 목록에 시세가 함께 왔는지 여부. */
+    public boolean hasQuote() {
+        return summary.hasQuote();
+    }
+
+    /**
+     * 통화에 맞춘 현재가 표기.
+     *
+     * <p>목록 조회가 시세를 주지 않으면 값을 지어내지 않고 없음으로 표시한다. 상세 화면을
+     * 열면 실제 현재가를 조회한다.
+     */
     public String price() {
         BigDecimal value = summary.currentPrice();
+        if (value == null) {
+            return "-";
+        }
         if (summary.isKrw()) {
             return String.format("%,d원", value.setScale(0, RoundingMode.HALF_UP).longValue());
         }
         return "$" + value.setScale(2, RoundingMode.HALF_UP).toPlainString();
     }
 
-    /** 부호를 포함한 등락률 표기. */
+    /** 부호를 포함한 등락률 표기. 시세가 없으면 없음으로 표시한다. */
     public String changeRate() {
-        BigDecimal rate = summary.changeRate().setScale(2, RoundingMode.HALF_UP);
+        BigDecimal value = summary.changeRate();
+        if (value == null) {
+            return "-";
+        }
+        BigDecimal rate = value.setScale(2, RoundingMode.HALF_UP);
         return (rate.signum() > 0 ? "+" : "") + rate.toPlainString() + "%";
     }
 
     /** 스크린리더가 한 행을 한 문장으로 읽을 수 있는 설명. */
     public String accessibleDescription() {
+        if (!hasQuote()) {
+            return "%s %s, %s, 목록에서는 시세를 제공하지 않습니다. 열면 현재가를 조회합니다."
+                    .formatted(name(), symbol(), exchange());
+        }
         return "%s %s, %s, 현재가 %s, 등락률 %s"
                 .formatted(name(), symbol(), exchange(), price(), changeRate());
     }
