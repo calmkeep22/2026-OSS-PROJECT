@@ -430,7 +430,7 @@ class KiwoomRestClientTest {
         transport.enqueueJson("{\"entr\":\"000000010000000\","
                 + "\"d2_entra\":\"000000009780000\","
                 + "\"ord_alow_amt\":\"000000009000000\","
-                + "\"wthd_alowa\":\"000000008000000\",\"return_code\":0}");
+                + "\"pymn_alow_amt\":\"000000008000000\",\"return_code\":0}");
         transport.enqueueJson("{\"acnt_evlt_remn_indv_tot\":[],\"return_code\":0}");
 
         Account account = client.fetchAccount("12345678901");
@@ -479,6 +479,45 @@ class KiwoomRestClientTest {
                 "수수료를 세지 않은 -500 이 아니라 증권사 값이어야 합니다");
         assertEquals(0, new BigDecimal("-2480").compareTo(account.totalProfitLoss()));
         assertEquals(0, new BigDecimal("9997520").compareTo(account.totalAssets()));
+    }
+
+    @Test
+    @DisplayName("모의투자 서버 실제 응답 모양 그대로 계좌를 읽는다")
+    void readsTheAccountFromARealMockServerResponse() {
+        // 2026-08-20 모의투자 서버에서 받은 응답에서 값만 옮긴 것이다.
+        // NAVER 를 220,500 원에 한 주 샀고 수수료·세금 합계가 1,980 원이다.
+        transport.enqueueJson(TOKEN_BODY);
+        transport.enqueueJson("""
+                {"entr":"000000010000000","profa_ch":"000000000044100",
+                 "pymn_alow_amt":"000000009955900","ord_alow_amt":"000000009778730",
+                 "d1_entra":"000000010000000","d2_entra":"000000009778730",
+                 "d2_buy_exct_amt":"000000000221270","return_code":0}""");
+        transport.enqueueJson("""
+                {"tot_pur_amt":"000000000220500","tot_evlt_amt":"000000000220500",
+                 "tot_evlt_pl":"-00000000001981","tot_prft_rt":"-00000000.90",
+                 "prsm_dpst_aset_amt":"000000009998019",
+                 "acnt_evlt_remn_indv_tot":[
+                  {"stk_cd":"A035420","stk_nm":"NAVER","rmnd_qty":"000000000000001",
+                   "pur_pric":"000000000220500","cur_prc":"000000220500",
+                   "pur_amt":"000000000220500","evlt_amt":"000000000220500",
+                   "evltv_prft":"-00000000001980","prft_rt":"-00000000.90",
+                   "pur_cmsn":"000000000000770","tax":"000000000000440"}],
+                 "return_code":0}""");
+
+        Account account = client.fetchAccount("12345678901");
+
+        assertEquals(0, new BigDecimal("10000000").compareTo(account.deposits().cash()));
+        assertEquals(0, new BigDecimal("9778730").compareTo(account.deposits().settledCash()));
+        assertEquals(0, new BigDecimal("9778730").compareTo(account.deposits().orderable()));
+        assertEquals(0, new BigDecimal("9955900").compareTo(account.deposits().withdrawable()),
+                "출금가능금액은 pymn_alow_amt 입니다");
+        assertFalse(account.deposits().hasShortfall());
+
+        assertEquals(0, new BigDecimal("9998019").compareTo(account.totalAssets()));
+        assertEquals(0, new BigDecimal("-1981").compareTo(account.totalProfitLoss()));
+        assertEquals(0, new BigDecimal("-1980").compareTo(account.positions().get(0).profitLoss()),
+                "직접 빼면 0 원이지만 수수료를 포함한 증권사 값은 -1,980 원입니다");
+        assertEquals("035420", account.positions().get(0).symbol());
     }
 
     // ------------------------------------------------------------------

@@ -310,10 +310,11 @@ public final class KiwoomJsonMapper {
      * <p>D+2 추정예수금은 <b>음수일 수 있다.</b> 증거금 매수로 미수가 나면 그렇다. 0 으로
      * 뭉개면 반대매매 위험을 감추게 되므로 부호를 그대로 둔다.
      *
-     * <p><b>확인 필요:</b> {@code d2_entra}, {@code ord_alow_amt}, {@code wthd_alowa} 는
-     * 아직 실제 응답으로 확인하지 못한 이름이다. 없으면 예수금으로 물러선다. 필드가 하나
-     * 빠졌다고 잔고를 0 원으로 보여 주는 것이 더 나쁘다. 화면을 볼 수 없는 사용자에게
-     * 0 원은 계좌가 빈 것으로 읽힌다.
+     * <p>필드 이름은 모의투자 서버 응답으로 확인했다. 출금가능금액은 {@code wthd_alowa} 가
+     * 아니라 {@code pymn_alow_amt}(지급가능금액) 다.
+     *
+     * <p>없는 필드는 순서대로 물러선다. 필드가 하나 빠졌다고 잔고를 0 원으로 보여 주는 것이
+     * 더 나쁘다. 화면을 볼 수 없는 사용자에게 0 원은 계좌가 빈 것으로 읽힌다.
      */
     private Deposits toDeposits(JsonNode deposit) {
         BigDecimal cash = optionalDecimal(deposit, "entr")
@@ -321,7 +322,7 @@ public final class KiwoomJsonMapper {
         BigDecimal settled = optionalDecimal(deposit, "d2_entra").orElse(cash);
         BigDecimal orderable = optionalDecimal(deposit, "ord_alow_amt")
                 .orElse(settled).max(BigDecimal.ZERO);
-        BigDecimal withdrawable = optionalDecimal(deposit, "wthd_alowa")
+        BigDecimal withdrawable = optionalDecimal(deposit, "pymn_alow_amt")
                 .orElse(orderable).max(BigDecimal.ZERO);
         return new Deposits(cash, settled, orderable, withdrawable);
     }
