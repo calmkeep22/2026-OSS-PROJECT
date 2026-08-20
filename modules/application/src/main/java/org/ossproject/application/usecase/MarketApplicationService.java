@@ -1,5 +1,6 @@
 package org.ossproject.application.usecase;
 
+import org.ossproject.application.port.CandleListener;
 import org.ossproject.application.port.CandleQueryPort;
 import org.ossproject.application.port.ConnectionListener;
 import org.ossproject.application.port.ConnectionState;
@@ -16,6 +17,7 @@ import org.ossproject.finance.model.SecuritySummary;
 import org.ossproject.finance.model.StockDetail;
 
 import java.util.List;
+import java.time.Clock;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -39,6 +41,7 @@ public final class MarketApplicationService implements MarketApplicationPort {
     private final MarketDataStreamPort marketStream;
     private final Executor ioExecutor;
     private final Executor eventExecutor;
+    private final Clock clock;
     private final AtomicBoolean closed = new AtomicBoolean();
     private final Object monitorLock = new Object();
     private final Map<String, MonitorCount> monitorCounts = new HashMap<>();
@@ -59,6 +62,20 @@ public final class MarketApplicationService implements MarketApplicationPort {
             Executor ioExecutor,
             Executor eventExecutor
     ) {
+        this(stockQuery, candleQuery, marketStream, ioExecutor, eventExecutor,
+                Clock.systemDefaultZone());
+    }
+
+    /** 봉 경계 판정에 쓰는 시계를 지정한다. 테스트가 고정 시계를 넣는다. */
+    public MarketApplicationService(
+            StockQueryPort stockQuery,
+            CandleQueryPort candleQuery,
+            MarketDataStreamPort marketStream,
+            Executor ioExecutor,
+            Executor eventExecutor,
+            Clock clock
+    ) {
+        this.clock = Objects.requireNonNull(clock, "clock");
         this.stockQuery = Objects.requireNonNull(stockQuery, "stockQuery");
         this.candleQuery = Objects.requireNonNull(candleQuery, "candleQuery");
         this.marketStream = Objects.requireNonNull(marketStream, "marketStream");
@@ -138,6 +155,50 @@ public final class MarketApplicationService implements MarketApplicationPort {
             if (!closed.compareAndSet(false, true)) return;
             marketStream.removeQuoteListener(quoteListener);
             marketStream.removeConnectionListener(connectionListener);
+            releaseMonitor(security);
+        };
+    }
+
+    @Override
+    public EventSubscription monitorCandles(SecurityId security, CandleInterval interval,
+                                            List<Candle> history, CandleListener listener) {
+        if (closed.get()) throw new IllegalStateException("시장 Application 서비스가 종료되었습니다.");
+        Objects.requireNonNull(security, "security");
+        Objects.requireNonNull(interval, "interval");
+        Objects.requireNonNull(listener, "listener");
+
+        LiveCandleUseCase live = new LiveCandleUseCase(candleQuery, marketStream, interval, clock);
+        // 집계는 스트림 스레드에서 돈다. 화면으로 넘기는 것은 다른 이벤트와 같은 실행자를 쓴다.
+        live.addListener(new CandleListener() {
+            @Override public void onCandleUpdated(Candle candle) {
+                dispatch(() -> listener.onCandleUpdated(candle));
+            }
+
+            @Override public void onCandleCompleted(Candle completed) {
+                dispatch(() -> listener.onCandleCompleted(completed));
+            }
+        });
+
+        boolean retained = false;
+        try {
+            live.startFrom(security.symbol(), history);
+            retainMonitor(security);
+            retained = true;
+            if (marketStream.connectionState() == ConnectionState.DISCONNECTED
+                    || marketStream.connectionState() == ConnectionState.FAILED) {
+                marketStream.connect();
+            }
+        } catch (RuntimeException failure) {
+            live.close();
+            if (retained) releaseMonitor(security);
+            throw failure;
+        }
+
+        AtomicBoolean done = new AtomicBoolean();
+        return () -> {
+            if (!done.compareAndSet(false, true)) return;
+            live.stop(security.symbol());
+            live.close();
             releaseMonitor(security);
         };
     }

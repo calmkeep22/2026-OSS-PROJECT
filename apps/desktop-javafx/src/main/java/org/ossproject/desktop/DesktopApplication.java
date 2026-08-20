@@ -711,6 +711,24 @@ public final class DesktopApplication extends Application {
         return account.valuationReportedByBroker() ? "증권사 제공 값" : "앱에서 합산한 값";
     }
 
+    /**
+     * 실시간 체결로 마지막 봉을 갱신받기 시작한다.
+     *
+     * <p>그래프와 접근 가능한 표가 같은 값을 보도록 함께 갱신한다. 한쪽만 갱신하면 화면을
+     * 볼 수 없는 사용자가 표에서 읽는 값이 그래프와 달라진다.
+     */
+    private void startLiveChart(CandlestickChartView candleChart, TableView<PricePoint> history) {
+        try {
+            stockDetailViewModel.startLiveChart(points -> {
+                candleChart.setPoints(points);
+                history.getItems().setAll(points);
+            });
+        } catch (RuntimeException failure) {
+            // 실시간이 없어도 조회한 차트는 그대로 볼 수 있다. 조용히 넘기지 않고 알린다.
+            status.setText("실시간 차트 갱신을 시작하지 못했습니다. " + failure.getMessage());
+        }
+    }
+
     /** 음성이 나가는 동안 청각 차트 음량을 낮춘다. 차트를 못 연 상태면 할 일이 없다. */
     private void setChartSpeechActive(boolean active) {
         AccessibleChartController controller = accessibleChartController;
@@ -763,6 +781,10 @@ public final class DesktopApplication extends Application {
                     && accessibleChartController != null) {
                 accessibleChartController.stopLive();
                 accessibleChartController.stop();
+            }
+            // 종목 상세를 떠나면 봉 구독을 놓는다. 보이지 않는 차트를 계속 갱신할 이유가 없다.
+            if (old == Screen.STOCK_DETAIL && screen != Screen.STOCK_DETAIL) {
+                stockDetailViewModel.stopLiveChart();
             }
             if (screen == null) return;
             revealNavigationGroup(screen);
@@ -1074,6 +1096,7 @@ public final class DesktopApplication extends Application {
                 } else {
                     candleChart.setPoints(updated);
                     history.getItems().setAll(updated);
+                    startLiveChart(candleChart, history);
                     status.setText(detail.name() + " " + range.label() + " 차트로 변경했습니다.");
                 }
             });
@@ -1083,6 +1106,7 @@ public final class DesktopApplication extends Application {
         TabPane chartRepresentations = new TabPane(tab("그래프", candleChart), tab("접근 가능한 표", history));
         chartRepresentations.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE); chartRepresentations.setPrefHeight(430);
         VBox chart = new VBox(12, periods, indicators, chartRepresentations, soundChart); chart.setPadding(new Insets(10));
+        startLiveChart(candleChart, history);
 
         // 호가·체결·수급·기업정보는 아직 연동하지 않았다. 예전에는 현재가에 임의의 값을
         // 더해 호가를 만들어 보여 주고, 그 호가를 주문 가격으로 넣을 수도 있었다. 시장에
@@ -2117,6 +2141,7 @@ public final class DesktopApplication extends Application {
     @Override public void stop() {
         if (persistenceDelay != null) persistenceDelay.stop();
         saveLocalState();
+        stockDetailViewModel.stopLiveChart();
         if (accessibleChartController != null) accessibleChartController.close();
         marketApplication.close();
         sonificationPort.close();
