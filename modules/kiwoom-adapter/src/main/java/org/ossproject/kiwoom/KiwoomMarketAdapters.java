@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.ossproject.application.port.AccountPort;
 import org.ossproject.application.port.CandleQueryPort;
 import org.ossproject.application.port.MarketDataStreamPort;
+import org.ossproject.application.port.OrderBookQueryPort;
 import org.ossproject.application.port.OrderLifecyclePort;
 import org.ossproject.application.port.StockQueryPort;
 import org.ossproject.broker.BrokerCredentials;
@@ -34,6 +35,7 @@ public record KiwoomMarketAdapters(
         CandleQueryPort candles,
         AccountPort account,
         OrderLifecyclePort orders,
+        OrderBookQueryPort orderBooks,
         MarketDataStreamPort stream
 ) {
 
@@ -92,6 +94,7 @@ public record KiwoomMarketAdapters(
                 new KiwoomCandleQueryAdapter(client),
                 account,
                 new KiwoomOrderLifecycleAdapter(client, account, clock),
+                new KiwoomOrderBookAdapter(client),
                 stream);
     }
 }

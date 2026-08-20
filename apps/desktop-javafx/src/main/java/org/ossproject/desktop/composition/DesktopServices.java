@@ -12,6 +12,7 @@ import org.ossproject.application.port.AccountPort;
 import org.ossproject.application.port.CandleQueryPort;
 import org.ossproject.application.port.MarketApplicationPort;
 import org.ossproject.application.port.MarketDataStreamPort;
+import org.ossproject.application.port.OrderBookQueryPort;
 import org.ossproject.application.port.OrderLifecyclePort;
 import org.ossproject.application.port.StockQueryPort;
 import org.ossproject.application.usecase.MarketApplicationService;
@@ -62,7 +63,8 @@ public record DesktopServices(
         SecretStore secrets = createSecretStore(stateDirectory.resolve("secrets"));
         MarketDataSource source = createMarketDataSource();
         MarketApplicationPort market = new MarketApplicationService(
-                source.stocks(), source.candles(), source.stream(), ForkJoinPool.commonPool());
+                source.stocks(), source.candles(), source.orderBooks(), source.stream(),
+                ForkJoinPool.commonPool(), ForkJoinPool.commonPool(), java.time.Clock.systemDefaultZone());
 
         return new DesktopServices(
                 new TradingUseCase(source.orders(), source.account(),
@@ -94,6 +96,7 @@ public record DesktopServices(
             CandleQueryPort candles,
             AccountPort account,
             OrderLifecyclePort orders,
+            OrderBookQueryPort orderBooks,
             MarketDataStreamPort stream,
             String description) {
     }
@@ -121,7 +124,8 @@ public record DesktopServices(
         try {
             KiwoomMarketAdapters kiwoom = KiwoomMarketAdapters.mockTrading(appKey, appSecret);
             return new MarketDataSource(kiwoom.stocks(), kiwoom.candles(),
-                    kiwoom.account(), kiwoom.orders(), kiwoom.stream(), "키움 모의투자");
+                    kiwoom.account(), kiwoom.orders(), kiwoom.orderBooks(), kiwoom.stream(),
+                    "키움 모의투자");
         } catch (RuntimeException failure) {
             LOGGER.log(System.Logger.Level.WARNING, "키움 연결을 준비하지 못했습니다.", failure);
             return unavailable("키움 연결을 준비하지 못했습니다. 자격증명과 네트워크를 확인해주세요.");
@@ -130,7 +134,7 @@ public record DesktopServices(
 
     private static MarketDataSource unavailable(String reason) {
         UnavailableMarketData none = new UnavailableMarketData(reason);
-        return new MarketDataSource(none, none, none, none, none, "미연결 · " + reason);
+        return new MarketDataSource(none, none, none, none, none, none, "미연결 · " + reason);
     }
 
     private static SpeechOptions defaultSpeechOptions() {
