@@ -17,11 +17,22 @@ public final class AccessibilityAudit {
     }
 
     private void visit(Node node, List<Issue> issues) {
-        if (isInteractive(node) && accessibleName(node).isBlank()) {
+        if (!isSkinInternal(node) && isInteractive(node) && accessibleName(node).isBlank()) {
             issues.add(new Issue("MISSING_ACCESSIBLE_NAME",
                     node.getClass().getSimpleName() + "에 접근 가능한 이름이 없습니다.", node));
         }
         if (node instanceof Parent parent) parent.getChildrenUnmodifiable().forEach(child -> visit(child, issues));
+    }
+
+    /**
+     * 컨트롤 스킨이 내부에 만드는 노드인지.
+     *
+     * <p>콤보박스는 목록을 스킨 안에서 {@code ListView} 로 만든다. 우리가 작성한 노드가
+     * 아니라 이름을 붙일 방법이 없고, 스크린리더도 콤보박스 자체로 읽는다. 걸러 내지
+     * 않으면 실제 문제와 섞여 검사 결과를 믿을 수 없게 된다.
+     */
+    private boolean isSkinInternal(Node node) {
+        return node.getClass().getName().startsWith("javafx.scene.control.skin.");
     }
 
     private boolean isInteractive(Node node) {
