@@ -169,6 +169,29 @@ public final class UiKit {
         TextField field = new TextField(value); field.setEditable(false); return field;
     }
 
+    /**
+     * 아직 증권사와 연동하지 않은 화면에 대신 보여 줄 안내.
+     *
+     * <p>값을 지어내 채우지 않는다. 화면을 볼 수 없는 사용자는 표에 있는 숫자가 실제 시장
+     * 값인지 확인할 방법이 없으므로, 없는 데이터는 없다고 말하는 편이 안전하다.
+     *
+     * @param what 어떤 데이터인지
+     * @param tr   연동에 사용할 키움 TR. 후속 작업을 알아볼 수 있게 함께 적는다
+     */
+    public static Node notConnectedPanel(String what, String tr) {
+        Label heading = new Label(what + " 데이터는 아직 연동되지 않았습니다.");
+        heading.getStyleClass().add("safety-note");
+        heading.setWrapText(true);
+        Label detail = new Label("실제 값을 받아오기 전까지 임의의 숫자를 표시하지 않습니다. "
+                + "연동 예정 항목: " + tr);
+        detail.setWrapText(true);
+        VBox panel = new VBox(10, heading, detail);
+        panel.setPadding(new Insets(20));
+        panel.setAccessibleText(what + " 데이터는 아직 연동되지 않았습니다. "
+                + "실제 값을 받아오기 전까지 임의의 숫자를 표시하지 않습니다.");
+        return panel;
+    }
+
     public static Label heading(String text) {
         Label label = new Label(text); label.getStyleClass().add("title"); return label;
     }
