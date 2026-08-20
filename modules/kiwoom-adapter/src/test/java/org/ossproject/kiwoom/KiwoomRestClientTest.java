@@ -14,6 +14,7 @@ import org.ossproject.broker.resilience.ResilientExecutor;
 import org.ossproject.broker.resilience.RetryPolicy;
 import org.ossproject.broker.resilience.Sleeper;
 import org.ossproject.finance.model.Account;
+import org.ossproject.finance.model.Position;
 import org.ossproject.finance.model.Candle;
 import org.ossproject.finance.model.CandleInterval;
 import org.ossproject.finance.model.Order;
@@ -341,7 +342,7 @@ class KiwoomRestClientTest {
     @DisplayName("예수금과 잔고를 합치고 0-패딩과 종목코드 접두어를 걷어 낸다")
     void mergesDepositAndBalance() {
         transport.enqueueJson(TOKEN_BODY);
-        transport.enqueueJson("{\"entr\":\"000000012500000\",\"return_code\":0}");
+        transport.enqueueJson("{\"entr\":\"000000012500000\",\"d2_entra\":\"000000012500000\",\"return_code\":0}");
         transport.enqueueJson("""
                 {"tot_pur_amt":"000000017598258","acnt_evlt_remn_indv_tot":[
                   {"stk_cd":"A005930","stk_nm":"삼성전자","rmnd_qty":"000000000000020",
@@ -358,6 +359,165 @@ class KiwoomRestClientTest {
         assertEquals(20L, account.positions().get(0).quantity());
         assertEquals("kt00001", transport.requests.get(1).headers().get("api-id"));
         assertEquals("kt00018", transport.requests.get(2).headers().get("api-id"));
+    }
+
+    @Test
+    @DisplayName("매수 당일에도 총자산이 부풀지 않도록 D+2 추정예수금을 쓴다")
+    void usesSettledCashSoABuyDoesNotInflateTotalAssets() {
+        // 11,000원 20주를 방금 샀다. 예수금은 D+2 결제라 아직 그대로지만 종목은 이미 잡혔다.
+        transport.enqueueJson(TOKEN_BODY);
+        transport.enqueueJson("{\"entr\":\"000000010000000\","
+                + "\"d2_entra\":\"000000009780000\",\"return_code\":0}");
+        transport.enqueueJson("""
+                {"acnt_evlt_remn_indv_tot":[
+                  {"stk_cd":"A005930","stk_nm":"삼성전자","rmnd_qty":"000000000000020",
+                   "pur_pric":"000000000011000","cur_prc":"000000011000"}
+                ],"return_code":0}""");
+
+        Account account = client.fetchAccount("12345678901");
+
+        assertEquals(0, new BigDecimal("10000000").compareTo(account.deposits().cash()),
+                "예수금(D+0) 은 entr 그대로여야 합니다");
+        assertEquals(0, new BigDecimal("9780000").compareTo(account.deposits().settledCash()),
+                "D+2 추정예수금은 d2_entra 를 써야 합니다");
+        assertEquals(0, new BigDecimal("220000").compareTo(account.totalMarketValue()));
+        assertEquals(0, new BigDecimal("10000000").compareTo(account.totalAssets()),
+                "매수 금액이 현금과 주식에 두 번 세어지면 안 됩니다");
+        assertFalse(account.totalAssetsReportedByBroker(),
+                "증권사 총액이 없는 응답이면 직접 더한 값입니다");
+    }
+
+    @Test
+    @DisplayName("증권사가 추정예탁자산을 주면 직접 더하지 않고 그 값을 쓴다")
+    void prefersTheBrokerReportedTotalOverOurOwnSum() {
+        // 미수·신용·미수령 배당처럼 우리가 세지 않는 항목이 있어 직접 더하면 어긋난다.
+        transport.enqueueJson(TOKEN_BODY);
+        transport.enqueueJson("{\"entr\":\"000000010000000\","
+                + "\"d2_entra\":\"000000009780000\",\"return_code\":0}");
+        transport.enqueueJson("""
+                {"prsm_dpst_aset_amt":"000000010500000",
+                 "acnt_evlt_remn_indv_tot":[
+                  {"stk_cd":"A005930","stk_nm":"삼성전자","rmnd_qty":"000000000000020",
+                   "pur_pric":"000000000011000","cur_prc":"000000011000"}],
+                 "return_code":0}""");
+
+        Account account = client.fetchAccount("12345678901");
+
+        assertTrue(account.totalAssetsReportedByBroker());
+        assertEquals(0, new BigDecimal("10500000").compareTo(account.totalAssets()),
+                "증권사가 준 추정예탁자산을 그대로 써야 합니다");
+    }
+
+    @Test
+    @DisplayName("미수가 나면 D+2 예수금 음수를 0 으로 감추지 않는다")
+    void keepsANegativeSettledCashSoAShortfallStaysVisible() {
+        transport.enqueueJson(TOKEN_BODY);
+        transport.enqueueJson("{\"entr\":\"000000001000000\","
+                + "\"d2_entra\":\"-000000000500000\",\"return_code\":0}");
+        transport.enqueueJson("{\"acnt_evlt_remn_indv_tot\":[],\"return_code\":0}");
+
+        Account account = client.fetchAccount("12345678901");
+
+        assertTrue(account.deposits().hasShortfall(), "미수를 감추면 반대매매 위험을 못 알립니다");
+        assertEquals(0, new BigDecimal("500000").compareTo(account.deposits().shortfall()));
+        assertEquals(0, new BigDecimal("-500000").compareTo(account.totalAssets()));
+    }
+
+    @Test
+    @DisplayName("주문가능금액과 출금가능금액을 따로 읽는다")
+    void readsOrderableAndWithdrawableSeparately() {
+        transport.enqueueJson(TOKEN_BODY);
+        transport.enqueueJson("{\"entr\":\"000000010000000\","
+                + "\"d2_entra\":\"000000009780000\","
+                + "\"ord_alow_amt\":\"000000009000000\","
+                + "\"pymn_alow_amt\":\"000000008000000\",\"return_code\":0}");
+        transport.enqueueJson("{\"acnt_evlt_remn_indv_tot\":[],\"return_code\":0}");
+
+        Account account = client.fetchAccount("12345678901");
+
+        assertEquals(0, new BigDecimal("9000000").compareTo(account.deposits().orderable()));
+        assertEquals(0, new BigDecimal("8000000").compareTo(account.deposits().withdrawable()));
+    }
+
+    @Test
+    @DisplayName("D+2 추정예수금이 없는 응답이면 예수금으로 물러선다")
+    void fallsBackToRawDepositWhenSettledCashIsMissing() {
+        transport.enqueueJson(TOKEN_BODY);
+        transport.enqueueJson("{\"entr\":\"000000010000000\",\"return_code\":0}");
+        transport.enqueueJson("{\"acnt_evlt_remn_indv_tot\":[],\"return_code\":0}");
+
+        Account account = client.fetchAccount("12345678901");
+
+        assertEquals(0, new BigDecimal("10000000").compareTo(account.deposits().settledCash()),
+                "필드가 없다고 0 원으로 보여 주면 계좌가 빈 것으로 읽힙니다");
+        assertEquals(0, new BigDecimal("10000000").compareTo(account.deposits().orderable()),
+                "주문가능금액도 함께 물러서야 합니다");
+    }
+
+    @Test
+    @DisplayName("종목 손익도 직접 빼지 않고 증권사가 준 값을 쓴다")
+    void usesTheBrokerProfitLossWhichAlreadyCountsFees() {
+        // 220,500 에 산 한 주가 220,000 이면 단순히 빼면 -500 이다.
+        // 증권사 값은 매매수수료까지 반영해 -2,480 을 준다.
+        transport.enqueueJson(TOKEN_BODY);
+        transport.enqueueJson("{\"entr\":\"000000010000000\","
+                + "\"d2_entra\":\"000000009777520\",\"return_code\":0}");
+        transport.enqueueJson("""
+                {"prsm_dpst_aset_amt":"000000009997520","tot_evlt_pl":"-000000002480",
+                 "acnt_evlt_remn_indv_tot":[
+                  {"stk_cd":"A035420","stk_nm":"NAVER","rmnd_qty":"000000000000001",
+                   "pur_pric":"000000000220500","cur_prc":"000000220000",
+                   "evlt_amt":"000000000220000","evltv_prft":"-000000002480",
+                   "prft_rt":"-1.12"}],
+                 "return_code":0}""");
+
+        Account account = client.fetchAccount("12345678901");
+        Position naver = account.positions().get(0);
+
+        assertTrue(naver.valuationReportedByBroker());
+        assertEquals(0, new BigDecimal("-2480").compareTo(naver.profitLoss()),
+                "수수료를 세지 않은 -500 이 아니라 증권사 값이어야 합니다");
+        assertEquals(0, new BigDecimal("-2480").compareTo(account.totalProfitLoss()));
+        assertEquals(0, new BigDecimal("9997520").compareTo(account.totalAssets()));
+    }
+
+    @Test
+    @DisplayName("모의투자 서버 실제 응답 모양 그대로 계좌를 읽는다")
+    void readsTheAccountFromARealMockServerResponse() {
+        // 2026-08-20 모의투자 서버에서 받은 응답에서 값만 옮긴 것이다.
+        // NAVER 를 220,500 원에 한 주 샀고 수수료·세금 합계가 1,980 원이다.
+        transport.enqueueJson(TOKEN_BODY);
+        transport.enqueueJson("""
+                {"entr":"000000010000000","profa_ch":"000000000044100",
+                 "pymn_alow_amt":"000000009955900","ord_alow_amt":"000000009778730",
+                 "d1_entra":"000000010000000","d2_entra":"000000009778730",
+                 "d2_buy_exct_amt":"000000000221270","return_code":0}""");
+        transport.enqueueJson("""
+                {"tot_pur_amt":"000000000220500","tot_evlt_amt":"000000000220500",
+                 "tot_evlt_pl":"-00000000001981","tot_prft_rt":"-00000000.90",
+                 "prsm_dpst_aset_amt":"000000009998019",
+                 "acnt_evlt_remn_indv_tot":[
+                  {"stk_cd":"A035420","stk_nm":"NAVER","rmnd_qty":"000000000000001",
+                   "pur_pric":"000000000220500","cur_prc":"000000220500",
+                   "pur_amt":"000000000220500","evlt_amt":"000000000220500",
+                   "evltv_prft":"-00000000001980","prft_rt":"-00000000.90",
+                   "pur_cmsn":"000000000000770","tax":"000000000000440"}],
+                 "return_code":0}""");
+
+        Account account = client.fetchAccount("12345678901");
+
+        assertEquals(0, new BigDecimal("10000000").compareTo(account.deposits().cash()));
+        assertEquals(0, new BigDecimal("9778730").compareTo(account.deposits().settledCash()));
+        assertEquals(0, new BigDecimal("9778730").compareTo(account.deposits().orderable()));
+        assertEquals(0, new BigDecimal("9955900").compareTo(account.deposits().withdrawable()),
+                "출금가능금액은 pymn_alow_amt 입니다");
+        assertFalse(account.deposits().hasShortfall());
+
+        assertEquals(0, new BigDecimal("9998019").compareTo(account.totalAssets()));
+        assertEquals(0, new BigDecimal("-1981").compareTo(account.totalProfitLoss()));
+        assertEquals(0, new BigDecimal("-1980").compareTo(account.positions().get(0).profitLoss()),
+                "직접 빼면 0 원이지만 수수료를 포함한 증권사 값은 -1,980 원입니다");
+        assertEquals("035420", account.positions().get(0).symbol());
     }
 
     // ------------------------------------------------------------------

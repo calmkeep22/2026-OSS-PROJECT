@@ -685,6 +685,32 @@ public final class DesktopApplication extends Application {
         return panel;
     }
 
+    /**
+     * 미수 발생 경고.
+     *
+     * <p>D+2 예수금이 음수면 결제일까지 채워 넣지 않는 한 반대매매 대상이 된다. 색으로만
+     * 알리면 화면을 볼 수 없는 사용자에게 전달되지 않으므로 문장으로 남긴다.
+     */
+    private javafx.scene.Node shortfallWarning(Deposits deposits) {
+        String text = "미수금 " + Formatters.won(deposits.shortfall())
+                + "이 발생했습니다. 결제일까지 입금하지 않으면 반대매매가 될 수 있습니다.";
+        Label warning = new Label(text);
+        warning.getStyleClass().add("safety-note");
+        warning.setWrapText(true);
+        warning.setAccessibleText(text);
+        return warning;
+    }
+
+    /**
+     * 총자산 옆에 붙일 출처 설명.
+     *
+     * <p>증권사가 계산한 값과 앱이 더한 값은 다를 수 있다. 어느 쪽인지 밝히지 않으면
+     * 사용자가 증권사 화면과 대조할 때 어느 숫자를 믿어야 할지 알 수 없다.
+     */
+    private static String assetsSource(Account account) {
+        return account.valuationReportedByBroker() ? "증권사 제공 값" : "앱에서 합산한 값";
+    }
+
     /** 음성이 나가는 동안 청각 차트 음량을 낮춘다. 차트를 못 연 상태면 할 일이 없다. */
     private void setChartSpeechActive(boolean active) {
         AccessibleChartController controller = accessibleChartController;
@@ -784,12 +810,13 @@ public final class DesktopApplication extends Application {
 
         FlowPane assets = wrappingRow(14,
                 summaryCard("총 자산", Formatters.won(snapshot.totalAssets()),
-                        "예수금 포함", "neutral"),
+                        assetsSource(snapshot), "neutral"),
                 summaryCard("평가손익", signedWon(snapshot.totalProfitLoss()),
-                        "평가금액 " + Formatters.won(snapshot.totalMarketValue()),
+                        "평가금액 " + Formatters.won(snapshot.totalMarketValue())
+                                + " · " + assetsSource(snapshot),
                         snapshot.totalProfitLoss().signum() >= 0 ? "positive" : "negative"),
-                summaryCard("주문 가능 금액", Formatters.won(snapshot.balance().available()),
-                        "예수금 " + Formatters.won(snapshot.balance().cash()), "neutral"));
+                summaryCard("주문 가능 금액", Formatters.won(snapshot.deposits().orderable()),
+                        "예수금 " + Formatters.won(snapshot.deposits().cash()), "neutral"));
 
         TableView<ObservableList<String>> holdings = textTable("홈 보유종목 요약",
                 snapshot.positions().stream().map(position -> row(
@@ -839,12 +866,13 @@ public final class DesktopApplication extends Application {
         // 예시 숫자를 적어 두지 않는다.
         FlowPane metrics = wrappingRow(14,
                 summaryCard("총 평가자산", Formatters.won(snapshot.totalAssets()),
-                        "보유 " + snapshot.positions().size() + "종목 + 예수금", "neutral"),
+                        assetsSource(snapshot), "neutral"),
                 summaryCard("평가손익", signedWon(snapshot.totalProfitLoss()),
-                        "평가금액 " + Formatters.won(snapshot.totalMarketValue()),
+                        "평가금액 " + Formatters.won(snapshot.totalMarketValue())
+                                + " · " + assetsSource(snapshot),
                         snapshot.totalProfitLoss().signum() >= 0 ? "positive" : "negative"),
-                summaryCard("예수금", Formatters.won(snapshot.balance().cash()),
-                        "주문 가능 " + Formatters.won(snapshot.balance().available()), "neutral"));
+                summaryCard("예수금", Formatters.won(snapshot.deposits().cash()),
+                        "주문 가능 " + Formatters.won(snapshot.deposits().orderable()), "neutral"));
 
         TableView<ObservableList<String>> holdings = textTable("보유종목 표",
                 snapshot.positions().stream().map(position -> row(
@@ -865,14 +893,18 @@ public final class DesktopApplication extends Application {
         VBox holdingsPanel = new VBox(10, holdings, wrappingRow(8, holdingDetail, holdingBuy, holdingSell));
         holdingsPanel.setPadding(new Insets(10));
 
-        // 예수금과 주문 가능 금액은 모의주문 엔진이 들고 있는 잔고에서 읽는다.
-        // D+1·D+2 정산과 출금 가능 금액은 별도 TR 이라 연동 전까지 표시하지 않는다.
+        // 실제 증권사 화면처럼 예수금을 단계별로 나눠 보여 준다. "지금 얼마 주문할 수 있나",
+        // "지금 얼마 뽑을 수 있나", "결제가 끝나면 얼마 남나" 는 서로 다른 질문이다.
+        Deposits deposits = snapshot.deposits();
         VBox cash = new VBox(12,
-                informationRow("예수금", Formatters.won(snapshot.balance().cash())),
+                informationRow("예수금", Formatters.won(deposits.cash())),
+                informationRow("D+2 추정예수금", signedWon(deposits.settledCash())),
                 informationRow("주문 대기 금액", Formatters.won(snapshot.balance().locked())),
-                informationRow("주문 가능 금액", Formatters.won(snapshot.balance().available())),
-                notConnectedPanel("D+1·D+2 예수금과 출금 가능 금액",
-                        "kt00001 예수금상세현황요청, kt00010 주문인출가능금액"));
+                informationRow("주문 가능 금액", Formatters.won(deposits.orderable())),
+                informationRow("출금 가능 금액", Formatters.won(deposits.withdrawable())));
+        if (deposits.hasShortfall()) {
+            cash.getChildren().add(shortfallWarning(deposits));
+        }
         cash.setPadding(new Insets(20));
 
         TableView<ObservableList<String>> open = orderStatusTable(true);

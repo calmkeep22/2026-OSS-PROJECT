@@ -54,6 +54,10 @@ public final class KiwoomFieldMap {
                 .map(KiwoomField.CANDLE_VOLUME, "trde_qty")
 
                 .map(KiwoomField.ACCOUNT_CASH, "entr")
+                .map(KiwoomField.ACCOUNT_SETTLED_CASH, "d2_entra")
+                .map(KiwoomField.ACCOUNT_ORDERABLE, "ord_alow_amt")
+                .map(KiwoomField.ACCOUNT_WITHDRAWABLE, "pymn_alow_amt")
+                .map(KiwoomField.ACCOUNT_ESTIMATED_ASSETS, "prsm_dpst_aset_amt")
                 .map(KiwoomField.ACCOUNT_POSITIONS, "acnt_evlt_remn_indv_tot")
                 .map(KiwoomField.POSITION_SYMBOL, "stk_cd")
                 .map(KiwoomField.POSITION_NAME, "stk_nm")
@@ -102,6 +106,10 @@ public final class KiwoomFieldMap {
                 .map(KiwoomField.CANDLE_VOLUME, "volume")
 
                 .map(KiwoomField.ACCOUNT_CASH, "cash")
+                .map(KiwoomField.ACCOUNT_SETTLED_CASH, "settledCash")
+                .map(KiwoomField.ACCOUNT_ORDERABLE, "orderable")
+                .map(KiwoomField.ACCOUNT_WITHDRAWABLE, "withdrawable")
+                .map(KiwoomField.ACCOUNT_ESTIMATED_ASSETS, "estimatedAssets")
                 .map(KiwoomField.ACCOUNT_POSITIONS, "positions")
                 .map(KiwoomField.POSITION_SYMBOL, "symbol")
                 .map(KiwoomField.POSITION_NAME, "name")

@@ -14,7 +14,8 @@ public record Position(
         long quantity,
         long lockedQuantity,
         BigDecimal averagePrice,
-        BigDecimal currentPrice
+        BigDecimal currentPrice,
+        ReportedValuation reported
 ) {
     public Position {
         if (symbol == null || symbol.isBlank()) {
@@ -35,6 +36,13 @@ public record Position(
         if (currentPrice == null || currentPrice.signum() < 0) {
             throw new IllegalArgumentException("현재가는 0 이상이어야 합니다.");
         }
+        reported = reported == null ? ReportedValuation.none() : reported;
+    }
+
+    /** 증권사 평가 값 없이 만드는 보유 종목. 모의 거래가 쓴다. */
+    public Position(String symbol, String name, long quantity, long lockedQuantity,
+                    BigDecimal averagePrice, BigDecimal currentPrice) {
+        this(symbol, name, quantity, lockedQuantity, averagePrice, currentPrice, null);
     }
 
     public static Position of(String symbol, String name, long quantity, BigDecimal averagePrice) {
@@ -46,20 +54,37 @@ public record Position(
         return quantity - lockedQuantity;
     }
 
+    /** 평가금액. 증권사가 준 값이 있으면 그것을 쓴다. */
     public BigDecimal marketValue() {
-        return currentPrice.multiply(BigDecimal.valueOf(quantity));
+        return reported.or(reported.evaluation(),
+                currentPrice.multiply(BigDecimal.valueOf(quantity)));
     }
 
+    /** 매입금액. 증권사가 준 값이 있으면 그것을 쓴다. */
     public BigDecimal costBasis() {
-        return averagePrice.multiply(BigDecimal.valueOf(quantity));
+        return reported.or(reported.purchaseAmount(),
+                averagePrice.multiply(BigDecimal.valueOf(quantity)));
     }
 
+    /**
+     * 평가손익. 증권사가 준 값이 있으면 그것을 쓴다.
+     *
+     * <p>직접 뺀 값은 매매수수료와 거래세를 세지 않아 증권사 화면보다 이익 쪽으로 치우친다.
+     */
     public BigDecimal profitLoss() {
-        return marketValue().subtract(costBasis());
+        return reported.or(reported.profitLoss(), marketValue().subtract(costBasis()));
+    }
+
+    /** 평가 값이 증권사가 계산한 것인지. 거짓이면 앱이 직접 계산한 값이다. */
+    public boolean valuationReportedByBroker() {
+        return reported.isPresent();
     }
 
     /** 수익률(%). 매입 원가가 0이면 0을 돌려준다. */
     public BigDecimal profitLossRate() {
+        if (reported.profitLossRate() != null) {
+            return reported.profitLossRate();
+        }
         BigDecimal cost = costBasis();
         if (cost.signum() == 0) {
             return BigDecimal.ZERO;
@@ -77,7 +102,7 @@ public record Position(
             throw new IllegalStateException(
                     "매도 가능 수량이 부족합니다. 가능 " + availableQuantity() + ", 필요 " + amount);
         }
-        return new Position(symbol, name, quantity, lockedQuantity + amount, averagePrice, currentPrice);
+        return new Position(symbol, name, quantity, lockedQuantity + amount, averagePrice, currentPrice, reported);
     }
 
     /** 취소·거부·체결 확정 시 묶인 수량을 푼다. */
@@ -87,7 +112,7 @@ public record Position(
             throw new IllegalStateException(
                     "묶인 수량보다 많이 풀 수 없습니다. 대기 " + lockedQuantity + ", 요청 " + amount);
         }
-        return new Position(symbol, name, quantity, lockedQuantity - amount, averagePrice, currentPrice);
+        return new Position(symbol, name, quantity, lockedQuantity - amount, averagePrice, currentPrice, reported);
     }
 
     /** 매수 체결. 평균 단가를 가중 평균으로 다시 계산한다. */
@@ -99,7 +124,8 @@ public record Position(
         long newQuantity = quantity + amount;
         BigDecimal newCost = costBasis().add(price.multiply(BigDecimal.valueOf(amount)));
         BigDecimal newAverage = newCost.divide(BigDecimal.valueOf(newQuantity), 2, RoundingMode.HALF_UP);
-        return new Position(symbol, name, newQuantity, lockedQuantity, newAverage, currentPrice);
+        // 수량이 바뀌면 증권사가 준 평가 값은 낡은 값이다.
+        return new Position(symbol, name, newQuantity, lockedQuantity, newAverage, currentPrice, null);
     }
 
     /** 매도 체결. 평균 단가는 유지한다. */
@@ -110,7 +136,7 @@ public record Position(
                     "보유 수량보다 많이 팔 수 없습니다. 보유 " + quantity + ", 매도 " + amount);
         }
         long newLocked = Math.min(lockedQuantity, quantity - amount);
-        return new Position(symbol, name, quantity - amount, newLocked, averagePrice, currentPrice);
+        return new Position(symbol, name, quantity - amount, newLocked, averagePrice, currentPrice, null);
     }
 
     /** 실시간 시세 반영. */
@@ -118,7 +144,8 @@ public record Position(
         if (price == null || price.signum() < 0) {
             throw new IllegalArgumentException("현재가는 0 이상이어야 합니다.");
         }
-        return new Position(symbol, name, quantity, lockedQuantity, averagePrice, price);
+        // 시세가 움직였으므로 증권사가 준 평가 값은 더 이상 맞지 않는다.
+        return new Position(symbol, name, quantity, lockedQuantity, averagePrice, price, null);
     }
 
     private static void requirePositive(long amount) {
