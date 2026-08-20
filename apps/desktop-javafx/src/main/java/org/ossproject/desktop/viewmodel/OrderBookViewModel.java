@@ -1,6 +1,7 @@
 package org.ossproject.desktop.viewmodel;
 
 import org.ossproject.application.port.EventSubscription;
+import org.ossproject.desktop.orderbook.WallAnnouncer;
 import org.ossproject.application.port.ConnectionState;
 import org.ossproject.application.port.MarketApplicationListener;
 import org.ossproject.application.port.MarketApplicationPort;
@@ -15,6 +16,9 @@ import org.ossproject.finance.model.PriceLadderView;
 import org.ossproject.finance.model.SecurityId;
 
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.Executor;
@@ -33,16 +37,20 @@ public final class OrderBookViewModel {
 
     private final MarketApplicationPort market;
     private final Executor stateExecutor;
+    private final Clock clock;
 
     private PriceLadder ladder;
     private PriceLadderView view;
     private DepthChart depth;
+    private final WallAnnouncer wallAnnouncer = new WallAnnouncer();
     private DepthChartView depthView;
     private EventSubscription subscription;
     private EventSubscription quoteSubscription;
     private SecurityId watching;
     /** 마지막 체결가. 격자 중심을 잡는 기준이다. 아직 못 받았으면 {@code null}. */
     private BigDecimal lastTradedPrice;
+    /** 마지막으로 호가를 받은 시각. 실시간이 살아 있는지 판단하는 근거다. */
+    private Instant lastOrderBookAt;
 
     public OrderBookViewModel(MarketApplicationPort market, Executor stateExecutor) {
         this(market, stateExecutor, PriceLadderConfig.defaults());
@@ -55,6 +63,12 @@ public final class OrderBookViewModel {
 
     public OrderBookViewModel(MarketApplicationPort market, Executor stateExecutor,
                               PriceLadderConfig config, DepthChartConfig depthConfig) {
+        this(market, stateExecutor, config, depthConfig, Clock.systemDefaultZone());
+    }
+
+    public OrderBookViewModel(MarketApplicationPort market, Executor stateExecutor,
+                              PriceLadderConfig config, DepthChartConfig depthConfig, Clock clock) {
+        this.clock = Objects.requireNonNull(clock, "clock");
         this.market = Objects.requireNonNull(market, "market");
         this.stateExecutor = Objects.requireNonNull(stateExecutor, "stateExecutor");
         this.ladder = PriceLadder.create(Objects.requireNonNull(config, "config"));
@@ -87,6 +101,22 @@ public final class OrderBookViewModel {
     }
 
     /**
+     * 실시간 갱신이 살아 있는지.
+     *
+     * <p>연결 상태만으로는 알 수 없다. 연결은 되어 있는데 데이터가 오지 않는 경우가 있다.
+     * 장이 닫히면 그렇다. 마지막으로 호가를 받은 시각으로 판단한다.
+     *
+     * @param staleAfter 이 시간 동안 호가가 없으면 멈춘 것으로 본다
+     */
+    public boolean isLive(Duration staleAfter) {
+        Objects.requireNonNull(staleAfter, "staleAfter");
+        if (lastOrderBookAt == null) {
+            return false;
+        }
+        return Duration.between(lastOrderBookAt, clock.instant()).compareTo(staleAfter) < 0;
+    }
+
+    /**
      * 호가 구독을 시작한다.
      *
      * <p>이미 구독 중이면 먼저 해제한다. 종목을 바꿀 때마다 구독이 쌓이면 호가 한 건에
@@ -107,9 +137,21 @@ public final class OrderBookViewModel {
      */
     public void start(SecurityId security, Consumer<PriceLadderView> onUpdated,
                       Consumer<DepthChartView> onDepthUpdated) {
+        start(security, onUpdated, onDepthUpdated, walls -> { });
+    }
+
+    /**
+     * 물량이 몰린 곳 안내까지 함께 받는다.
+     *
+     * <p>안내는 벽 구성이 달라졌을 때만 온다. 갱신마다 읽으면 소음이 된다.
+     */
+    public void start(SecurityId security, Consumer<PriceLadderView> onUpdated,
+                      Consumer<DepthChartView> onDepthUpdated,
+                      Consumer<Optional<String>> onWalls) {
         Objects.requireNonNull(security, "security");
         Objects.requireNonNull(onUpdated, "onUpdated");
         Objects.requireNonNull(onDepthUpdated, "onDepthUpdated");
+        Objects.requireNonNull(onWalls, "onWalls");
         stop();
 
         if (!security.equals(watching)) {
@@ -118,6 +160,8 @@ public final class OrderBookViewModel {
             view = null;
             depthView = null;
             lastTradedPrice = null;
+            lastOrderBookAt = null;
+            wallAnnouncer.reset();
         }
         watching = security;
 
@@ -146,6 +190,7 @@ public final class OrderBookViewModel {
             apply(book);
             onUpdated.accept(view);
             onDepthUpdated.accept(depthView);
+            onWalls.accept(wallAnnouncer.onOrderBook(book));
         }));
     }
 
@@ -164,6 +209,7 @@ public final class OrderBookViewModel {
     }
 
     private void apply(OrderBook book) {
+        lastOrderBookAt = clock.instant();
         PriceLadder.Update update = ladder.update(book, lastTradedPrice);
         ladder = update.ladder();
         view = update.view();

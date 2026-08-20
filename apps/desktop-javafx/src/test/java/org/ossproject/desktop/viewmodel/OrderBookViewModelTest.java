@@ -32,7 +32,27 @@ class OrderBookViewModelTest {
             new FakeStockQueryAdapter(), new FakeCandleQueryAdapter(),
             symbol -> snapshot.get(), stream,
             Runnable::run, Runnable::run, java.time.Clock.systemUTC());
-    private final OrderBookViewModel viewModel = new OrderBookViewModel(market, Runnable::run);
+    private final MutableClock clock = new MutableClock(Instant.parse("2026-08-20T05:00:00Z"));
+    private final OrderBookViewModel viewModel = new OrderBookViewModel(market, Runnable::run,
+            org.ossproject.finance.model.PriceLadderConfig.defaults(),
+            org.ossproject.finance.model.DepthChartConfig.defaults(), clock);
+
+    /** 시간을 손으로 밀어 실시간이 멈춘 상황을 만든다. */
+    private static final class MutableClock extends java.time.Clock {
+        private Instant now;
+
+        MutableClock(Instant now) {
+            this.now = now;
+        }
+
+        void advance(java.time.Duration amount) {
+            now = now.plus(amount);
+        }
+
+        @Override public java.time.ZoneId getZone() { return java.time.ZoneOffset.UTC; }
+        @Override public java.time.Clock withZone(java.time.ZoneId zone) { return this; }
+        @Override public Instant instant() { return now; }
+    }
 
     private static OrderBook book(String symbol, long bidSize) {
         return OrderBook.of(symbol, List.of(
@@ -225,5 +245,52 @@ class OrderBookViewModelTest {
 
         assertFalse(stream.subscriptions().contains("005930"),
                 "호가와 체결 구독을 모두 놓아야 합니다");
+    }
+
+    /**
+     * 연결 상태만으로는 알 수 없다. 연결은 되어 있는데 데이터가 오지 않는 경우가 있다.
+     * 장이 닫히면 그렇다.
+     */
+    @Test void reportsStaleOnceOrderBooksStopArriving() {
+        java.time.Duration staleAfter = java.time.Duration.ofSeconds(30);
+        viewModel.start(SAMSUNG, view -> { });
+        assertFalse(viewModel.isLive(staleAfter), "아직 한 건도 못 받았으면 살아 있지 않습니다");
+
+        stream.emitOrderBook(book("005930", 200L));
+        assertTrue(viewModel.isLive(staleAfter));
+
+        clock.advance(java.time.Duration.ofSeconds(31));
+
+        assertFalse(viewModel.isLive(staleAfter), "한동안 호가가 없으면 멈춘 것으로 봅니다");
+    }
+
+    @Test void becomesLiveAgainWhenOrderBooksResume() {
+        java.time.Duration staleAfter = java.time.Duration.ofSeconds(30);
+        viewModel.start(SAMSUNG, view -> { });
+        stream.emitOrderBook(book("005930", 200L));
+        clock.advance(java.time.Duration.ofSeconds(31));
+        assertFalse(viewModel.isLive(staleAfter));
+
+        stream.emitOrderBook(book("005930", 300L));
+
+        assertTrue(viewModel.isLive(staleAfter));
+    }
+
+    /** 종목이 바뀌면 이전 종목의 수신 시각으로 살아 있다고 하면 안 된다. */
+    @Test void forgetsTheLastReceiptWhenTheStockChanges() {
+        viewModel.start(SAMSUNG, view -> { });
+        stream.emitOrderBook(book("005930", 200L));
+
+        viewModel.start(HYNIX, view -> { });
+
+        assertFalse(viewModel.isLive(java.time.Duration.ofSeconds(30)));
+    }
+
+    @Test void handsOutWallAnnouncementsOnlyWhenTheyChange() {
+        AtomicReference<java.util.Optional<String>> said = new AtomicReference<>();
+        viewModel.start(SAMSUNG, view -> { }, view -> { }, said::set);
+
+        stream.emitOrderBook(book("005930", 200L));
+        assertNotNull(said.get(), "안내 통로가 호출되어야 합니다");
     }
 }

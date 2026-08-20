@@ -115,6 +115,16 @@ public final class DesktopApplication extends Application {
     private final WatchlistViewModel watchlistViewModel;
     private final StockDetailViewModel stockDetailViewModel;
     private final OrderBookViewModel orderBookViewModel;
+    /** 지금 보고 있는 호가창. 실시간이 멈췄는지 주기적으로 다시 표시하려고 들고 있는다. */
+    private OrderBookLadderView orderBookLadder;
+
+    /**
+     * 이 시간 동안 호가가 오지 않으면 실시간이 멈춘 것으로 본다.
+     *
+     * <p>장중 활발한 종목은 초 단위로 오지만 한산한 종목은 몇십 초씩 비는 일이 있다.
+     * 너무 짧게 잡으면 멀쩡한 연결을 끊긴 것처럼 알리게 된다.
+     */
+    private static final java.time.Duration ORDER_BOOK_STALE_AFTER = java.time.Duration.ofSeconds(30);
     private final ScannerViewModel scannerViewModel = new ScannerViewModel();
     private final DesktopStateRepository stateRepository;
     private final AccessibilityPreferencesRepository accessibilityPreferencesRepository;
@@ -756,7 +766,10 @@ public final class DesktopApplication extends Application {
         // 구독은 차트, 청각 차트, 관심종목 등 여러 곳에서 생기고 사라진다. 각 지점마다
         // 갱신을 넣으면 하나만 빠뜨려도 표시가 실제와 어긋난다. 실제 값을 주기적으로 읽는다.
         subscriptionTicker = new Timeline(
-                new KeyFrame(Duration.seconds(1), event -> refreshSubscriptionCount()));
+                new KeyFrame(Duration.seconds(1), event -> {
+                    refreshSubscriptionCount();
+                    refreshOrderBookLiveness();
+                }));
         subscriptionTicker.setCycleCount(Timeline.INDEFINITE);
         subscriptionTicker.play();
     }
@@ -775,6 +788,14 @@ public final class DesktopApplication extends Application {
     }
 
     /** 구독 수는 화면을 오갈 때마다 달라진다. */
+    /** 호가가 끊긴 것은 아무 일도 일어나지 않는 형태로 나타난다. 주기적으로 확인한다. */
+    private void refreshOrderBookLiveness() {
+        OrderBookLadderView current = orderBookLadder;
+        if (current != null) {
+            current.setLive(orderBookViewModel.isLive(ORDER_BOOK_STALE_AFTER));
+        }
+    }
+
     private void refreshSubscriptionCount() {
         int count = marketApplication.liveSubscriptionCount();
         subscriptionCount.setText("실시간 구독 " + count + " / " + maxSubscriptions);
@@ -800,12 +821,14 @@ public final class DesktopApplication extends Application {
             return views;
         }
         ladder.showUnavailable("호가를 기다리고 있습니다.");
+        orderBookLadder = ladder;
         try {
             orderBookViewModel.start(session.selectedStock().securityId(), view -> {
                 // 체결가를 아직 못 받았으면 격자 중심은 호가 중간값이다. 이름을 구분한다.
                 ladder.setTradedCenter(orderBookViewModel.centeredOnTradedPrice());
+                ladder.setLive(orderBookViewModel.isLive(ORDER_BOOK_STALE_AFTER));
                 ladder.update(view);
-            }, depth::update);
+            }, depth::update, walls -> ladder.showWalls(walls.orElse(null)));
         } catch (RuntimeException failure) {
             ladder.showUnavailable("호가 구독을 시작하지 못했습니다. " + failure.getMessage());
         }
@@ -870,6 +893,7 @@ public final class DesktopApplication extends Application {
             if (old == Screen.STOCK_DETAIL && screen != Screen.STOCK_DETAIL) {
                 stockDetailViewModel.stopLiveChart();
                 orderBookViewModel.stop();
+                orderBookLadder = null;
             }
             refreshSubscriptionCount();
             if (screen == null) return;
