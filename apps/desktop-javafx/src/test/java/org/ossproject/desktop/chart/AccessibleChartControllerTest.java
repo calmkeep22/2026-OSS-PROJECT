@@ -172,6 +172,15 @@ class AccessibleChartControllerTest {
             return CompletableFuture.completedFuture(candles());
         }
 
+        @Override public EventSubscription observeConnection(
+                org.ossproject.application.port.ConnectionListener listener) {
+            return () -> { };
+        }
+
+        @Override public int liveSubscriptionCount() {
+            return 0;
+        }
+
         @Override public EventSubscription monitorCandles(
                 SecurityId security, CandleInterval interval,
                 List<Candle> history, org.ossproject.application.port.CandleListener listener

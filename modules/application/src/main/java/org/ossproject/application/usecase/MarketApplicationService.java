@@ -204,6 +204,28 @@ public final class MarketApplicationService implements MarketApplicationPort {
     }
 
     @Override
+    public EventSubscription observeConnection(ConnectionListener listener) {
+        if (closed.get()) throw new IllegalStateException("시장 Application 서비스가 종료되었습니다.");
+        Objects.requireNonNull(listener, "listener");
+
+        ConnectionListener relay = (state, detail) -> dispatch(() -> listener.onConnectionStateChanged(state, detail));
+        marketStream.addConnectionListener(relay);
+        // 등록 직후 현재 상태를 한 번 알린다. 다음 변화까지 화면이 비어 있으면 안 된다.
+        dispatch(() -> listener.onConnectionStateChanged(marketStream.connectionState(), null));
+
+        AtomicBoolean done = new AtomicBoolean();
+        return () -> {
+            if (!done.compareAndSet(false, true)) return;
+            marketStream.removeConnectionListener(relay);
+        };
+    }
+
+    @Override
+    public int liveSubscriptionCount() {
+        return marketStream.subscriptions().size();
+    }
+
+    @Override
     public void close() {
         if (!closed.compareAndSet(false, true)) return;
         synchronized (monitorLock) {
