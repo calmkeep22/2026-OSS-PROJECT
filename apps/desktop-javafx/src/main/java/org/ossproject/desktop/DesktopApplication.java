@@ -1509,7 +1509,13 @@ public final class DesktopApplication extends Application {
         return scrollPage("계좌 대시보드", body);
     }
 
-    private VBox createTradingScreen() {
+    /**
+     * 주문 화면.
+     *
+     * <p>창이 낮으면 아래쪽 주문 상태가 화면 밖으로 밀린다. 접수 결과를 확인하는 자리라
+     * 가려지면 안 되므로 잘라 내지 않고 스크롤로 닿을 수 있게 감싼다.
+     */
+    private javafx.scene.Node createTradingScreen() {
         Label loading = new Label("키움 모의계좌 주문 상태를 조회하고 있습니다.");
         ProgressIndicator progress = new ProgressIndicator();
         VBox host = new VBox(12, progress, loading);
@@ -1525,7 +1531,12 @@ public final class DesktopApplication extends Application {
                         host.setAlignment(Pos.TOP_LEFT);
                     }
                 }));
-        return host;
+        ScrollPane scroll = new ScrollPane(host);
+        scroll.setFitToWidth(true);
+        scroll.setFitToHeight(true);
+        scroll.setAccessibleText("주문 화면");
+        scroll.getStyleClass().add("workspace-scroll");
+        return scroll;
     }
 
     private VBox createTradingScreenContent(List<Order> orders) {

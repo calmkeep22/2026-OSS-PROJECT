@@ -123,12 +123,16 @@
 .order-book-panel .tab-header-area .tab,
 .order-status-tabs .tab-header-area .tab { -fx-padding: 6 11; }
 .order-book-panel .table-row-cell { -fx-cell-size: 34px; }
+/* 호가 표는 스스로 높이를 맞춘다. 안쪽 스크롤막대가 자리를 먹지 않게 한다. */
+.order-book-panel .table-view > .virtual-flow > .scroll-bar:vertical { -fx-pref-width: 0; -fx-opacity: 0; }
 .order-form-compact .section-title { -fx-font-size: 20px; }
 .order-form-compact .label { -fx-font-size: 14px; }
 .order-form-compact .button { -fx-min-height: 32; -fx-pref-height: 32; -fx-padding: 5 10; }
 .order-form-compact .text-field,
-.order-form-compact .combo-box,
 .order-form-compact .spinner { -fx-min-height: 34; -fx-pref-height: 34; }
+/* 콤보박스는 안쪽 셀에 자체 여백이 있어 34 로는 한글 아래쪽이 잘린다. */
+.order-form-compact .combo-box { -fx-min-height: 38; -fx-pref-height: 38; }
+.order-form-compact .combo-box > .list-cell { -fx-padding: 4 6; -fx-text-overrun: clip; }
 .order-form-compact .information-row { -fx-padding: 4 2; }
 .order-status-tabs .table-row-cell { -fx-cell-size: 32px; }
 .order-status-tabs .state-banner { -fx-padding: 6 10; }

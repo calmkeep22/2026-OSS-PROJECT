@@ -53,7 +53,8 @@ public final class OrderBookViewModel {
     private Instant lastOrderBookAt;
 
     public OrderBookViewModel(MarketApplicationPort market, Executor stateExecutor) {
-        this(market, stateExecutor, PriceLadderConfig.defaults());
+        // 주문 화면과 종목 상세 모두 좁은 칸에 들어간다. 21단계는 스크롤 없이 담기지 않는다.
+        this(market, stateExecutor, PriceLadderConfig.compact());
     }
 
     public OrderBookViewModel(MarketApplicationPort market, Executor stateExecutor,

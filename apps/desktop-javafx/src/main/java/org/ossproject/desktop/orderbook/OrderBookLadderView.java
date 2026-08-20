@@ -37,6 +37,10 @@ public final class OrderBookLadderView {
 
     private static final NumberFormat NUMBERS = NumberFormat.getIntegerInstance(Locale.KOREA);
 
+    /** 한 행 높이. CSS 의 {@code .order-book-panel .table-row-cell} 과 맞춘다. */
+    private static final double ROW_HEIGHT = 34;
+    private static final double HEADER_HEIGHT = 32;
+
     private final ObservableList<PriceLadderRow> rows = FXCollections.observableArrayList();
     private final TableView<PriceLadderRow> table;
     private final Label summary = new Label("호가를 기다리고 있습니다.");
@@ -58,7 +62,9 @@ public final class OrderBookLadderView {
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
         table.getColumns().setAll(List.of(askColumn, priceColumn, bidColumn));
         table.setAccessibleHelp("위아래 방향키로 가격대를 이동합니다. 각 행은 가격과 매도·매수 잔량입니다.");
-        table.setPrefHeight(360);
+        // 행 높이를 고정해 두어야 표 전체 높이를 미리 셀 수 있다.
+        table.setFixedCellSize(ROW_HEIGHT);
+        resizeToRows(0);
         // 행마다 읽어 줄 문장을 도메인이 만들어 준다. 매도·매수를 색이 아니라 말로 구분한다.
         table.setRowFactory(view -> new javafx.scene.control.TableRow<>() {
             @Override
@@ -154,6 +160,7 @@ public final class OrderBookLadderView {
             return;
         }
         rows.setAll(view.rows());
+        resizeToRows(view.rows().size());
         applySummary(view);
         applyAnnouncement(view);
     }
@@ -179,6 +186,7 @@ public final class OrderBookLadderView {
     /** 호가를 받을 수 없는 상태를 감추지 않는다. */
     public void showUnavailable(String reason) {
         rows.clear();
+        resizeToRows(0);
         summary.setText(reason);
         summary.setAccessibleText(reason);
         hideAnnouncement();
@@ -226,6 +234,19 @@ public final class OrderBookLadderView {
     private void hideAnnouncement() {
         announcement.setVisible(false);
         announcement.setManaged(false);
+    }
+
+    /**
+     * 표를 행 수에 맞춰 키운다.
+     *
+     * <p>호가는 한눈에 보아야 판단이 된다. 표 안에서 스크롤하게 두면 위아래 호가를 함께
+     * 볼 수 없고, 스크린리더로 읽을 때도 보이지 않는 행을 지나치기 쉽다.
+     */
+    private void resizeToRows(int count) {
+        double height = HEADER_HEIGHT + Math.max(1, count) * ROW_HEIGHT;
+        table.setMinHeight(height);
+        table.setPrefHeight(height);
+        table.setMaxHeight(height);
     }
 
     /** 잔량이 없으면 빈 칸으로 둔다. 0 을 늘어놓으면 표를 읽어 내려갈 때 소음이 된다. */
