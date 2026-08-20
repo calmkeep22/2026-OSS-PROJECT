@@ -5,6 +5,7 @@ import org.ossproject.application.usecase.MarketApplicationService;
 import org.ossproject.fake.FakeCandleQueryAdapter;
 import org.ossproject.fake.FakeMarketDataStreamAdapter;
 import org.ossproject.fake.FakeStockQueryAdapter;
+import org.ossproject.finance.model.DepthChartView;
 import org.ossproject.finance.model.Exchange;
 import org.ossproject.finance.model.OrderBook;
 import org.ossproject.finance.model.OrderBookLevel;
@@ -136,5 +137,42 @@ class OrderBookViewModelTest {
         stream.emitOrderBook(book("005930", 200L));
 
         assertNotNull(pushed.get(), "이후 실시간 호가는 받아야 합니다");
+    }
+
+    /** 사다리와 그래프는 같은 호가창에서 나온다. 따로 갱신하면 두 표현이 어긋난다. */
+    @Test void updatesTheLadderAndTheDepthGraphFromTheSameOrderBook() {
+        AtomicReference<PriceLadderView> ladder = new AtomicReference<>();
+        AtomicReference<DepthChartView> depth = new AtomicReference<>();
+
+        viewModel.start(SAMSUNG, ladder::set, depth::set);
+        stream.emitOrderBook(book("005930", 200L));
+
+        assertNotNull(ladder.get());
+        assertNotNull(depth.get());
+        assertEquals("005930", depth.get().symbol());
+        assertFalse(depth.get().isEmpty(), "그래프에도 점이 있어야 합니다");
+    }
+
+    /** 그래프 좌표는 도메인이 0.0~1.0 으로 정규화해 준다. 화면은 폭과 높이만 곱한다. */
+    @Test void handsOutNormalisedCoordinatesTheScreenCanDrawDirectly() {
+        AtomicReference<DepthChartView> depth = new AtomicReference<>();
+        viewModel.start(SAMSUNG, view -> { }, depth::set);
+
+        stream.emitOrderBook(book("005930", 200L));
+
+        depth.get().askPoints().forEach(plot -> {
+            assertTrue(plot.priceRatio() >= 0.0 && plot.priceRatio() <= 1.0);
+            assertTrue(plot.depthRatio() >= 0.0 && plot.depthRatio() <= 1.0);
+        });
+    }
+
+    @Test void startsAFreshDepthGraphWhenTheStockChanges() {
+        viewModel.start(SAMSUNG, view -> { }, view -> { });
+        stream.emitOrderBook(book("005930", 200L));
+        assertTrue(viewModel.currentDepthView().isPresent());
+
+        viewModel.start(HYNIX, view -> { }, view -> { });
+
+        assertTrue(viewModel.currentDepthView().isEmpty(), "종목이 바뀌면 그래프도 새로 잡아야 합니다");
     }
 }

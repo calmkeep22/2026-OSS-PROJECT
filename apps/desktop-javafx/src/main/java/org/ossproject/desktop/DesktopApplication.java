@@ -51,6 +51,7 @@ import org.ossproject.desktop.viewmodel.StockSearchItem;
 import org.ossproject.desktop.viewmodel.StockSearchViewModel;
 import org.ossproject.desktop.viewmodel.ConnectionViewModel;
 import org.ossproject.desktop.viewmodel.WatchlistViewModel;
+import org.ossproject.desktop.orderbook.DepthChartCanvas;
 import org.ossproject.desktop.orderbook.OrderBookLadderView;
 import org.ossproject.desktop.viewmodel.OrderBookViewModel;
 import org.ossproject.desktop.viewmodel.StockDetailViewModel;
@@ -788,18 +789,25 @@ public final class DesktopApplication extends Application {
      */
     private javafx.scene.Node createOrderBookPanel(String stockName) {
         OrderBookLadderView ladder = new OrderBookLadderView(stockName);
+        DepthChartCanvas depth = new DepthChartCanvas();
+        // 표가 원본이고 그래프는 보조다. 차트 탭과 같은 순서로 둔다.
+        TabPane views = new TabPane(tab("호가 표", ladder.root()), tab("누적 깊이 그래프", depth));
+        views.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        views.setPrefHeight(430);
+
         if (!orderBookViewModel.supported()) {
             ladder.showUnavailable("실시간 호가를 제공하지 않는 연결입니다. " + marketDataSource);
-            return ladder.root();
+            return views;
         }
         ladder.showUnavailable("호가를 기다리고 있습니다.");
         try {
-            orderBookViewModel.start(session.selectedStock().securityId(), ladder::update);
+            orderBookViewModel.start(session.selectedStock().securityId(),
+                    ladder::update, depth::update);
         } catch (RuntimeException failure) {
             ladder.showUnavailable("호가 구독을 시작하지 못했습니다. " + failure.getMessage());
         }
         refreshSubscriptionCount();
-        return ladder.root();
+        return views;
     }
 
     /** 음성이 나가는 동안 청각 차트 음량을 낮춘다. 차트를 못 연 상태면 할 일이 없다. */

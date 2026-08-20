@@ -2,6 +2,9 @@ package org.ossproject.desktop.viewmodel;
 
 import org.ossproject.application.port.EventSubscription;
 import org.ossproject.application.port.MarketApplicationPort;
+import org.ossproject.finance.model.DepthChart;
+import org.ossproject.finance.model.DepthChartConfig;
+import org.ossproject.finance.model.DepthChartView;
 import org.ossproject.finance.model.OrderBook;
 import org.ossproject.finance.model.PriceLadder;
 import org.ossproject.finance.model.PriceLadderConfig;
@@ -29,6 +32,8 @@ public final class OrderBookViewModel {
 
     private PriceLadder ladder;
     private PriceLadderView view;
+    private DepthChart depth;
+    private DepthChartView depthView;
     private EventSubscription subscription;
     private SecurityId watching;
 
@@ -38,9 +43,15 @@ public final class OrderBookViewModel {
 
     public OrderBookViewModel(MarketApplicationPort market, Executor stateExecutor,
                               PriceLadderConfig config) {
+        this(market, stateExecutor, config, DepthChartConfig.defaults());
+    }
+
+    public OrderBookViewModel(MarketApplicationPort market, Executor stateExecutor,
+                              PriceLadderConfig config, DepthChartConfig depthConfig) {
         this.market = Objects.requireNonNull(market, "market");
         this.stateExecutor = Objects.requireNonNull(stateExecutor, "stateExecutor");
         this.ladder = PriceLadder.create(Objects.requireNonNull(config, "config"));
+        this.depth = DepthChart.create(Objects.requireNonNull(depthConfig, "depthConfig"));
     }
 
     /** 공급원이 실시간 호가를 주는지. 거짓이면 화면은 호가창 대신 안내를 보여 준다. */
@@ -48,9 +59,14 @@ public final class OrderBookViewModel {
         return market.supportsOrderBook();
     }
 
-    /** 마지막으로 만들어진 화면. 아직 호가를 한 번도 받지 못했으면 비어 있다. */
+    /** 마지막으로 만들어진 사다리. 아직 호가를 한 번도 받지 못했으면 비어 있다. */
     public Optional<PriceLadderView> currentView() {
         return Optional.ofNullable(view);
+    }
+
+    /** 마지막으로 만들어진 누적 깊이 그래프. */
+    public Optional<DepthChartView> currentDepthView() {
+        return Optional.ofNullable(depthView);
     }
 
     /**
@@ -63,13 +79,27 @@ public final class OrderBookViewModel {
      * @param onUpdated 갱신된 화면. 화면 스레드에서 호출된다
      */
     public void start(SecurityId security, Consumer<PriceLadderView> onUpdated) {
+        start(security, onUpdated, depthView -> { });
+    }
+
+    /**
+     * 사다리와 누적 깊이 그래프를 함께 받는다.
+     *
+     * <p>둘은 같은 호가창에서 나오므로 한 번에 갱신한다. 따로 구독하면 두 표현이 서로 다른
+     * 시점의 값을 보여 줄 수 있다.
+     */
+    public void start(SecurityId security, Consumer<PriceLadderView> onUpdated,
+                      Consumer<DepthChartView> onDepthUpdated) {
         Objects.requireNonNull(security, "security");
         Objects.requireNonNull(onUpdated, "onUpdated");
+        Objects.requireNonNull(onDepthUpdated, "onDepthUpdated");
         stop();
 
         if (!security.equals(watching)) {
             ladder = PriceLadder.create(ladder.config());
+            depth = DepthChart.create(depth.config());
             view = null;
+            depthView = null;
         }
         watching = security;
 
@@ -80,6 +110,7 @@ public final class OrderBookViewModel {
             }
             apply(book);
             onUpdated.accept(view);
+            onDepthUpdated.accept(depthView);
         }));
     }
 
@@ -96,5 +127,9 @@ public final class OrderBookViewModel {
         PriceLadder.Update update = ladder.update(book, null);
         ladder = update.ladder();
         view = update.view();
+
+        DepthChart.Update depthUpdate = depth.update(book, null);
+        depth = depthUpdate.chart();
+        depthView = depthUpdate.view();
     }
 }
