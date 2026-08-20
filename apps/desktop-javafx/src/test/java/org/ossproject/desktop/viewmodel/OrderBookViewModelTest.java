@@ -25,8 +25,11 @@ class OrderBookViewModelTest {
     private static final SecurityId HYNIX = new SecurityId("000660", Exchange.KRX);
 
     private final FakeMarketDataStreamAdapter stream = new FakeMarketDataStreamAdapter();
+    private final AtomicReference<OrderBook> snapshot = new AtomicReference<>();
     private final MarketApplicationService market = new MarketApplicationService(
-            new FakeStockQueryAdapter(), new FakeCandleQueryAdapter(), stream, Runnable::run);
+            new FakeStockQueryAdapter(), new FakeCandleQueryAdapter(),
+            symbol -> snapshot.get(), stream,
+            Runnable::run, Runnable::run, java.time.Clock.systemUTC());
     private final OrderBookViewModel viewModel = new OrderBookViewModel(market, Runnable::run);
 
     private static OrderBook book(String symbol, long bidSize) {
@@ -102,5 +105,36 @@ class OrderBookViewModelTest {
         stream.emitOrderBook(book("005930", 200L));
 
         assertEquals(1, pushes.get(), "구독이 하나만 살아 있어야 합니다");
+    }
+
+    /**
+     * 실시간만 붙이면 다음 호가가 올 때까지 화면이 비어 있다. 장 시간 외에는 영영 오지
+     * 않으므로 화면을 열 때 한 장을 받아 둔다.
+     */
+    @Test void showsAQueriedSnapshotBeforeAnyRealtimeUpdateArrives() {
+        snapshot.set(book("005930", 200L));
+        AtomicReference<PriceLadderView> pushed = new AtomicReference<>();
+
+        viewModel.start(SAMSUNG, pushed::set);
+
+        assertNotNull(pushed.get(), "구독을 시작하면 조회한 호가가 먼저 보여야 합니다");
+        assertFalse(pushed.get().rows().isEmpty());
+    }
+
+    /** 조회가 실패해도 구독은 살려 둔다. 지금 못 받는 것과 앞으로도 못 받는 것은 다르다. */
+    @Test void keepsTheSubscriptionWhenTheSnapshotQueryFails() {
+        MarketApplicationService failing = new MarketApplicationService(
+                new FakeStockQueryAdapter(), new FakeCandleQueryAdapter(),
+                symbol -> { throw new IllegalStateException("조회 실패"); }, stream,
+                Runnable::run, Runnable::run, java.time.Clock.systemUTC());
+        OrderBookViewModel model = new OrderBookViewModel(failing, Runnable::run);
+        AtomicReference<PriceLadderView> pushed = new AtomicReference<>();
+
+        assertDoesNotThrow(() -> model.start(SAMSUNG, pushed::set));
+        assertTrue(stream.subscriptions().contains("005930"));
+
+        stream.emitOrderBook(book("005930", 200L));
+
+        assertNotNull(pushed.get(), "이후 실시간 호가는 받아야 합니다");
     }
 }

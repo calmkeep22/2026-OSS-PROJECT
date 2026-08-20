@@ -6,6 +6,7 @@ import org.ossproject.broker.BrokerException;
 import org.ossproject.broker.SensitiveDataMasker;
 import org.ossproject.finance.model.Account;
 import org.ossproject.finance.model.Balance;
+import org.ossproject.finance.model.OrderBook;
 import org.ossproject.finance.model.Deposits;
 import org.ossproject.finance.model.ReportedValuation;
 import org.ossproject.finance.model.Candle;
@@ -325,6 +326,11 @@ public final class KiwoomJsonMapper {
         BigDecimal withdrawable = optionalDecimal(deposit, "pymn_alow_amt")
                 .orElse(orderable).max(BigDecimal.ZERO);
         return new Deposits(cash, settled, orderable, withdrawable);
+    }
+
+    /** {@code ka10004} 호가 응답을 도메인 호가창으로 옮긴다. 파싱 규칙은 파서가 안다. */
+    public OrderBook toOrderBook(String symbol, JsonNode root) {
+        return KiwoomOrderBookParser.fromRest(symbol, root, clock.instant());
     }
 
     /** 계좌 응답의 {@code A005930} 형태에서 접두어를 떼어 낸다. */

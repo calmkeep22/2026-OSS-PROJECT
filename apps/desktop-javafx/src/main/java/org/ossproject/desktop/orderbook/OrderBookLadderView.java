@@ -34,6 +34,7 @@ public final class OrderBookLadderView {
     private final Label summary = new Label("호가를 기다리고 있습니다.");
     private final Label announcement = new Label();
     private final VBox root;
+    private boolean live = true;
 
     public OrderBookLadderView(String stockName) {
         Objects.requireNonNull(stockName, "stockName");
@@ -92,14 +93,31 @@ public final class OrderBookLadderView {
     }
 
     private void applySummary(PriceLadderView view) {
+        if (view.rows().isEmpty()) {
+            String empty = "받은 호가에 잔량이 없습니다.";
+            summary.setText(empty);
+            summary.setAccessibleText(empty);
+            return;
+        }
         String text = view.currentPriceRow()
                 .map(row -> "현재가 " + price(row.price()) + ". ")
                 .orElse("")
                 + "표시 범위 " + view.highestPrice().map(OrderBookLadderView::price).orElse("-")
                 + " 부터 " + view.lowestPrice().map(OrderBookLadderView::price).orElse("-")
-                + " 까지, " + view.rows().size() + "단계.";
+                + " 까지, " + view.rows().size() + "단계."
+                + (live ? "" : " 실시간 갱신은 오지 않습니다.");
         summary.setText(text);
         summary.setAccessibleText(text);
+    }
+
+    /**
+     * 실시간 갱신이 오고 있는지 표시한다.
+     *
+     * <p>장 시간 외에는 조회한 호가만 있고 갱신이 오지 않는다. 그 사실을 적지 않으면
+     * 사용자는 멈춘 화면을 보며 값이 최신인지 알 수 없다.
+     */
+    public void setLive(boolean value) {
+        this.live = value;
     }
 
     private void applyAnnouncement(PriceLadderView view) {
