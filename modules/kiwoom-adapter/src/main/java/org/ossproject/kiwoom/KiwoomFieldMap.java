@@ -53,7 +53,7 @@ public final class KiwoomFieldMap {
                 .map(KiwoomField.CANDLE_CLOSE, "cur_prc")
                 .map(KiwoomField.CANDLE_VOLUME, "trde_qty")
 
-                .map(KiwoomField.ACCOUNT_CASH, "entr")
+                .map(KiwoomField.ACCOUNT_CASH, "d2_entra")
                 .map(KiwoomField.ACCOUNT_POSITIONS, "acnt_evlt_remn_indv_tot")
                 .map(KiwoomField.POSITION_SYMBOL, "stk_cd")
                 .map(KiwoomField.POSITION_NAME, "stk_nm")

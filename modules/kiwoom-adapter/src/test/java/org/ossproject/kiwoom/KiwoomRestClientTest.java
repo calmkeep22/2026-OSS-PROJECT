@@ -341,7 +341,7 @@ class KiwoomRestClientTest {
     @DisplayName("예수금과 잔고를 합치고 0-패딩과 종목코드 접두어를 걷어 낸다")
     void mergesDepositAndBalance() {
         transport.enqueueJson(TOKEN_BODY);
-        transport.enqueueJson("{\"entr\":\"000000012500000\",\"return_code\":0}");
+        transport.enqueueJson("{\"entr\":\"000000012500000\",\"d2_entra\":\"000000012500000\",\"return_code\":0}");
         transport.enqueueJson("""
                 {"tot_pur_amt":"000000017598258","acnt_evlt_remn_indv_tot":[
                   {"stk_cd":"A005930","stk_nm":"삼성전자","rmnd_qty":"000000000000020",
@@ -358,6 +358,41 @@ class KiwoomRestClientTest {
         assertEquals(20L, account.positions().get(0).quantity());
         assertEquals("kt00001", transport.requests.get(1).headers().get("api-id"));
         assertEquals("kt00018", transport.requests.get(2).headers().get("api-id"));
+    }
+
+    @Test
+    @DisplayName("매수 당일에도 총자산이 부풀지 않도록 D+2 추정예수금을 쓴다")
+    void usesSettledCashSoABuyDoesNotInflateTotalAssets() {
+        // 11,000원 20주를 방금 샀다. 예수금은 D+2 결제라 아직 그대로지만 종목은 이미 잡혔다.
+        transport.enqueueJson(TOKEN_BODY);
+        transport.enqueueJson("{\"entr\":\"000000010000000\","
+                + "\"d2_entra\":\"000000009780000\",\"return_code\":0}");
+        transport.enqueueJson("""
+                {"acnt_evlt_remn_indv_tot":[
+                  {"stk_cd":"A005930","stk_nm":"삼성전자","rmnd_qty":"000000000000020",
+                   "pur_pric":"000000000011000","cur_prc":"000000011000"}
+                ],"return_code":0}""");
+
+        Account account = client.fetchAccount("12345678901");
+
+        assertEquals(0, new BigDecimal("9780000").compareTo(account.balance().cash()),
+                "entr 이 아니라 d2_entra 를 써야 합니다");
+        assertEquals(0, new BigDecimal("220000").compareTo(account.totalMarketValue()));
+        assertEquals(0, new BigDecimal("10000000").compareTo(account.totalAssets()),
+                "매수 금액이 현금과 주식에 두 번 세어지면 안 됩니다");
+    }
+
+    @Test
+    @DisplayName("D+2 추정예수금이 없는 응답이면 예수금으로 물러선다")
+    void fallsBackToRawDepositWhenSettledCashIsMissing() {
+        transport.enqueueJson(TOKEN_BODY);
+        transport.enqueueJson("{\"entr\":\"000000010000000\",\"return_code\":0}");
+        transport.enqueueJson("{\"acnt_evlt_remn_indv_tot\":[],\"return_code\":0}");
+
+        Account account = client.fetchAccount("12345678901");
+
+        assertEquals(0, new BigDecimal("10000000").compareTo(account.balance().cash()),
+                "필드가 없다고 0 원으로 보여 주면 계좌가 빈 것으로 읽힙니다");
     }
 
     // ------------------------------------------------------------------
