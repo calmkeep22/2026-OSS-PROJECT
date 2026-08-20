@@ -9,8 +9,14 @@ import java.util.Optional;
  * 계좌 전체 상태. 예수금과 보유 종목을 함께 가진다.
  *
  * <p>불변 객체이며 변경은 새 인스턴스를 반환한다.
+ *
+ * @param deposits        예수금 단계. 증권사가 주지 않으면 {@link Deposits#from(Balance)} 로 채운다
+ * @param estimatedAssets 증권사가 계산해 내려준 추정예탁자산. 없으면 {@code null}.
+ *                        직접 더한 값보다 이쪽이 우선이다. 미수·신용·대출처럼 우리가 세지
+ *                        않는 항목까지 포함하므로, 직접 더하면 증권사 화면과 어긋난다
  */
-public record Account(String accountNo, Balance balance, List<Position> positions) {
+public record Account(String accountNo, Balance balance, List<Position> positions,
+                      Deposits deposits, BigDecimal estimatedAssets) {
 
     public Account {
         if (accountNo == null || accountNo.isBlank()) {
@@ -20,6 +26,12 @@ public record Account(String accountNo, Balance balance, List<Position> position
             throw new IllegalArgumentException("잔고는 필수입니다.");
         }
         positions = List.copyOf(positions == null ? List.of() : positions);
+        deposits = deposits == null ? Deposits.from(balance) : deposits;
+    }
+
+    /** 증권사 요약 없이 원장만으로 만든 계좌. 모의 거래가 쓴다. */
+    public Account(String accountNo, Balance balance, List<Position> positions) {
+        this(accountNo, balance, positions, null, null);
     }
 
     public static Account of(String accountNo, BigDecimal cash) {
@@ -39,9 +51,26 @@ public record Account(String accountNo, Balance balance, List<Position> position
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
-    /** 예수금을 포함한 총 자산. */
+    /**
+     * 예수금을 포함한 총 자산.
+     *
+     * <p>증권사가 추정예탁자산을 내려줬으면 그 값을 그대로 쓴다. 실제 증권사 프로그램도
+     * 직접 더하지 않고 서버가 계산한 값을 보여 준다. 미수금, 신용융자, 예탁담보대출,
+     * 미수령 배당처럼 우리가 세지 않는 항목이 있어서, 직접 더하면 증권사 화면과 어긋난다.
+     *
+     * <p>증권사 값이 없거나 시세 반영으로 보유 평가액이 바뀐 뒤에는 직접 더한다. 이때
+     * 더하는 현금은 예수금이 아니라 <b>D+2 추정예수금</b>이다. 예수금을 쓰면 매수 당일
+     * 대금이 현금과 주식 양쪽에서 세어진다.
+     */
     public BigDecimal totalAssets() {
-        return balance.cash().add(totalMarketValue());
+        return estimatedAssets != null
+                ? estimatedAssets
+                : deposits.settledCash().add(totalMarketValue());
+    }
+
+    /** 총자산이 증권사가 계산한 값인지. 거짓이면 앱이 직접 더한 값이다. */
+    public boolean totalAssetsReportedByBroker() {
+        return estimatedAssets != null;
     }
 
     public BigDecimal totalProfitLoss() {
@@ -49,8 +78,9 @@ public record Account(String accountNo, Balance balance, List<Position> position
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
+    /** 원장이 바뀌면 증권사 요약은 더 이상 맞지 않는다. 예수금 단계도 원장에서 다시 잡는다. */
     public Account withBalance(Balance newBalance) {
-        return new Account(accountNo, newBalance, positions);
+        return new Account(accountNo, newBalance, positions, null, null);
     }
 
     /**
@@ -76,7 +106,8 @@ public record Account(String accountNo, Balance balance, List<Position> position
         if (!replaced && position.quantity() > 0) {
             updated.add(position);
         }
-        return new Account(accountNo, balance, updated);
+        // 보유가 바뀌면 증권사가 준 총액은 낡은 값이다. 예수금은 그대로 두고 총액만 버린다.
+        return new Account(accountNo, balance, updated, deposits, null);
     }
 
     /** 실시간 시세를 보유 종목에 반영한다. 보유하지 않은 종목이면 그대로 돌려준다. */

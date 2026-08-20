@@ -31,6 +31,12 @@ public enum KiwoomField {
     CANDLE_VOLUME,
 
     ACCOUNT_CASH,
+    /** D+2 추정예수금. 미수면 음수. */
+    ACCOUNT_SETTLED_CASH,
+    ACCOUNT_ORDERABLE,
+    ACCOUNT_WITHDRAWABLE,
+    /** 증권사가 계산한 추정예탁자산. 직접 더한 값보다 우선한다. */
+    ACCOUNT_ESTIMATED_ASSETS,
     /** 보유 종목 배열이 들어 있는 노드 이름. */
     ACCOUNT_POSITIONS,
     POSITION_SYMBOL,
