@@ -813,6 +813,24 @@ public final class DesktopApplication extends Application {
         return views;
     }
 
+    /**
+     * 주문 확인 창에 넣을 비용 줄.
+     *
+     * <p>총액만 보여 주면 체결 뒤에야 차이를 알게 된다. 요율을 모르면 지어내지 않고
+     * 모른다고 적는다.
+     */
+    private static String costLines(TradePreview preview) {
+        TradeCosts costs = preview.costs();
+        if (!costs.isKnown()) {
+            return "\n수수료와 세금: 요율이 설정되지 않아 계산하지 않았습니다";
+        }
+        String settlementLabel = preview.command().side() == OrderSide.SELL
+                ? "\n예상 수령금액: " : "\n예상 결제금액: ";
+        return "\n예상 수수료: " + Formatters.won(costs.commission())
+                + (costs.tax().signum() > 0 ? "\n예상 거래세: " + Formatters.won(costs.tax()) : "")
+                + settlementLabel + Formatters.won(preview.settlementAmount());
+    }
+
     /** 음성이 나가는 동안 청각 차트 음량을 낮춘다. 차트를 못 연 상태면 할 일이 없다. */
     private void setChartSpeechActive(boolean active) {
         AccessibleChartController controller = accessibleChartController;
@@ -2102,7 +2120,10 @@ public final class DesktopApplication extends Application {
             String orderPrice = request.type() == OrderType.MARKET ? "시장가" : Formatters.won(request.limitPrice());
             confirmation.setContentText("종목 코드: " + request.symbol() + "\n주문 가격: " + orderPrice
                     + "\n예상 주문금액: " + Formatters.won(result.estimatedAmount())
+                    + costLines(result)
                     + "\n주문 후 예상 현금: " + Formatters.won(result.availableCashAfter()) + "\n\n실제 주문이 아닌 모의주문입니다.");
+            // 확인 창은 되돌릴 수 없는 동작 직전이다. 화면 글자와 읽어 주는 문장을 같게 둔다.
+            confirmation.getDialogPane().setAccessibleText(result.describe());
             ButtonType submit = new ButtonType("모의 " + request.side().displayName() + " 제출", ButtonBar.ButtonData.OK_DONE);
             confirmation.getButtonTypes().setAll(submit, ButtonType.CANCEL);
             confirmation.showAndWait().filter(submit::equals).ifPresent(button -> {
