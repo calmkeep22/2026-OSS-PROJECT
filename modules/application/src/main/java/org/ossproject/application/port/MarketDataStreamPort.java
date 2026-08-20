@@ -59,6 +59,19 @@ public interface MarketDataStreamPort extends AutoCloseable {
         // 위와 같다.
     }
 
+    /** 공급원이 체결 건별 정보를 주는지. 거짓이면 체결 목록을 만들 수 없다. */
+    default boolean supportsTrades() {
+        return false;
+    }
+
+    /** 실시간 체결을 받는다. {@link #supportsTrades()} 가 거짓이면 아무 일도 하지 않는다. */
+    default void addTradeListener(TradeListener listener) {
+        // 체결 건별 정보를 주지 않는 공급원을 위한 기본 동작.
+    }
+
+    default void removeTradeListener(TradeListener listener) {
+    }
+
     void addConnectionListener(ConnectionListener listener);
 
     void removeConnectionListener(ConnectionListener listener);

@@ -181,6 +181,15 @@ class AccessibleChartControllerTest {
             return false;
         }
 
+        @Override public EventSubscription monitorTrades(
+                SecurityId security, org.ossproject.application.port.TradeListener listener) {
+            return () -> { };
+        }
+
+        @Override public boolean supportsTrades() {
+            return false;
+        }
+
         @Override public EventSubscription observeConnection(
                 org.ossproject.application.port.ConnectionListener listener) {
             return () -> { };

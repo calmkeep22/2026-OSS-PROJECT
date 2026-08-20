@@ -6,9 +6,11 @@ import org.ossproject.application.port.OrderBookListener;
 import org.ossproject.application.port.ConnectionState;
 import org.ossproject.application.port.MarketDataStreamPort;
 import org.ossproject.application.port.QuoteListener;
+import org.ossproject.application.port.TradeListener;
 import org.ossproject.broker.resilience.RetryPolicy;
 import org.ossproject.finance.model.OrderBook;
 import org.ossproject.finance.model.Quote;
+import org.ossproject.finance.model.Trade;
 import org.ossproject.kiwoom.KiwoomProperties;
 
 import java.net.URI;
@@ -62,6 +64,7 @@ public final class KiwoomMarketDataStream implements MarketDataStreamPort {
 
     private final List<QuoteListener> quoteListeners = new CopyOnWriteArrayList<>();
     private final List<OrderBookListener> orderBookListeners = new CopyOnWriteArrayList<>();
+    private final List<TradeListener> tradeListeners = new CopyOnWriteArrayList<>();
     private final List<ConnectionListener> connectionListeners = new CopyOnWriteArrayList<>();
 
     private final Object lock = new Object();
@@ -378,6 +381,23 @@ public final class KiwoomMarketDataStream implements MarketDataStreamPort {
     }
 
     @Override
+    public boolean supportsTrades() {
+        return true;
+    }
+
+    @Override
+    public void addTradeListener(TradeListener listener) {
+        if (listener != null) {
+            tradeListeners.add(listener);
+        }
+    }
+
+    @Override
+    public void removeTradeListener(TradeListener listener) {
+        tradeListeners.remove(listener);
+    }
+
+    @Override
     public void addConnectionListener(ConnectionListener listener) {
         if (listener != null) {
             connectionListeners.add(listener);
@@ -456,6 +476,16 @@ public final class KiwoomMarketDataStream implements MarketDataStreamPort {
         }
     }
 
+    private void notifyTrade(Trade trade) {
+        for (TradeListener listener : tradeListeners) {
+            try {
+                listener.onTrade(trade);
+            } catch (RuntimeException ignored) {
+                // 한 리스너의 실패가 다른 리스너를 막지 않는다.
+            }
+        }
+    }
+
     private void notifyQuote(Quote quote) {
         for (QuoteListener listener : quoteListeners) {
             try {
@@ -490,6 +520,8 @@ public final class KiwoomMarketDataStream implements MarketDataStreamPort {
                 notifyOrderBook(update.orderBook());
             } else if (event instanceof KiwoomStreamEvent.QuoteUpdate update) {
                 notifyQuote(update.quote());
+            } else if (event instanceof KiwoomStreamEvent.TradeUpdate update) {
+                notifyTrade(update.trade());
             }
         }
 

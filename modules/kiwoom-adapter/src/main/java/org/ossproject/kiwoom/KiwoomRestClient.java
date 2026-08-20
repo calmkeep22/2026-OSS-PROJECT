@@ -11,6 +11,7 @@ import org.ossproject.finance.model.Candle;
 import org.ossproject.finance.model.CandleInterval;
 import org.ossproject.finance.model.Order;
 import org.ossproject.finance.model.OrderBook;
+import org.ossproject.finance.model.Trade;
 import org.ossproject.finance.model.OrderCommand;
 import org.ossproject.finance.model.OrderSide;
 import org.ossproject.finance.model.OrderType;
@@ -98,6 +99,19 @@ public final class KiwoomRestClient implements BrokerClient {
         String body = "{\"stk_cd\":\"" + escape(symbol) + "\"}";
         return executor.call("호가 조회", () -> call("호가 조회", KiwoomTr.ORDER_BOOK, body,
                 root -> jsonMapper.toOrderBook(symbol, root)));
+    }
+
+    /**
+     * 최근 체결 내역을 조회한다.
+     *
+     * <p>실시간 구독만으로는 다음 체결이 올 때까지 목록이 비어 있다. 장 시간 외에는 영영
+     * 오지 않으므로 화면을 열 때 한 번 받아 둔다.
+     */
+    public List<Trade> fetchRecentTrades(String symbol) {
+        requireSymbol(symbol);
+        String body = "{\"stk_cd\":\"" + escape(symbol) + "\"}";
+        return executor.call("체결 조회", () -> call("체결 조회", KiwoomTr.TRADE_HISTORY, body,
+                root -> jsonMapper.toTrades(symbol, root)));
     }
 
     /** 화면용 상세. {@link #fetchQuote(String)} 와 같은 TR 을 쓰지만 더 많은 값을 담는다. */

@@ -5,8 +5,10 @@ import org.ossproject.application.port.ConnectionState;
 import org.ossproject.application.port.MarketDataStreamPort;
 import org.ossproject.application.port.OrderBookListener;
 import org.ossproject.application.port.QuoteListener;
+import org.ossproject.application.port.TradeListener;
 import org.ossproject.finance.model.OrderBook;
 import org.ossproject.finance.model.Quote;
+import org.ossproject.finance.model.Trade;
 
 import java.util.Collection;
 import java.util.LinkedHashSet;
@@ -19,6 +21,7 @@ public final class FakeMarketDataStreamAdapter implements MarketDataStreamPort {
     private final Set<String> subscriptions = new LinkedHashSet<>();
     private final List<QuoteListener> quoteListeners = new CopyOnWriteArrayList<>();
     private final List<OrderBookListener> orderBookListeners = new CopyOnWriteArrayList<>();
+    private final List<TradeListener> tradeListeners = new CopyOnWriteArrayList<>();
     private final List<ConnectionListener> connectionListeners = new CopyOnWriteArrayList<>();
     private ConnectionState state = ConnectionState.DISCONNECTED;
     private boolean closed;
@@ -86,6 +89,30 @@ public final class FakeMarketDataStreamAdapter implements MarketDataStreamPort {
         orderBookListeners.remove(listener);
     }
 
+    @Override
+    public boolean supportsTrades() {
+        return true;
+    }
+
+    @Override
+    public void addTradeListener(TradeListener listener) {
+        if (listener != null) tradeListeners.add(listener);
+    }
+
+    @Override
+    public void removeTradeListener(TradeListener listener) {
+        tradeListeners.remove(listener);
+    }
+
+    /** Emits a trade only when connected and subscribed to its symbol. */
+    public void emitTrade(Trade trade) {
+        if (trade == null) throw new IllegalArgumentException("Trade is required.");
+        synchronized (this) {
+            if (state != ConnectionState.CONNECTED || !subscriptions.contains(trade.symbol())) return;
+        }
+        tradeListeners.forEach(listener -> listener.onTrade(trade));
+    }
+
     /** Emits an order book only when connected and subscribed to its symbol. */
     public void emitOrderBook(OrderBook book) {
         if (book == null) throw new IllegalArgumentException("Order book is required.");
@@ -110,6 +137,7 @@ public final class FakeMarketDataStreamAdapter implements MarketDataStreamPort {
         closed = true;
         subscriptions.clear();
         orderBookListeners.clear();
+        tradeListeners.clear();
         changeState(ConnectionState.DISCONNECTED, null);
     }
 

@@ -53,7 +53,9 @@ import org.ossproject.desktop.viewmodel.ConnectionViewModel;
 import org.ossproject.desktop.viewmodel.WatchlistViewModel;
 import org.ossproject.desktop.orderbook.DepthChartCanvas;
 import org.ossproject.desktop.orderbook.OrderBookLadderView;
+import org.ossproject.desktop.trades.TradeTapeView;
 import org.ossproject.desktop.viewmodel.OrderBookViewModel;
+import org.ossproject.desktop.viewmodel.TradeTapeViewModel;
 import org.ossproject.desktop.viewmodel.StockDetailViewModel;
 import org.ossproject.desktop.viewmodel.StockSelection;
 import org.ossproject.desktop.viewmodel.ScannerViewModel;
@@ -115,6 +117,7 @@ public final class DesktopApplication extends Application {
     private final WatchlistViewModel watchlistViewModel;
     private final StockDetailViewModel stockDetailViewModel;
     private final OrderBookViewModel orderBookViewModel;
+    private final TradeTapeViewModel tradeTapeViewModel;
     /** 지금 보고 있는 호가창. 실시간이 멈췄는지 주기적으로 다시 표시하려고 들고 있는다. */
     private OrderBookLadderView orderBookLadder;
 
@@ -173,6 +176,7 @@ public final class DesktopApplication extends Application {
         this.stockDetailViewModel = new StockDetailViewModel(
                 session, marketApplication, Platform::runLater);
         this.orderBookViewModel = new OrderBookViewModel(marketApplication, Platform::runLater);
+        this.tradeTapeViewModel = new TradeTapeViewModel(marketApplication, Platform::runLater);
     }
 
     @Override public void start(Stage stage) {
@@ -854,6 +858,29 @@ public final class DesktopApplication extends Application {
                 + settlementLabel + Formatters.won(preview.settlementAmount());
     }
 
+    /**
+     * 실시간 체결 목록.
+     *
+     * <p>표에 초점이 있는 동안에는 갱신을 멈춘다. 활발한 종목은 초당 수십 건이 들어오는데,
+     * 읽는 중에 목록이 위로 밀리면 스크린리더로 읽던 자리를 잃는다.
+     */
+    private javafx.scene.Node createTradeTapePanel(String stockName) {
+        // 초점이 떠나 밀린 체결을 풀 때는 뷰모델이 갱신 통로로 다시 알려 준다.
+        TradeTapeView tape = new TradeTapeView(stockName, tradeTapeViewModel::setPaused);
+        if (!tradeTapeViewModel.supported()) {
+            tape.showUnavailable("실시간 체결을 제공하지 않는 연결입니다. " + marketDataSource);
+            return tape.root();
+        }
+        try {
+            tradeTapeViewModel.start(session.selectedStock().securityId(),
+                    tape::update, tape::showHeld);
+        } catch (RuntimeException failure) {
+            tape.showUnavailable("체결 구독을 시작하지 못했습니다. " + failure.getMessage());
+        }
+        refreshSubscriptionCount();
+        return tape.root();
+    }
+
     /** 음성이 나가는 동안 청각 차트 음량을 낮춘다. 차트를 못 연 상태면 할 일이 없다. */
     private void setChartSpeechActive(boolean active) {
         AccessibleChartController controller = accessibleChartController;
@@ -911,6 +938,7 @@ public final class DesktopApplication extends Application {
             if (old == Screen.STOCK_DETAIL && screen != Screen.STOCK_DETAIL) {
                 stockDetailViewModel.stopLiveChart();
                 orderBookViewModel.stop();
+                tradeTapeViewModel.stop();
                 orderBookLadder = null;
             }
             refreshSubscriptionCount();
@@ -1240,7 +1268,7 @@ public final class DesktopApplication extends Application {
         // 더해 호가를 만들어 보여 주고, 그 호가를 주문 가격으로 넣을 수도 있었다. 시장에
         // 없는 가격으로 주문이 나갈 수 있어 표시 자체를 없앤다.
         javafx.scene.Node orderBook = createOrderBookPanel(detail.name());
-        javafx.scene.Node trades = notConnectedPanel("체결", "ka10003 체결정보요청");
+        javafx.scene.Node trades = createTradeTapePanel(detail.name());
         javafx.scene.Node supply = notConnectedPanel("투자자 수급",
                 "ka10059 종목별투자자기관별, ka10008 외국인 종목별 매매동향");
         javafx.scene.Node info = notConnectedPanel("기업정보",
@@ -2275,6 +2303,7 @@ public final class DesktopApplication extends Application {
         saveLocalState();
         stockDetailViewModel.stopLiveChart();
         orderBookViewModel.stop();
+        tradeTapeViewModel.stop();
         if (connectionWatch != null) connectionWatch.close();
         if (subscriptionTicker != null) subscriptionTicker.stop();
         if (accessibleChartController != null) accessibleChartController.close();
