@@ -5,10 +5,13 @@ import org.ossproject.application.usecase.MarketApplicationService;
 import org.ossproject.fake.FakeCandleQueryAdapter;
 import org.ossproject.fake.FakeMarketDataStreamAdapter;
 import org.ossproject.fake.FakeStockQueryAdapter;
+import org.ossproject.finance.model.Candle;
 import org.ossproject.finance.model.PricePoint;
 import org.ossproject.finance.model.StockDetail;
 
 import java.util.List;
+import java.time.Clock;
+import java.time.ZoneOffset;
 import java.util.concurrent.CompletionException;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -79,6 +82,39 @@ class StockDetailViewModelTest {
             assertEquals(reported.get(index).high(), shown.get(index).high());
             assertEquals(reported.get(index).low(), shown.get(index).low());
         }
+    }
+
+    @Test void visualAndAccessibleChartsShareTheSameCandleSnapshot() {
+        StockDetailViewModel viewModel = viewModel(apple());
+
+        StockDetailViewModel.InitialData loaded = viewModel.loadInitial().toCompletableFuture().join();
+
+        List<Candle> reported = new FakeCandleQueryAdapter(Clock.fixed(
+                loaded.candles().get(loaded.candles().size() - 1).timestamp(), ZoneOffset.UTC))
+                .getCandles(
+                apple().securityId(), StockDetailViewModel.ChartRange.DAY.interval(),
+                StockDetailViewModel.ChartRange.DAY.count());
+        assertEquals(reported, loaded.candles());
+        assertEquals(loaded.candles(), viewModel.selectedCandles());
+        assertEquals(loaded.candles().size(), loaded.chartPoints().size());
+        for (int index = 0; index < loaded.candles().size(); index++) {
+            assertEquals(loaded.candles().get(index).close(), loaded.chartPoints().get(index).close());
+        }
+    }
+
+    @Test void selectedChartRangeKeepsItsExactCandlesForAccessiblePlayback() {
+        StockDetailViewModel viewModel = loadedViewModel(apple());
+
+        viewModel.loadHistory(StockDetailViewModel.ChartRange.MINUTE_5)
+                .toCompletableFuture().join();
+
+        assertEquals(StockDetailViewModel.ChartRange.MINUTE_5, viewModel.selectedChartRange());
+        List<Candle> selected = viewModel.selectedCandles();
+        assertEquals(new FakeCandleQueryAdapter(Clock.fixed(
+                        selected.get(selected.size() - 1).timestamp(), ZoneOffset.UTC)).getCandles(
+                        apple().securityId(), StockDetailViewModel.ChartRange.MINUTE_5.interval(),
+                        StockDetailViewModel.ChartRange.MINUTE_5.count()),
+                selected);
     }
 
     @Test void koreanStockFormatsInWon() {

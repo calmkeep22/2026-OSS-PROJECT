@@ -29,7 +29,6 @@ import org.ossproject.accessibility.port.SpeechPort;
 import org.ossproject.accessibility.port.SpeechVoiceProvider;
 import org.ossproject.application.port.CandleQueryPort;
 import org.ossproject.application.port.MarketApplicationPort;
-import org.ossproject.application.port.StockQueryPort;
 import org.ossproject.application.usecase.TradingUseCase;
 import org.ossproject.desktop.composition.DesktopServices;
 import org.ossproject.finance.model.*;
@@ -49,6 +48,7 @@ import org.ossproject.desktop.viewmodel.StockSearchViewModel;
 import org.ossproject.desktop.viewmodel.ConnectionViewModel;
 import org.ossproject.desktop.viewmodel.WatchlistViewModel;
 import org.ossproject.desktop.viewmodel.StockDetailViewModel;
+import org.ossproject.desktop.viewmodel.StockSelection;
 import org.ossproject.desktop.viewmodel.ScannerViewModel;
 import org.ossproject.desktop.view.screen.SearchScreenView;
 import org.ossproject.desktop.view.screen.ConnectionScreenView;
@@ -79,7 +79,6 @@ public final class DesktopApplication extends Application {
 
     private final TradingUseCase tradingUseCase;
     private final MarketApplicationPort marketApplication;
-    private final StockQueryPort stockAdapter;
     private final CandleQueryPort candleAdapter;
     /** 시세 공급원 설명. 상태 표시줄에 그대로 보여 준다. */
     private final String marketDataSource;
@@ -89,9 +88,6 @@ public final class DesktopApplication extends Application {
     private final SonificationPort sonificationPort;
     private final SecretStore secretStore;
     private AccessibleChartController accessibleChartController;
-    private AccessibleChartView accessibleChartView;
-    /** 청각 차트를 열지 못한 이유. 열려 있으면 {@code null}. */
-    private String chartUnavailableReason;
     private final Label status = new Label("준비됨");
     private final Label lastDataTime = new Label("마지막 시세 --:--:--");
     private final StackPane screenHost = new StackPane();
@@ -136,7 +132,6 @@ public final class DesktopApplication extends Application {
     DesktopApplication(DesktopServices services) {
         this.tradingUseCase = services.trading();
         this.marketApplication = services.market();
-        this.stockAdapter = services.stocks();
         this.candleAdapter = services.candles();
         this.marketDataSource = services.marketDataSource();
         this.speechPort = services.speech();
@@ -174,7 +169,6 @@ public final class DesktopApplication extends Application {
             status.setAccessibleText("앱 상태. " + message);
             status.notifyAccessibleAttributeChanged(AccessibleAttribute.TEXT);
         }));
-        rebuildAccessibleChart(session.selectedStock().symbol());
         configureScreens();
         speechQueue.addListener(new SpeechListener() {
             @Override public void onStarted(SpeechRequest request) {
@@ -574,45 +568,98 @@ public final class DesktopApplication extends Application {
 
     private void showScreen(Screen screen) {
         if (screen == Screen.WATCHLIST || screen == Screen.US_MARKET) watchlistViewModel.refresh();
-        if (screen == Screen.RADIO && (accessibleChartController == null
-                || !accessibleChartController.stock().symbol().equals(session.selectedStock().symbol()))) {
-            rebuildAccessibleChart(session.selectedStock().symbol());
-            screenController.invalidate(Screen.RADIO);
-        }
         if (screen == Screen.STOCK_DETAIL || screen == Screen.TRADING) screenController.invalidate(screen);
         screenController.show(screen);
     }
 
+    private javafx.scene.Node createAccessibleChartScreen() {
+        if (stockDetailViewModel.hasCurrentChartData()) {
+            try {
+                return rebuildAccessibleChart().root();
+            } catch (RuntimeException error) {
+                return accessibleChartError("청각 차트를 준비하지 못했습니다: " + error.getMessage());
+            }
+        }
+
+        StockSelection requested = session.selectedStock();
+        Label loading = new Label(requested.name() + " 청각 차트 데이터를 불러오는 중입니다.");
+        loading.setAccessibleText(loading.getText());
+        StackPane placeholder = new StackPane(loading);
+        placeholder.getStyleClass().add("screen-content");
+        placeholder.setPadding(new Insets(32));
+
+        stockDetailViewModel.loadInitial().whenComplete((data, failure) -> {
+            if (screenController.currentScreen().orElse(null) != Screen.RADIO) return;
+            if (failure != null) {
+                loading.setText("청각 차트 데이터를 불러오지 못했습니다. 연결 상태를 확인해주세요.");
+                loading.setAccessibleText(loading.getText());
+                status.setText(loading.getText());
+                play(SoundCue.ERROR);
+                return;
+            }
+            if (!requested.securityId().equals(session.selectedStock().securityId())) return;
+            try {
+                AccessibleChartView view = rebuildAccessibleChart();
+                placeholder.getChildren().setAll(view.root());
+                screenController.focusContent();
+                status.setText(data.detail().name() + " 청각 차트를 준비했습니다.");
+            } catch (RuntimeException error) {
+                loading.setText("청각 차트를 준비하지 못했습니다: " + error.getMessage());
+                loading.setAccessibleText(loading.getText());
+                status.setText(loading.getText());
+                play(SoundCue.ERROR);
+            }
+        });
+        return placeholder;
+    }
+
     /**
-     * 청각 차트를 다시 만든다.
+     * 청각 차트를 열지 못했을 때 대신 보여 줄 화면.
      *
-     * <p>시세를 받지 못해도 앱을 띄우지 못하게 하지는 않는다. 청각 차트를 못 여는 것과 앱을
-     * 아예 쓰지 못하는 것은 다른 문제이고, 나머지 접근성 기능은 시세 없이도 동작해야 한다.
-     * 실패는 감추지 않고 상태 표시줄로 알린다.
+     * <p>실패 사유를 텍스트로 남기고 다시 시도할 수단을 함께 준다. 화면을 볼 수 없는
+     * 사용자는 실패했다는 사실만으로는 다음에 무엇을 할 수 있는지 알 수 없다.
      */
-    private void rebuildAccessibleChart(String symbol) {
+    private javafx.scene.Node accessibleChartError(String message) {
+        Label description = new Label(message);
+        description.setWrapText(true);
+        description.setAccessibleText(message);
+        Button retry = new Button("다시 시도");
+        retry.setAccessibleText("다시 시도. 청각 차트를 다시 준비합니다.");
+        retry.setOnAction(event -> retryAccessibleChart());
+        VBox error = new VBox(18, description, retry);
+        error.getStyleClass().add("screen-content");
+        error.setPadding(new Insets(32));
+        error.setAccessibleText(message);
+        status.setText(message);
+        play(SoundCue.ERROR);
+        return error;
+    }
+
+    /** 실패한 청각 차트 화면을 버리고 처음부터 다시 만든다. */
+    private void retryAccessibleChart() {
+        status.setText("청각 차트를 다시 준비하고 있습니다.");
+        screenController.invalidate(Screen.RADIO);
+        screenController.show(Screen.RADIO);
+    }
+
+    private AccessibleChartView rebuildAccessibleChart() {
         if (accessibleChartController != null) {
             sonificationPreferences = accessibleChartController.preferences();
             accessibleChartController.close();
         }
-        accessibleChartController = null;
-        accessibleChartView = null;
-        try {
-            AccessibleChartController controller = new AccessibleChartController(
-                    symbol, stockAdapter, candleAdapter, sonificationPort, this::requestSpeech,
-                    status::setText);
-            controller.applyPreferences(sonificationPreferences);
-            controller.setPreferencesListener(preferences -> {
-                sonificationPreferences = preferences;
-                scheduleStateSave();
-            });
-            accessibleChartController = controller;
-            accessibleChartView = new AccessibleChartView(controller);
-            chartUnavailableReason = null;
-        } catch (RuntimeException failure) {
-            chartUnavailableReason = safeReason(failure);
-            status.setText("청각 차트를 준비하지 못했습니다. " + chartUnavailableReason);
-        }
+        StockDetailViewModel.ChartRange range = stockDetailViewModel.selectedChartRange();
+        List<Candle> candles = stockDetailViewModel.selectedCandles();
+        String seriesDescription = range.label() + "봉 " + candles.size() + "개 종가";
+        accessibleChartController = new AccessibleChartController(
+                session.selectedStock().securityId(), stockDetailViewModel.detail(), candles,
+                seriesDescription, marketApplication, sonificationPort,
+                this::requestSpeech, status::setText);
+        accessibleChartController.applyPreferences(sonificationPreferences);
+        accessibleChartController.setPreferencesListener(preferences -> {
+            sonificationPreferences = preferences;
+            scheduleStateSave();
+        });
+        return new AccessibleChartView(accessibleChartController);
     }
 
     /**
@@ -642,34 +689,6 @@ public final class DesktopApplication extends Application {
     private void setChartSpeechActive(boolean active) {
         AccessibleChartController controller = accessibleChartController;
         if (controller != null) controller.setSpeechActive(active);
-    }
-
-    /** 사용자에게 보여 줄 수 있는 짧은 실패 사유. */
-    private static String safeReason(RuntimeException failure) {
-        String message = failure.getMessage();
-        return message == null || message.isBlank()
-                ? "시세를 불러오지 못했습니다." : message;
-    }
-
-    /** 청각 차트를 열 수 없을 때 대신 보여 줄 화면. 실패 사실을 텍스트로 전달한다. */
-    private javafx.scene.Node createChartUnavailableScreen() {
-        Label title = heading("청각 차트");
-        Label reason = new Label(chartUnavailableReason == null
-                ? "시세를 불러오지 못해 청각 차트를 열 수 없습니다."
-                : "시세를 불러오지 못해 청각 차트를 열 수 없습니다. " + chartUnavailableReason);
-        reason.setWrapText(true);
-        reason.getStyleClass().add("safety-note");
-        Button retry = new Button("다시 시도");
-        retry.setOnAction(event -> {
-            status.setText("청각 차트를 다시 준비하고 있습니다.");
-            rebuildAccessibleChart(session.selectedStock().symbol());
-            screenController.invalidate(Screen.RADIO);
-            screenController.show(Screen.RADIO);
-        });
-        VBox body = new VBox(18, title, reason, retry);
-        body.setPadding(new Insets(24));
-        body.setAccessibleText("청각 차트를 열 수 없습니다. " + reason.getText());
-        return body;
     }
 
     private void navigateBack() {
@@ -714,6 +733,11 @@ public final class DesktopApplication extends Application {
         backButton.disableProperty().unbind();
         backButton.disableProperty().bind(screenController.canGoBackProperty().not());
         screenController.currentScreenProperty().addListener((obs, old, screen) -> {
+            if (old == Screen.RADIO && screen != Screen.RADIO
+                    && accessibleChartController != null) {
+                accessibleChartController.stopLive();
+                accessibleChartController.stop();
+            }
             if (screen == null) return;
             revealNavigationGroup(screen);
             String location = switch (screen) {
@@ -737,8 +761,7 @@ public final class DesktopApplication extends Application {
         screenController.register(Screen.ACCOUNT, this::createAccountScreen);
         screenController.register(Screen.US_MARKET, this::createUsMarketScreen);
         screenController.registerPreservingState(Screen.NOTIFICATIONS, this::createNotificationsScreen);
-        screenController.register(Screen.RADIO, () -> accessibleChartView == null
-                ? createChartUnavailableScreen() : accessibleChartView.root());
+        screenController.register(Screen.RADIO, this::createAccessibleChartScreen);
         screenController.registerPreservingState(Screen.SETTINGS, this::createSettingsScreen);
     }
 
