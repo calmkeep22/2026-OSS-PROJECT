@@ -109,3 +109,16 @@
 .high-contrast .button:focused, .high-contrast .text-field:focused, .high-contrast .combo-box:focused,
 .high-contrast .spinner:focused, .high-contrast .table-view:focused, .high-contrast .list-view:focused,
 .high-contrast .check-box:focused { -fx-border-color: #ffff00; }
+
+/* 호가창 잔량 막대. 길이 비율은 도메인이 정하고 여기서는 색과 배경만 맡는다. */
+.ladder-bar-track { -fx-background-color: #f0f2f5; -fx-border-color: #dfe3e8; -fx-border-width: 0 0 0 0; }
+.ladder-bar-ask { -fx-background-color: #d9534f; }
+.ladder-bar-bid { -fx-background-color: #1f6fb2; }
+/* 현재가 행은 색만으로 알리지 않는다. 가격 칸에 "현재가" 글자를 함께 넣는다. */
+.table-row-cell:current-price { -fx-background-color: #fff6d8; -fx-border-color: #e0a800 transparent #e0a800 transparent; -fx-border-width: 1 0 1 0; }
+.table-row-cell:current-price .label { -fx-font-weight: bold; }
+
+.high-contrast .ladder-bar-track { -fx-background-color: #000000; -fx-border-color: #ffffff; -fx-border-width: 1; }
+.high-contrast .ladder-bar-ask { -fx-background-color: #ff6666; }
+.high-contrast .ladder-bar-bid { -fx-background-color: #66b3ff; }
+.high-contrast .table-row-cell:current-price { -fx-background-color: #000000; -fx-border-color: #ffff00 transparent #ffff00 transparent; }

@@ -2,6 +2,14 @@ package org.ossproject.desktop.orderbook;
 
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
+import javafx.beans.property.SimpleObjectProperty;
+import javafx.geometry.Pos;
+import javafx.scene.control.TableCell;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
+import java.util.List;
 import javafx.geometry.Insets;
 import javafx.scene.control.Label;
 import javafx.scene.control.TableColumn;
@@ -38,13 +46,15 @@ public final class OrderBookLadderView {
 
     public OrderBookLadderView(String stockName) {
         Objects.requireNonNull(stockName, "stockName");
-        TableColumn<PriceLadderRow, String> askColumn =
-                UiKit.textColumn("매도 잔량", row -> size(row.askSize(), row.askDelta()));
+        TableColumn<PriceLadderRow, PriceLadderRow> askColumn = barColumn("매도 잔량", true);
         TableColumn<PriceLadderRow, String> priceColumn =
-                UiKit.textColumn("가격", row -> price(row.price()));
-        TableColumn<PriceLadderRow, String> bidColumn =
-                UiKit.textColumn("매수 잔량", row -> size(row.bidSize(), row.bidDelta()));
-        table = UiKit.typedTable(stockName + " 호가창 표", rows, askColumn, priceColumn, bidColumn);
+                UiKit.textColumn("가격", OrderBookLadderView::priceLabel);
+        priceColumn.setStyle("-fx-alignment: CENTER;");
+        TableColumn<PriceLadderRow, PriceLadderRow> bidColumn = barColumn("매수 잔량", false);
+        table = new TableView<>(rows);
+        table.setAccessibleText(stockName + " 호가창 표");
+        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        table.getColumns().setAll(List.of(askColumn, priceColumn, bidColumn));
         table.setAccessibleHelp("위아래 방향키로 가격대를 이동합니다. 각 행은 가격과 매도·매수 잔량입니다.");
         table.setPrefHeight(360);
         // 행마다 읽어 줄 문장을 도메인이 만들어 준다. 매도·매수를 색이 아니라 말로 구분한다.
@@ -65,6 +75,60 @@ public final class OrderBookLadderView {
 
         root = new VBox(10, summary, announcement, table);
         root.setPadding(new Insets(12));
+    }
+
+    /**
+     * 잔량을 막대와 숫자로 함께 보여 주는 칸.
+     *
+     * <p>막대 길이는 도메인이 정한 비율을 그대로 쓴다. 잔량이 있으면 최소 길이를 보장하는
+     * 규칙도 도메인에 있어서, 편차가 큰 값이 실 한 가닥으로 그려져 "없는 것" 과 헷갈리는
+     * 일이 없다.
+     *
+     * <p>매도는 가운데(가격)를 향해 왼쪽으로, 매수는 오른쪽으로 자란다. 실제 호가창의
+     * 읽는 방향과 같다.
+     */
+    private TableColumn<PriceLadderRow, PriceLadderRow> barColumn(String title, boolean ask) {
+        TableColumn<PriceLadderRow, PriceLadderRow> column = new TableColumn<>(title);
+        column.setCellValueFactory(data -> new SimpleObjectProperty<>(data.getValue()));
+        column.setSortable(false);
+        column.setCellFactory(ignored -> new TableCell<>() {
+            private final Region track = new Region();
+            private final Region fill = new Region();
+            private final StackPane bar = new StackPane(track, fill);
+            private final Label amount = new Label();
+            private final HBox box = new HBox(8);
+
+            {
+                track.getStyleClass().add("ladder-bar-track");
+                fill.getStyleClass().add(ask ? "ladder-bar-ask" : "ladder-bar-bid");
+                StackPane.setAlignment(fill, ask ? Pos.CENTER_RIGHT : Pos.CENTER_LEFT);
+                bar.setMinHeight(16);
+                bar.setPrefHeight(16);
+                HBox.setHgrow(bar, Priority.ALWAYS);
+                amount.setMinWidth(64);
+                amount.setAlignment(ask ? Pos.CENTER_RIGHT : Pos.CENTER_LEFT);
+                box.setAlignment(Pos.CENTER);
+                box.getChildren().setAll(ask ? List.of(bar, amount) : List.of(amount, bar));
+            }
+
+            @Override
+            protected void updateItem(PriceLadderRow row, boolean empty) {
+                super.updateItem(row, empty);
+                long size = row == null ? 0L : (ask ? row.askSize() : row.bidSize());
+                if (empty || row == null || size <= 0L) {
+                    setGraphic(null);
+                    setText(null);
+                    return;
+                }
+                double ratio = ask ? row.askBarRatio() : row.bidBarRatio();
+                fill.prefWidthProperty().bind(bar.widthProperty().multiply(ratio));
+                fill.maxWidthProperty().bind(fill.prefWidthProperty());
+                amount.setText(sizeLabel(size, ask ? row.askDelta() : row.bidDelta()));
+                setGraphic(box);
+                setText(null);
+            }
+        });
+        return column;
     }
 
     private static final javafx.css.PseudoClass CURRENT =
@@ -105,6 +169,7 @@ public final class OrderBookLadderView {
                 + "표시 범위 " + view.highestPrice().map(OrderBookLadderView::price).orElse("-")
                 + " 부터 " + view.lowestPrice().map(OrderBookLadderView::price).orElse("-")
                 + " 까지, " + view.rows().size() + "단계."
+                + " 막대는 최대 잔량 " + NUMBERS.format(view.maxSize()) + "주 기준."
                 + (live ? "" : " 실시간 갱신은 오지 않습니다.");
         summary.setText(text);
         summary.setAccessibleText(text);
@@ -135,7 +200,7 @@ public final class OrderBookLadderView {
     }
 
     /** 잔량이 없으면 빈 칸으로 둔다. 0 을 늘어놓으면 표를 읽어 내려갈 때 소음이 된다. */
-    private static String size(long value, long delta) {
+    private static String sizeLabel(long value, long delta) {
         if (value <= 0L) {
             return "";
         }
@@ -147,6 +212,10 @@ public final class OrderBookLadderView {
             return text + " (" + NUMBERS.format(delta) + ")";
         }
         return text;
+    }
+
+    private static String priceLabel(PriceLadderRow row) {
+        return price(row.price()) + (row.currentPriceRow() ? "  현재가" : "");
     }
 
     private static String price(BigDecimal value) {
