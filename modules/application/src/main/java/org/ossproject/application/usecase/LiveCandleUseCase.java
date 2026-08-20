@@ -29,7 +29,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * <p>리스너는 실시간 스트림 스레드에서 호출된다. 화면 계층은 반드시 자기 스레드로
  * 넘겨서 처리해야 한다.
  */
-public final class LiveCandleUseCase implements QuoteListener {
+public final class LiveCandleUseCase implements QuoteListener, AutoCloseable {
 
     private final CandleQueryPort candles;
     private final MarketDataStreamPort stream;
@@ -70,11 +70,22 @@ public final class LiveCandleUseCase implements QuoteListener {
     public List<Candle> start(String symbol, int count) {
         requireSymbol(symbol);
         List<Candle> history = candles.getCandles(symbol, aggregator.interval(), count);
-        if (!history.isEmpty()) {
+        startFrom(symbol, history);
+        return history;
+    }
+
+    /**
+     * 이미 받아 둔 과거 봉으로 시작한다.
+     *
+     * <p>화면이 차트를 그리려고 이미 조회한 봉이 있으면 같은 조회를 두 번 하지 않는다.
+     * 모의투자 서버는 TR 당 유량이 1 이라 중복 조회가 곧 지연으로 이어진다.
+     */
+    public void startFrom(String symbol, List<Candle> history) {
+        requireSymbol(symbol);
+        if (history != null && !history.isEmpty()) {
             aggregator.prime(symbol, history.get(history.size() - 1), clock.instant());
         }
         stream.subscribe(List.of(symbol));
-        return history;
     }
 
     /** 구독을 멈추고 쌓아 둔 상태를 비운다. */
@@ -126,6 +137,18 @@ public final class LiveCandleUseCase implements QuoteListener {
                 // 위와 같다.
             }
         }
+    }
+
+    /**
+     * 스트림에서 자기 자신을 떼어 낸다.
+     *
+     * <p>생성자에서 스트림에 등록하므로, 쓰고 버리면 리스너가 그대로 남는다. 화면을 오갈
+     * 때마다 새로 만들면 죽은 리스너가 계속 쌓여 체결 한 건에 수십 번 집계가 돈다.
+     */
+    @Override
+    public void close() {
+        stream.removeQuoteListener(this);
+        listeners.clear();
     }
 
     private static void requireSymbol(String symbol) {

@@ -11,6 +11,7 @@ import org.ossproject.application.policy.OrderLimitPolicy;
 import org.ossproject.application.port.AccountPort;
 import org.ossproject.application.port.CandleQueryPort;
 import org.ossproject.application.port.MarketApplicationPort;
+import org.ossproject.application.port.MarketDataStreamPort;
 import org.ossproject.application.port.OrderLifecyclePort;
 import org.ossproject.application.port.StockQueryPort;
 import org.ossproject.application.usecase.MarketApplicationService;
@@ -23,7 +24,6 @@ import org.ossproject.desktop.persistence.PropertiesSonificationPreferencesRepos
 import org.ossproject.desktop.persistence.SonificationPreferencesRepository;
 import org.ossproject.fake.FakeStockQueryAdapter;
 import org.ossproject.fake.FakeCandleQueryAdapter;
-import org.ossproject.fake.FakeMarketDataStreamAdapter;
 import org.ossproject.kiwoom.KiwoomMarketAdapters;
 import org.ossproject.sonification.javasound.PcmGraphSonificationAdapter;
 import org.ossproject.sonification.port.SonificationPort;
@@ -62,8 +62,7 @@ public record DesktopServices(
         SecretStore secrets = createSecretStore(stateDirectory.resolve("secrets"));
         MarketDataSource source = createMarketDataSource();
         MarketApplicationPort market = new MarketApplicationService(
-                source.stocks(), source.candles(),
-                new FakeMarketDataStreamAdapter(), ForkJoinPool.commonPool());
+                source.stocks(), source.candles(), source.stream(), ForkJoinPool.commonPool());
 
         return new DesktopServices(
                 new TradingUseCase(source.orders(), source.account(),
@@ -84,12 +83,18 @@ public record DesktopServices(
                 source.description());
     }
 
-    /** 시세·계좌·주문 공급원과 사용자에게 보여 줄 설명. */
+    /**
+     * 시세·계좌·주문 공급원과 사용자에게 보여 줄 설명.
+     *
+     * <p>실시간 스트림도 여기 함께 담는다. 조회는 증권사에서 받고 실시간은 가짜를 쓰면,
+     * 화면에 시세가 멈춰 있어도 연결이 끊긴 것인지 장이 조용한 것인지 알 수 없다.
+     */
     private record MarketDataSource(
             StockQueryPort stocks,
             CandleQueryPort candles,
             AccountPort account,
             OrderLifecyclePort orders,
+            MarketDataStreamPort stream,
             String description) {
     }
 
@@ -116,7 +121,7 @@ public record DesktopServices(
         try {
             KiwoomMarketAdapters kiwoom = KiwoomMarketAdapters.mockTrading(appKey, appSecret);
             return new MarketDataSource(kiwoom.stocks(), kiwoom.candles(),
-                    kiwoom.account(), kiwoom.orders(), "키움 모의투자");
+                    kiwoom.account(), kiwoom.orders(), kiwoom.stream(), "키움 모의투자");
         } catch (RuntimeException failure) {
             LOGGER.log(System.Logger.Level.WARNING, "키움 연결을 준비하지 못했습니다.", failure);
             return unavailable("키움 연결을 준비하지 못했습니다. 자격증명과 네트워크를 확인해주세요.");
@@ -125,7 +130,7 @@ public record DesktopServices(
 
     private static MarketDataSource unavailable(String reason) {
         UnavailableMarketData none = new UnavailableMarketData(reason);
-        return new MarketDataSource(none, none, none, none, "미연결 · " + reason);
+        return new MarketDataSource(none, none, none, none, none, "미연결 · " + reason);
     }
 
     private static SpeechOptions defaultSpeechOptions() {
