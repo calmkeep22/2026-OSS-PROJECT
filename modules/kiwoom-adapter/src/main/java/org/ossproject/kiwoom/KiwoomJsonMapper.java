@@ -6,6 +6,8 @@ import org.ossproject.broker.BrokerException;
 import org.ossproject.broker.SensitiveDataMasker;
 import org.ossproject.finance.model.Account;
 import org.ossproject.finance.model.Balance;
+import org.ossproject.finance.model.Deposits;
+import org.ossproject.finance.model.ReportedValuation;
 import org.ossproject.finance.model.Candle;
 import org.ossproject.finance.model.CandleInterval;
 import org.ossproject.finance.model.Execution;
@@ -261,7 +263,7 @@ public final class KiwoomJsonMapper {
      * @param balance kt00018 응답
      */
     public Account toAccount(String accountNo, JsonNode deposit, JsonNode balance) {
-        BigDecimal cash = optionalDecimal(deposit, "entr").orElse(BigDecimal.ZERO);
+        Deposits deposits = toDeposits(deposit);
         List<Position> positions = new ArrayList<>();
         JsonNode holdings = balance == null ? null : balance.get("acnt_evlt_remn_indv_tot");
         if (holdings != null && holdings.isArray()) {
@@ -280,10 +282,49 @@ public final class KiwoomJsonMapper {
                         quantity,
                         0L,
                         averagePrice,
-                        currentPrice));
+                        currentPrice,
+                        // 수수료·세금이 반영된 값이라 직접 계산한 것보다 정확하다.
+                        new ReportedValuation(
+                                optionalDecimal(node, "pur_amt").orElse(null),
+                                optionalDecimal(node, "evlt_amt").orElse(null),
+                                optionalDecimal(node, "evltv_prft").orElse(null),
+                                optionalDecimal(node, "prft_rt").orElse(null))));
             }
         }
-        return new Account(accountNo, Balance.of(cash.max(BigDecimal.ZERO)), positions);
+        ReportedValuation totals = new ReportedValuation(
+                optionalDecimal(balance, "tot_pur_amt").orElse(null),
+                optionalDecimal(balance, "tot_evlt_amt").orElse(null),
+                optionalDecimal(balance, "tot_evlt_pl").orElse(null),
+                optionalDecimal(balance, "tot_prft_rt").orElse(null));
+        return new Account(accountNo, Balance.of(deposits.cash()), positions, deposits, totals,
+                optionalDecimal(balance, "prsm_dpst_aset_amt").orElse(null));
+    }
+
+    /**
+     * 예수금 단계를 읽는다.
+     *
+     * <p>{@code entr}(예수금) 하나만 보면 안 된다. 국내 주식 대금은 D+2 에 결제되므로 매수
+     * 당일에는 {@code entr} 이 줄지 않는다. 반면 산 종목은 잔고에 즉시 잡히기 때문에,
+     * 총자산을 {@code entr} 로 계산하면 매수 금액이 현금과 주식 양쪽에 한 번씩 세어진다.
+     *
+     * <p>D+2 추정예수금은 <b>음수일 수 있다.</b> 증거금 매수로 미수가 나면 그렇다. 0 으로
+     * 뭉개면 반대매매 위험을 감추게 되므로 부호를 그대로 둔다.
+     *
+     * <p>필드 이름은 모의투자 서버 응답으로 확인했다. 출금가능금액은 {@code wthd_alowa} 가
+     * 아니라 {@code pymn_alow_amt}(지급가능금액) 다.
+     *
+     * <p>없는 필드는 순서대로 물러선다. 필드가 하나 빠졌다고 잔고를 0 원으로 보여 주는 것이
+     * 더 나쁘다. 화면을 볼 수 없는 사용자에게 0 원은 계좌가 빈 것으로 읽힌다.
+     */
+    private Deposits toDeposits(JsonNode deposit) {
+        BigDecimal cash = optionalDecimal(deposit, "entr")
+                .orElse(BigDecimal.ZERO).max(BigDecimal.ZERO);
+        BigDecimal settled = optionalDecimal(deposit, "d2_entra").orElse(cash);
+        BigDecimal orderable = optionalDecimal(deposit, "ord_alow_amt")
+                .orElse(settled).max(BigDecimal.ZERO);
+        BigDecimal withdrawable = optionalDecimal(deposit, "pymn_alow_amt")
+                .orElse(orderable).max(BigDecimal.ZERO);
+        return new Deposits(cash, settled, orderable, withdrawable);
     }
 
     /** 계좌 응답의 {@code A005930} 형태에서 접두어를 떼어 낸다. */
