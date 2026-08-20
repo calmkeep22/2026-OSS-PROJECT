@@ -375,11 +375,67 @@ class KiwoomRestClientTest {
 
         Account account = client.fetchAccount("12345678901");
 
-        assertEquals(0, new BigDecimal("9780000").compareTo(account.balance().cash()),
-                "entr 이 아니라 d2_entra 를 써야 합니다");
+        assertEquals(0, new BigDecimal("10000000").compareTo(account.deposits().cash()),
+                "예수금(D+0) 은 entr 그대로여야 합니다");
+        assertEquals(0, new BigDecimal("9780000").compareTo(account.deposits().settledCash()),
+                "D+2 추정예수금은 d2_entra 를 써야 합니다");
         assertEquals(0, new BigDecimal("220000").compareTo(account.totalMarketValue()));
         assertEquals(0, new BigDecimal("10000000").compareTo(account.totalAssets()),
                 "매수 금액이 현금과 주식에 두 번 세어지면 안 됩니다");
+        assertFalse(account.totalAssetsReportedByBroker(),
+                "증권사 총액이 없는 응답이면 직접 더한 값입니다");
+    }
+
+    @Test
+    @DisplayName("증권사가 추정예탁자산을 주면 직접 더하지 않고 그 값을 쓴다")
+    void prefersTheBrokerReportedTotalOverOurOwnSum() {
+        // 미수·신용·미수령 배당처럼 우리가 세지 않는 항목이 있어 직접 더하면 어긋난다.
+        transport.enqueueJson(TOKEN_BODY);
+        transport.enqueueJson("{\"entr\":\"000000010000000\","
+                + "\"d2_entra\":\"000000009780000\",\"return_code\":0}");
+        transport.enqueueJson("""
+                {"prsm_dpst_aset_amt":"000000010500000",
+                 "acnt_evlt_remn_indv_tot":[
+                  {"stk_cd":"A005930","stk_nm":"삼성전자","rmnd_qty":"000000000000020",
+                   "pur_pric":"000000000011000","cur_prc":"000000011000"}],
+                 "return_code":0}""");
+
+        Account account = client.fetchAccount("12345678901");
+
+        assertTrue(account.totalAssetsReportedByBroker());
+        assertEquals(0, new BigDecimal("10500000").compareTo(account.totalAssets()),
+                "증권사가 준 추정예탁자산을 그대로 써야 합니다");
+    }
+
+    @Test
+    @DisplayName("미수가 나면 D+2 예수금 음수를 0 으로 감추지 않는다")
+    void keepsANegativeSettledCashSoAShortfallStaysVisible() {
+        transport.enqueueJson(TOKEN_BODY);
+        transport.enqueueJson("{\"entr\":\"000000001000000\","
+                + "\"d2_entra\":\"-000000000500000\",\"return_code\":0}");
+        transport.enqueueJson("{\"acnt_evlt_remn_indv_tot\":[],\"return_code\":0}");
+
+        Account account = client.fetchAccount("12345678901");
+
+        assertTrue(account.deposits().hasShortfall(), "미수를 감추면 반대매매 위험을 못 알립니다");
+        assertEquals(0, new BigDecimal("500000").compareTo(account.deposits().shortfall()));
+        assertEquals(0, new BigDecimal("-500000").compareTo(account.totalAssets()));
+    }
+
+    @Test
+    @DisplayName("주문가능금액과 출금가능금액을 따로 읽는다")
+    void readsOrderableAndWithdrawableSeparately() {
+        transport.enqueueJson(TOKEN_BODY);
+        transport.enqueueJson("{\"entr\":\"000000010000000\","
+                + "\"d2_entra\":\"000000009780000\","
+                + "\"ord_alow_amt\":\"000000009000000\","
+                + "\"wthd_alowa\":\"000000008000000\",\"return_code\":0}");
+        transport.enqueueJson("{\"acnt_evlt_remn_indv_tot\":[],\"return_code\":0}");
+
+        Account account = client.fetchAccount("12345678901");
+
+        assertEquals(0, new BigDecimal("9000000").compareTo(account.deposits().orderable()));
+        assertEquals(0, new BigDecimal("8000000").compareTo(account.deposits().withdrawable()));
     }
 
     @Test
@@ -391,8 +447,10 @@ class KiwoomRestClientTest {
 
         Account account = client.fetchAccount("12345678901");
 
-        assertEquals(0, new BigDecimal("10000000").compareTo(account.balance().cash()),
+        assertEquals(0, new BigDecimal("10000000").compareTo(account.deposits().settledCash()),
                 "필드가 없다고 0 원으로 보여 주면 계좌가 빈 것으로 읽힙니다");
+        assertEquals(0, new BigDecimal("10000000").compareTo(account.deposits().orderable()),
+                "주문가능금액도 함께 물러서야 합니다");
     }
 
     // ------------------------------------------------------------------

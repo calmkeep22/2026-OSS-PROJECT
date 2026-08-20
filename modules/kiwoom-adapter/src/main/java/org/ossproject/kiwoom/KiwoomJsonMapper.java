@@ -6,6 +6,7 @@ import org.ossproject.broker.BrokerException;
 import org.ossproject.broker.SensitiveDataMasker;
 import org.ossproject.finance.model.Account;
 import org.ossproject.finance.model.Balance;
+import org.ossproject.finance.model.Deposits;
 import org.ossproject.finance.model.Candle;
 import org.ossproject.finance.model.CandleInterval;
 import org.ossproject.finance.model.Execution;
@@ -261,7 +262,7 @@ public final class KiwoomJsonMapper {
      * @param balance kt00018 응답
      */
     public Account toAccount(String accountNo, JsonNode deposit, JsonNode balance) {
-        BigDecimal cash = depositCash(deposit);
+        Deposits deposits = toDeposits(deposit);
         List<Position> positions = new ArrayList<>();
         JsonNode holdings = balance == null ? null : balance.get("acnt_evlt_remn_indv_tot");
         if (holdings != null && holdings.isArray()) {
@@ -283,27 +284,34 @@ public final class KiwoomJsonMapper {
                         currentPrice));
             }
         }
-        return new Account(accountNo, Balance.of(cash), positions);
+        return new Account(accountNo, Balance.of(deposits.cash()), positions,
+                deposits, optionalDecimal(balance, "prsm_dpst_aset_amt").orElse(null));
     }
 
     /**
-     * 총자산 계산에 쓸 예수금.
+     * 예수금 단계를 읽는다.
      *
-     * <p>{@code entr}(예수금) 이 아니라 {@code d2_entra}(D+2 추정예수금) 를 먼저 본다.
-     * 국내 주식 대금은 D+2 에 결제되므로 매수 당일에는 {@code entr} 이 줄지 않는다.
-     * 반면 산 종목은 잔고에 즉시 잡히기 때문에, {@code entr} 을 그대로 쓰면 매수 금액이
-     * 현금과 주식 양쪽에 한 번씩 세어져 총자산이 매수액만큼 부풀어 오른다.
-     * 매도는 반대로 총자산이 줄어 보인다.
+     * <p>{@code entr}(예수금) 하나만 보면 안 된다. 국내 주식 대금은 D+2 에 결제되므로 매수
+     * 당일에는 {@code entr} 이 줄지 않는다. 반면 산 종목은 잔고에 즉시 잡히기 때문에,
+     * 총자산을 {@code entr} 로 계산하면 매수 금액이 현금과 주식 양쪽에 한 번씩 세어진다.
      *
-     * <p>{@code d2_entra} 가 없는 응답이면 {@code entr} 로 물러선다. 필드가 하나 빠졌다고
-     * 잔고를 0 으로 보여 주는 것이, 결제일 차이로 조금 어긋난 값을 보여 주는 것보다 나쁘다.
-     * 화면을 볼 수 없는 사용자에게 0 원은 계좌가 빈 것으로 읽힌다.
+     * <p>D+2 추정예수금은 <b>음수일 수 있다.</b> 증거금 매수로 미수가 나면 그렇다. 0 으로
+     * 뭉개면 반대매매 위험을 감추게 되므로 부호를 그대로 둔다.
+     *
+     * <p><b>확인 필요:</b> {@code d2_entra}, {@code ord_alow_amt}, {@code wthd_alowa} 는
+     * 아직 실제 응답으로 확인하지 못한 이름이다. 없으면 예수금으로 물러선다. 필드가 하나
+     * 빠졌다고 잔고를 0 원으로 보여 주는 것이 더 나쁘다. 화면을 볼 수 없는 사용자에게
+     * 0 원은 계좌가 빈 것으로 읽힌다.
      */
-    private BigDecimal depositCash(JsonNode deposit) {
-        return optionalDecimal(deposit, "d2_entra")
-                .or(() -> optionalDecimal(deposit, "entr"))
-                .orElse(BigDecimal.ZERO)
-                .max(BigDecimal.ZERO);
+    private Deposits toDeposits(JsonNode deposit) {
+        BigDecimal cash = optionalDecimal(deposit, "entr")
+                .orElse(BigDecimal.ZERO).max(BigDecimal.ZERO);
+        BigDecimal settled = optionalDecimal(deposit, "d2_entra").orElse(cash);
+        BigDecimal orderable = optionalDecimal(deposit, "ord_alow_amt")
+                .orElse(settled).max(BigDecimal.ZERO);
+        BigDecimal withdrawable = optionalDecimal(deposit, "wthd_alowa")
+                .orElse(orderable).max(BigDecimal.ZERO);
+        return new Deposits(cash, settled, orderable, withdrawable);
     }
 
     /** 계좌 응답의 {@code A005930} 형태에서 접두어를 떼어 낸다. */
