@@ -661,7 +661,7 @@ public final class DesktopApplication extends Application {
      * 사용자가 증권사 화면과 대조할 때 어느 숫자를 믿어야 할지 알 수 없다.
      */
     private static String assetsSource(Account account) {
-        return account.totalAssetsReportedByBroker() ? "증권사 추정예탁자산" : "앱에서 합산한 값";
+        return account.valuationReportedByBroker() ? "증권사 제공 값" : "앱에서 합산한 값";
     }
 
     /** 음성이 나가는 동안 청각 차트 음량을 낮춘다. 차트를 못 연 상태면 할 일이 없다. */
@@ -789,7 +789,8 @@ public final class DesktopApplication extends Application {
                 summaryCard("총 자산", Formatters.won(snapshot.totalAssets()),
                         assetsSource(snapshot), "neutral"),
                 summaryCard("평가손익", signedWon(snapshot.totalProfitLoss()),
-                        "평가금액 " + Formatters.won(snapshot.totalMarketValue()),
+                        "평가금액 " + Formatters.won(snapshot.totalMarketValue())
+                                + " · " + assetsSource(snapshot),
                         snapshot.totalProfitLoss().signum() >= 0 ? "positive" : "negative"),
                 summaryCard("주문 가능 금액", Formatters.won(snapshot.balance().available()),
                         "예수금 " + Formatters.won(snapshot.balance().cash()), "neutral"));
@@ -844,10 +845,11 @@ public final class DesktopApplication extends Application {
                 summaryCard("총 평가자산", Formatters.won(snapshot.totalAssets()),
                         assetsSource(snapshot), "neutral"),
                 summaryCard("평가손익", signedWon(snapshot.totalProfitLoss()),
-                        "평가금액 " + Formatters.won(snapshot.totalMarketValue()),
+                        "평가금액 " + Formatters.won(snapshot.totalMarketValue())
+                                + " · " + assetsSource(snapshot),
                         snapshot.totalProfitLoss().signum() >= 0 ? "positive" : "negative"),
-                summaryCard("예수금", Formatters.won(snapshot.balance().cash()),
-                        "주문 가능 " + Formatters.won(snapshot.balance().available()), "neutral"));
+                summaryCard("예수금", Formatters.won(snapshot.deposits().cash()),
+                        "주문 가능 " + Formatters.won(snapshot.deposits().orderable()), "neutral"));
 
         TableView<ObservableList<String>> holdings = textTable("보유종목 표",
                 snapshot.positions().stream().map(position -> row(

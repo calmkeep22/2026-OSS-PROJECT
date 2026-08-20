@@ -7,6 +7,7 @@ import org.ossproject.broker.SensitiveDataMasker;
 import org.ossproject.finance.model.Account;
 import org.ossproject.finance.model.Balance;
 import org.ossproject.finance.model.Deposits;
+import org.ossproject.finance.model.ReportedValuation;
 import org.ossproject.finance.model.Candle;
 import org.ossproject.finance.model.CandleInterval;
 import org.ossproject.finance.model.Execution;
@@ -281,11 +282,22 @@ public final class KiwoomJsonMapper {
                         quantity,
                         0L,
                         averagePrice,
-                        currentPrice));
+                        currentPrice,
+                        // 수수료·세금이 반영된 값이라 직접 계산한 것보다 정확하다.
+                        new ReportedValuation(
+                                optionalDecimal(node, "pur_amt").orElse(null),
+                                optionalDecimal(node, "evlt_amt").orElse(null),
+                                optionalDecimal(node, "evltv_prft").orElse(null),
+                                optionalDecimal(node, "prft_rt").orElse(null))));
             }
         }
-        return new Account(accountNo, Balance.of(deposits.cash()), positions,
-                deposits, optionalDecimal(balance, "prsm_dpst_aset_amt").orElse(null));
+        ReportedValuation totals = new ReportedValuation(
+                optionalDecimal(balance, "tot_pur_amt").orElse(null),
+                optionalDecimal(balance, "tot_evlt_amt").orElse(null),
+                optionalDecimal(balance, "tot_evlt_pl").orElse(null),
+                optionalDecimal(balance, "tot_prft_rt").orElse(null));
+        return new Account(accountNo, Balance.of(deposits.cash()), positions, deposits, totals,
+                optionalDecimal(balance, "prsm_dpst_aset_amt").orElse(null));
     }
 
     /**

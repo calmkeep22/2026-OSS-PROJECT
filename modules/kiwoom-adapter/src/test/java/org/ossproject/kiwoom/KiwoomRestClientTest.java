@@ -14,6 +14,7 @@ import org.ossproject.broker.resilience.ResilientExecutor;
 import org.ossproject.broker.resilience.RetryPolicy;
 import org.ossproject.broker.resilience.Sleeper;
 import org.ossproject.finance.model.Account;
+import org.ossproject.finance.model.Position;
 import org.ossproject.finance.model.Candle;
 import org.ossproject.finance.model.CandleInterval;
 import org.ossproject.finance.model.Order;
@@ -451,6 +452,33 @@ class KiwoomRestClientTest {
                 "필드가 없다고 0 원으로 보여 주면 계좌가 빈 것으로 읽힙니다");
         assertEquals(0, new BigDecimal("10000000").compareTo(account.deposits().orderable()),
                 "주문가능금액도 함께 물러서야 합니다");
+    }
+
+    @Test
+    @DisplayName("종목 손익도 직접 빼지 않고 증권사가 준 값을 쓴다")
+    void usesTheBrokerProfitLossWhichAlreadyCountsFees() {
+        // 220,500 에 산 한 주가 220,000 이면 단순히 빼면 -500 이다.
+        // 증권사 값은 매매수수료까지 반영해 -2,480 을 준다.
+        transport.enqueueJson(TOKEN_BODY);
+        transport.enqueueJson("{\"entr\":\"000000010000000\","
+                + "\"d2_entra\":\"000000009777520\",\"return_code\":0}");
+        transport.enqueueJson("""
+                {"prsm_dpst_aset_amt":"000000009997520","tot_evlt_pl":"-000000002480",
+                 "acnt_evlt_remn_indv_tot":[
+                  {"stk_cd":"A035420","stk_nm":"NAVER","rmnd_qty":"000000000000001",
+                   "pur_pric":"000000000220500","cur_prc":"000000220000",
+                   "evlt_amt":"000000000220000","evltv_prft":"-000000002480",
+                   "prft_rt":"-1.12"}],
+                 "return_code":0}""");
+
+        Account account = client.fetchAccount("12345678901");
+        Position naver = account.positions().get(0);
+
+        assertTrue(naver.valuationReportedByBroker());
+        assertEquals(0, new BigDecimal("-2480").compareTo(naver.profitLoss()),
+                "수수료를 세지 않은 -500 이 아니라 증권사 값이어야 합니다");
+        assertEquals(0, new BigDecimal("-2480").compareTo(account.totalProfitLoss()));
+        assertEquals(0, new BigDecimal("9997520").compareTo(account.totalAssets()));
     }
 
     // ------------------------------------------------------------------
