@@ -106,21 +106,52 @@ class KiwoomMarketDataStreamTest extends MarketDataStreamPortContract {
         }
     }
 
+    /** 예약만 받아 두고, 테스트가 부를 때 실행한다. 시한이 지난 상황을 흉내 낸다. */
+    private static final class ManualScheduler implements ReconnectScheduler {
+        private final List<Runnable> pending = new ArrayList<>();
+        private boolean shutdown;
+
+        @Override
+        public void schedule(Duration delay, Runnable task) {
+            if (!shutdown) {
+                pending.add(task);
+            }
+        }
+
+        @Override
+        public void shutdown() {
+            shutdown = true;
+            pending.clear();
+        }
+
+        /** 예약된 작업을 모두 실행한다. */
+        void fire() {
+            List<Runnable> due = new ArrayList<>(pending);
+            pending.clear();
+            due.forEach(Runnable::run);
+        }
+    }
+
     private FakeConnector connector;
     private ImmediateScheduler scheduler;
+    private ManualScheduler watchdog;
     private KiwoomMarketDataStream stream;
     private List<Quote> quotes;
     private List<OrderBook> books;
     private List<ConnectionState> states;
+    private java.util.function.Supplier<String> tokenSupplier;
 
     @BeforeEach
     void setUp() {
         connector = new FakeConnector();
         scheduler = new ImmediateScheduler();
+        watchdog = new ManualScheduler();
+        tokenSupplier = () -> "test-token";
         stream = new KiwoomMarketDataStream(WS_URI, connector,
-                new KiwoomWebSocketProtocol(new ObjectMapper(), CLOCK), scheduler,
+                new KiwoomWebSocketProtocol(new ObjectMapper(), CLOCK), scheduler, watchdog,
+                Duration.ofSeconds(10),
                 new RetryPolicy(5, Duration.ofMillis(100), Duration.ofSeconds(2), 2.0, 0.0),
-                () -> "test-token");
+                () -> tokenSupplier.get());
 
         quotes = new ArrayList<>();
         books = new ArrayList<>();
@@ -391,5 +422,73 @@ class KiwoomMarketDataStreamTest extends MarketDataStreamPortContract {
 
         assertEquals(1, received.size());
         assertFalse(books.isEmpty());
+    }
+
+    // ------------------------------------------------------------------
+    // 연결 수명주기
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("토큰 발급에 실패하면 이미 열린 소켓을 닫는다")
+    void closesTheOpenedSocketWhenTheTokenCannotBeIssued() {
+        tokenSupplier = () -> { throw new BrokerTransientException("토큰 발급 실패"); };
+
+        stream.connect();
+
+        assertFalse(connector.sessions.get(0).isOpen(),
+                "참조만 버리면 재연결마다 열린 소켓이 쌓입니다");
+    }
+
+    @Test
+    @DisplayName("재연결할 때마다 이전 소켓을 남기지 않는다")
+    void doesNotPileUpSocketsAcrossReconnects() {
+        tokenSupplier = () -> { throw new BrokerTransientException("토큰 발급 실패"); };
+
+        stream.connect();
+
+        assertTrue(connector.attempts > 1, "재연결을 시도해야 합니다");
+        assertTrue(connector.sessions.stream().noneMatch(FakeSession::isOpen),
+                "열린 채 남은 소켓이 없어야 합니다");
+    }
+
+    @Test
+    @DisplayName("로그인 응답이 오지 않으면 시한 뒤에 끊고 다시 시도한다")
+    void reconnectsWhenTheLoginResponseNeverArrives() {
+        stream.connect();
+        assertEquals(ConnectionState.CONNECTING, stream.connectionState());
+        FakeSession stuck = connector.lastSession();
+        int attemptsBefore = connector.attempts;
+
+        watchdog.fire();
+
+        assertFalse(stuck.isOpen(), "응답 없는 소켓을 닫아야 합니다");
+        assertTrue(connector.attempts > attemptsBefore, "재연결을 시도해야 합니다");
+        assertTrue(states.contains(ConnectionState.RECONNECTING));
+    }
+
+    @Test
+    @DisplayName("로그인에 성공했으면 시한이 지나도 끊지 않는다")
+    void leavesAHealthyConnectionAloneWhenTheDeadlinePasses() {
+        connectAndLogin();
+        assertEquals(ConnectionState.CONNECTED, stream.connectionState());
+        FakeSession healthy = connector.lastSession();
+
+        watchdog.fire();
+
+        assertEquals(ConnectionState.CONNECTED, stream.connectionState());
+        assertTrue(healthy.isOpen());
+    }
+
+    @Test
+    @DisplayName("사용자가 닫은 뒤에는 시한이 지나도 다시 연결하지 않는다")
+    void staysClosedWhenTheDeadlinePassesAfterTheUserClosedIt() {
+        stream.connect();
+        int attemptsBefore = connector.attempts;
+
+        stream.close();
+        watchdog.fire();
+
+        assertEquals(attemptsBefore, connector.attempts);
+        assertEquals(ConnectionState.DISCONNECTED, stream.connectionState());
     }
 }

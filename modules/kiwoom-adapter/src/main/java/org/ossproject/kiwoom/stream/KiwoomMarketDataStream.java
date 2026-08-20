@@ -38,11 +38,23 @@ public final class KiwoomMarketDataStream implements MarketDataStreamPort {
     private static final List<KiwoomRealtimeType> SUBSCRIBED_TYPES =
             List.of(KiwoomRealtimeType.TRADE, KiwoomRealtimeType.ORDER_BOOK);
 
+    /**
+     * 로그인 응답을 기다리는 시한.
+     *
+     * <p>소켓이 열려도 로그인 응답을 받기 전에는 아무것도 할 수 없다. 서버가 응답 없이
+     * 붙잡고 있으면 {@code onClose} 도 {@code onError} 도 오지 않아 연결 중 상태에 그대로
+     * 머문다. 시한을 두지 않으면 사용자가 할 수 있는 일이 앱 재시작밖에 없다.
+     */
+    private static final Duration DEFAULT_LOGIN_TIMEOUT = Duration.ofSeconds(10);
+
 
     private final URI uri;
     private final WebSocketConnector connector;
     private final KiwoomWebSocketProtocol protocol;
     private final ReconnectScheduler scheduler;
+    /** 로그인 응답을 기다리는 시한을 재는 예약기. 재연결 예약과 섞이지 않게 따로 둔다. */
+    private final ReconnectScheduler loginWatchdog;
+    private final Duration loginTimeout;
     private final RetryPolicy reconnectPolicy;
 
     /** 재연결 때마다 새 토큰을 받아야 하므로 값이 아니라 공급자를 들고 있는다. */
@@ -78,6 +90,22 @@ public final class KiwoomMarketDataStream implements MarketDataStreamPort {
     KiwoomMarketDataStream(URI uri, WebSocketConnector connector, KiwoomWebSocketProtocol protocol,
                            ReconnectScheduler scheduler, RetryPolicy reconnectPolicy,
                            Supplier<String> accessTokenSupplier) {
+        this(uri, connector, protocol, scheduler, ReconnectScheduler.daemon(),
+                DEFAULT_LOGIN_TIMEOUT, reconnectPolicy, accessTokenSupplier);
+    }
+
+    KiwoomMarketDataStream(URI uri, WebSocketConnector connector, KiwoomWebSocketProtocol protocol,
+                           ReconnectScheduler scheduler, ReconnectScheduler loginWatchdog,
+                           Duration loginTimeout, RetryPolicy reconnectPolicy,
+                           Supplier<String> accessTokenSupplier) {
+        if (loginWatchdog == null) {
+            throw new IllegalArgumentException("로그인 감시 예약기는 필수입니다.");
+        }
+        if (loginTimeout == null || loginTimeout.isNegative() || loginTimeout.isZero()) {
+            throw new IllegalArgumentException("로그인 응답 시한은 0보다 커야 합니다.");
+        }
+        this.loginWatchdog = loginWatchdog;
+        this.loginTimeout = loginTimeout;
         if (uri == null) {
             throw new IllegalArgumentException("스트림 주소는 필수입니다.");
         }
@@ -153,6 +181,26 @@ public final class KiwoomMarketDataStream implements MarketDataStreamPort {
             return;
         }
         sendQuietly(protocol.loginMessage(token));
+        watchLoginResponse(opened);
+    }
+
+    /**
+     * 로그인 응답이 시한 안에 오지 않으면 끊고 재연결한다.
+     *
+     * <p>{@code expected} 와 지금 세션이 다르면 이미 다른 연결로 넘어간 것이므로 아무것도
+     * 하지 않는다. 로그인에 성공했으면 상태가 연결됨으로 바뀌어 있어 역시 지나간다.
+     */
+    private void watchLoginResponse(WebSocketSession expected) {
+        loginWatchdog.schedule(loginTimeout, () -> {
+            boolean stillWaiting;
+            synchronized (lock) {
+                stillWaiting = !closedByUser && session == expected
+                        && state != ConnectionState.CONNECTED;
+            }
+            if (stillWaiting) {
+                handleDisconnect("로그인 응답이 " + loginTimeout.toMillis() + "밀리초 안에 오지 않았습니다.");
+            }
+        });
     }
 
     /** 로그인에 성공하면 연결됨으로 표시하고, 끊기기 전에 보던 종목을 다시 등록한다. */
@@ -175,33 +223,58 @@ public final class KiwoomMarketDataStream implements MarketDataStreamPort {
         }
     }
 
-    /** 끊김을 처리하고 다음 재연결을 예약한다. */
+    /**
+     * 끊김을 처리하고 다음 재연결을 예약한다.
+     *
+     * <p>참조만 버리지 않고 소켓을 실제로 닫는다. 토큰 발급 실패처럼 소켓이 열린 채로
+     * 들어오는 경로가 있어서, 참조만 지우면 재연결할 때마다 열린 소켓이 하나씩 쌓인다.
+     * {@code onClose} 로 들어온 경우처럼 이미 닫혀 있어도 다시 닫는 것은 문제가 없다.
+     */
     private void handleDisconnect(String reason) {
         List<Runnable> events = new ArrayList<>();
+        WebSocketSession stale;
         Duration delay;
+        boolean giveUp;
 
         synchronized (lock) {
             if (closedByUser) {
                 return;
             }
+            stale = session;
             session = null;
             reconnectAttempt++;
 
-            if (reconnectPolicy.maxAttempts() > 0 && reconnectAttempt > reconnectPolicy.maxAttempts()) {
+            giveUp = reconnectPolicy.maxAttempts() > 0
+                    && reconnectAttempt > reconnectPolicy.maxAttempts();
+            if (giveUp) {
                 changeState(ConnectionState.FAILED,
                         "재연결을 " + reconnectPolicy.maxAttempts() + "회 시도했지만 실패했습니다. " + reason,
                         events);
-                runEvents(events);
-                return;
+                delay = null;
+            } else {
+                delay = reconnectPolicy.delayAfterAttempt(reconnectAttempt);
+                changeState(ConnectionState.RECONNECTING,
+                        reason + " " + delay.toMillis() + "밀리초 뒤에 다시 시도합니다.", events);
             }
-
-            delay = reconnectPolicy.delayAfterAttempt(reconnectAttempt);
-            changeState(ConnectionState.RECONNECTING,
-                    reason + " " + delay.toMillis() + "밀리초 뒤에 다시 시도합니다.", events);
         }
 
+        closeQuietly(stale);
         runEvents(events);
-        scheduler.schedule(delay, this::openConnection);
+        if (!giveUp) {
+            scheduler.schedule(delay, this::openConnection);
+        }
+    }
+
+    /** 종료 중 오류는 알릴 대상이 아니다. 이미 닫힌 소켓을 다시 닫아도 조용히 넘어간다. */
+    private static void closeQuietly(WebSocketSession target) {
+        if (target == null) {
+            return;
+        }
+        try {
+            target.close();
+        } catch (RuntimeException ignored) {
+            // 닫는 중 오류로 재연결을 막지 않는다.
+        }
     }
 
     // ------------------------------------------------------------------
@@ -344,6 +417,7 @@ public final class KiwoomMarketDataStream implements MarketDataStreamPort {
             }
         }
         scheduler.shutdown();
+        loginWatchdog.shutdown();
         runEvents(events);
     }
 
