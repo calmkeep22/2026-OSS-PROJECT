@@ -41,6 +41,7 @@ public final class OrderBookLadderView {
     private final TableView<PriceLadderRow> table;
     private final Label summary = new Label("호가를 기다리고 있습니다.");
     private final Label announcement = new Label();
+    private final Label walls = new Label();
     private final VBox root;
     private boolean live = true;
     private boolean tradedCenter = true;
@@ -74,7 +75,12 @@ public final class OrderBookLadderView {
         announcement.setVisible(false);
         announcement.setManaged(false);
 
-        root = new VBox(10, summary, announcement, table);
+        walls.setWrapText(true);
+        walls.getStyleClass().add("safety-note");
+        walls.setVisible(false);
+        walls.setManaged(false);
+
+        root = new VBox(10, summary, announcement, walls, table);
         root.setPadding(new Insets(12));
     }
 
@@ -149,12 +155,31 @@ public final class OrderBookLadderView {
         applyAnnouncement(view);
     }
 
+    /**
+     * 물량이 몰린 곳을 문장으로 남긴다.
+     *
+     * <p>그래프에서는 색으로만 구분되는데, 색은 화면을 볼 수 없는 사용자에게 전달되지
+     * 않는다. 벽 구성이 달라졌을 때만 온다.
+     */
+    public void showWalls(String text) {
+        if (text == null || text.isBlank()) {
+            walls.setVisible(false);
+            walls.setManaged(false);
+            return;
+        }
+        walls.setText(text);
+        walls.setAccessibleText(text);
+        walls.setVisible(true);
+        walls.setManaged(true);
+    }
+
     /** 호가를 받을 수 없는 상태를 감추지 않는다. */
     public void showUnavailable(String reason) {
         rows.clear();
         summary.setText(reason);
         summary.setAccessibleText(reason);
         hideAnnouncement();
+        showWalls(null);
     }
 
     private void applySummary(PriceLadderView view) {
