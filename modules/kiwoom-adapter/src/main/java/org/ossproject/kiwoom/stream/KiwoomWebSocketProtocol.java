@@ -2,6 +2,13 @@ package org.ossproject.kiwoom.stream;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.ossproject.finance.model.OrderSide;
+import org.ossproject.finance.model.Trade;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import org.ossproject.finance.model.Quote;
 import org.ossproject.kiwoom.KiwoomOrderBookParser;
 
@@ -31,6 +38,9 @@ public final class KiwoomWebSocketProtocol {
 
     /** 구독 그룹 번호. 하나만 쓰면 충분하다. */
     private static final String GROUP_NO = "1";
+
+    private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
+    private static final DateTimeFormatter HHMMSS = DateTimeFormatter.ofPattern("HHmmss");
 
     private final ObjectMapper objectMapper;
     private final Clock clock;
@@ -184,6 +194,10 @@ public final class KiwoomWebSocketProtocol {
                 if (quote != null) {
                     events.add(new KiwoomStreamEvent.QuoteUpdate(quote));
                 }
+                Trade trade = toTrade(symbol, values);
+                if (trade != null) {
+                    events.add(new KiwoomStreamEvent.TradeUpdate(trade));
+                }
             }
         }
         if (events.isEmpty()) {
@@ -206,6 +220,60 @@ public final class KiwoomWebSocketProtocol {
         return new Quote(symbol, price, null,
                 decimal(values, "28"), decimal(values, "27"),
                 0L, 0L, longValue(values, "13"), clock.instant());
+    }
+
+    /**
+     * 주식체결(0B) 값을 체결 한 건으로 옮긴다.
+     *
+     * <p>FID 15 는 이 체결의 수량인데 <b>부호가 방향</b>이다. 양수면 매수 체결, 음수면
+     * 매도 체결이다. 다른 값처럼 절대값을 취하면 방향이 사라진다.
+     *
+     * <p>FID 20 은 체결 시각인데 {@code HHmmss} 형태다. 날짜가 없으므로 오늘 날짜에
+     * 붙인다. 값이 없거나 형식이 다르면 수신 시각으로 물러선다. 목록의 순서는 유지되고
+     * 시각만 조금 어긋난다.
+     */
+    private Trade toTrade(String symbol, JsonNode values) {
+        BigDecimal price = decimal(values, "10");
+        BigDecimal signedQuantity = signedDecimal(values, "15");
+        if (price == null || signedQuantity == null || signedQuantity.signum() == 0) {
+            return null;
+        }
+        OrderSide side = signedQuantity.signum() > 0 ? OrderSide.BUY : OrderSide.SELL;
+        return new Trade(symbol, price, signedQuantity.abs().longValue(), side,
+                tradeTime(text(values, "20")));
+    }
+
+    /** {@code HHmmss} 를 오늘 시각으로 읽는다. 읽을 수 없으면 지금으로 둔다. */
+    private Instant tradeTime(String raw) {
+        if (raw != null && raw.length() == 6 && raw.chars().allMatch(Character::isDigit)) {
+            try {
+                LocalTime time = LocalTime.parse(raw, HHMMSS);
+                return LocalDate.now(SEOUL).atTime(time).atZone(SEOUL).toInstant();
+            } catch (RuntimeException ignored) {
+                // 형식이 다르면 수신 시각으로 물러선다.
+            }
+        }
+        return clock.instant();
+    }
+
+    /** 부호를 남기고 읽는다. 방향을 담은 값에 쓴다. */
+    private static BigDecimal signedDecimal(JsonNode parent, String fid) {
+        String raw = text(parent, fid);
+        if (raw == null) {
+            return null;
+        }
+        String cleaned = raw.replace(",", "").trim();
+        if (cleaned.startsWith("+")) {
+            cleaned = cleaned.substring(1);
+        }
+        if (cleaned.isEmpty()) {
+            return null;
+        }
+        try {
+            return new BigDecimal(cleaned);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private static BigDecimal decimal(JsonNode parent, String fid) {

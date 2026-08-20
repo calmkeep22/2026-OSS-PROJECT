@@ -11,6 +11,7 @@ import org.ossproject.application.port.MarketDataStreamPort;
 import org.ossproject.application.port.OrderBookListener;
 import org.ossproject.application.port.OrderBookQueryPort;
 import org.ossproject.application.port.QuoteListener;
+import org.ossproject.application.port.TradeListener;
 import org.ossproject.application.port.StockQueryPort;
 import org.ossproject.finance.model.Candle;
 import org.ossproject.finance.model.CandleInterval;
@@ -292,6 +293,46 @@ public final class MarketApplicationService implements MarketApplicationPort {
     @Override
     public boolean supportsOrderBook() {
         return marketStream.supportsOrderBook();
+    }
+
+    @Override
+    public EventSubscription monitorTrades(SecurityId security, TradeListener listener) {
+        if (closed.get()) throw new IllegalStateException("시장 Application 서비스가 종료되었습니다.");
+        Objects.requireNonNull(security, "security");
+        Objects.requireNonNull(listener, "listener");
+
+        TradeListener relay = trade -> {
+            if (security.symbol().equalsIgnoreCase(trade.symbol())) {
+                dispatch(() -> listener.onTrade(trade));
+            }
+        };
+        marketStream.addTradeListener(relay);
+
+        boolean retained = false;
+        try {
+            retainMonitor(security);
+            retained = true;
+            if (marketStream.connectionState() == ConnectionState.DISCONNECTED
+                    || marketStream.connectionState() == ConnectionState.FAILED) {
+                marketStream.connect();
+            }
+        } catch (RuntimeException failure) {
+            marketStream.removeTradeListener(relay);
+            if (retained) releaseMonitor(security);
+            throw failure;
+        }
+
+        AtomicBoolean done = new AtomicBoolean();
+        return () -> {
+            if (!done.compareAndSet(false, true)) return;
+            marketStream.removeTradeListener(relay);
+            releaseMonitor(security);
+        };
+    }
+
+    @Override
+    public boolean supportsTrades() {
+        return marketStream.supportsTrades();
     }
 
     @Override

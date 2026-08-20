@@ -2,6 +2,7 @@ package org.ossproject.kiwoom.stream;
 
 import org.ossproject.finance.model.OrderBook;
 import org.ossproject.finance.model.Quote;
+import org.ossproject.finance.model.Trade;
 
 /**
  * 실시간 WebSocket 에서 올라온 사건.
@@ -29,6 +30,10 @@ public sealed interface KiwoomStreamEvent {
 
     /** 실시간 체결. 현재가와 누적 거래량이 갱신된다. */
     record QuoteUpdate(Quote quote) implements KiwoomStreamEvent {
+    }
+
+    /** 실시간 체결 한 건. 수량과 방향을 담는다. */
+    record TradeUpdate(Trade trade) implements KiwoomStreamEvent {
     }
 
     /** 구독 등록·해제 응답 등 우리가 따로 처리하지 않는 메시지. */

@@ -61,6 +61,17 @@ public interface MarketApplicationPort extends AutoCloseable {
     /** 공급원이 실시간 호가를 주는지. 거짓이면 화면은 호가창 대신 안내를 보여 준다. */
     boolean supportsOrderBook();
 
+    /**
+     * 실시간 체결을 구독한다.
+     *
+     * <p>{@link #monitor} 가 주는 {@link org.ossproject.finance.model.Quote} 는 현재가와
+     * 누적 거래량만 담는다. 체결 목록을 만들려면 건별 수량과 방향이 필요하다.
+     */
+    EventSubscription monitorTrades(SecurityId security, TradeListener listener);
+
+    /** 공급원이 체결 건별 정보를 주는지. 거짓이면 화면은 체결 목록 대신 안내를 보여 준다. */
+    boolean supportsTrades();
+
     /** 앱 종료 시 실시간 연결과 남은 구독을 정리한다. */
     @Override
     void close();

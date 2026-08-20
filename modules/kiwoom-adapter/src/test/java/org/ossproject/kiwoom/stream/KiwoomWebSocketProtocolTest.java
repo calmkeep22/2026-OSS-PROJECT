@@ -3,6 +3,8 @@ package org.ossproject.kiwoom.stream;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.ossproject.finance.model.Trade;
+import org.ossproject.finance.model.OrderSide;
 import org.ossproject.finance.model.OrderBook;
 
 import java.math.BigDecimal;
@@ -166,5 +168,63 @@ class KiwoomWebSocketProtocolTest {
         assertInstanceOf(KiwoomStreamEvent.Ignored.class, first("깨진 JSON {{{"));
         assertInstanceOf(KiwoomStreamEvent.Ignored.class, first(""));
         assertInstanceOf(KiwoomStreamEvent.Ignored.class, first(null));
+    }
+
+    // ------------------------------------------------------------------
+    // 체결 건별
+    // ------------------------------------------------------------------
+
+    /** FID 15 는 수량인데 부호가 방향이다. 절대값을 취하면 방향이 사라진다. */
+    @Test
+    @DisplayName("체결량이 양수면 매수 체결로 읽는다")
+    void readsAPositiveTradeVolumeAsABuy() {
+        Trade trade = onlyTrade("{\"trnm\":\"REAL\",\"data\":[{\"type\":\"0B\",\"item\":\"005930\","
+                + "\"values\":{\"10\":\"+73500\",\"15\":\"+20\",\"20\":\"143215\",\"13\":\"1000\"}}]}");
+
+        assertEquals(OrderSide.BUY, trade.side());
+        assertEquals(20L, trade.quantity());
+        assertEquals(0, new java.math.BigDecimal("73500").compareTo(trade.price()));
+    }
+
+    @Test
+    @DisplayName("체결량이 음수면 매도 체결로 읽는다")
+    void readsANegativeTradeVolumeAsASell() {
+        Trade trade = onlyTrade("{\"trnm\":\"REAL\",\"data\":[{\"type\":\"0B\",\"item\":\"005930\","
+                + "\"values\":{\"10\":\"-73500\",\"15\":\"-20\",\"20\":\"143215\",\"13\":\"1000\"}}]}");
+
+        assertEquals(OrderSide.SELL, trade.side());
+        assertEquals(20L, trade.quantity(), "수량 자체는 절대값입니다");
+    }
+
+    /** 같은 메시지에서 현재가 갱신과 체결이 함께 나와야 한다. 쓰는 화면이 다르다. */
+    @Test
+    @DisplayName("주식체결 하나에서 시세와 체결을 모두 만든다")
+    void producesBothAQuoteAndATradeFromOneMessage() {
+        List<KiwoomStreamEvent> events = protocol.decode(
+                "{\"trnm\":\"REAL\",\"data\":[{\"type\":\"0B\",\"item\":\"005930\","
+                + "\"values\":{\"10\":\"+73500\",\"15\":\"+20\",\"20\":\"143215\",\"13\":\"1000\"}}]}");
+
+        assertTrue(events.stream().anyMatch(e -> e instanceof KiwoomStreamEvent.QuoteUpdate));
+        assertTrue(events.stream().anyMatch(e -> e instanceof KiwoomStreamEvent.TradeUpdate));
+    }
+
+    /** 체결량이 없으면 체결이 아니다. 시세 갱신만 남는다. */
+    @Test
+    @DisplayName("체결량이 없으면 체결로 만들지 않는다")
+    void makesNoTradeWithoutAVolume() {
+        List<KiwoomStreamEvent> events = protocol.decode(
+                "{\"trnm\":\"REAL\",\"data\":[{\"type\":\"0B\",\"item\":\"005930\","
+                + "\"values\":{\"10\":\"+73500\",\"13\":\"1000\"}}]}");
+
+        assertTrue(events.stream().noneMatch(e -> e instanceof KiwoomStreamEvent.TradeUpdate));
+    }
+
+    private Trade onlyTrade(String message) {
+        return protocol.decode(message).stream()
+                .filter(KiwoomStreamEvent.TradeUpdate.class::isInstance)
+                .map(KiwoomStreamEvent.TradeUpdate.class::cast)
+                .map(KiwoomStreamEvent.TradeUpdate::trade)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("체결 사건이 없습니다"));
     }
 }
