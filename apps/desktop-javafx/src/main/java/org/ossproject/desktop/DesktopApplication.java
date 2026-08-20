@@ -1,6 +1,8 @@
 package org.ossproject.desktop;
 
+import javafx.animation.KeyFrame;
 import javafx.animation.PauseTransition;
+import javafx.animation.Timeline;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
@@ -28,6 +30,8 @@ import org.ossproject.accessibility.port.SoundPort;
 import org.ossproject.accessibility.port.SpeechPort;
 import org.ossproject.accessibility.port.SpeechVoiceProvider;
 import org.ossproject.application.port.CandleQueryPort;
+import org.ossproject.application.port.ConnectionState;
+import org.ossproject.application.port.EventSubscription;
 import org.ossproject.application.port.MarketApplicationPort;
 import org.ossproject.application.usecase.TradingUseCase;
 import org.ossproject.desktop.composition.DesktopServices;
@@ -90,6 +94,11 @@ public final class DesktopApplication extends Application {
     private AccessibleChartController accessibleChartController;
     private final Label status = new Label("준비됨");
     private final Label lastDataTime = new Label("마지막 시세 --:--:--");
+    /** 실시간 연결 상태. 실제 스트림 상태를 그대로 옮긴다. */
+    private final Label realtimeStatus = new Label("실시간 연결 끊김");
+    private final Label subscriptionCount = new Label("실시간 구독 0");
+    private EventSubscription connectionWatch;
+    private Timeline subscriptionTicker;
     private final StackPane screenHost = new StackPane();
     private final Map<Screen, Button> navigationButtons = new EnumMap<>(Screen.class);
     private final Map<Screen.NavigationGroup, Button> navigationGroupButtons =
@@ -164,6 +173,7 @@ public final class DesktopApplication extends Application {
         root.setTop(createTopBar());
         root.setCenter(screenHost);
         root.setBottom(createStatusBar());
+        watchRealtimeConnection();
         status.setAccessibleText("앱 상태. " + status.getText());
         status.textProperty().addListener((obs, old, message) -> Platform.runLater(() -> {
             status.setAccessibleText("앱 상태. " + message);
@@ -711,6 +721,61 @@ public final class DesktopApplication extends Application {
         return account.valuationReportedByBroker() ? "증권사 제공 값" : "앱에서 합산한 값";
     }
 
+    /**
+     * 실시간 체결로 마지막 봉을 갱신받기 시작한다.
+     *
+     * <p>그래프와 접근 가능한 표가 같은 값을 보도록 함께 갱신한다. 한쪽만 갱신하면 화면을
+     * 볼 수 없는 사용자가 표에서 읽는 값이 그래프와 달라진다.
+     */
+    private void startLiveChart(CandlestickChartView candleChart, TableView<PricePoint> history) {
+        try {
+            stockDetailViewModel.startLiveChart(points -> {
+                candleChart.setPoints(points);
+                history.getItems().setAll(points);
+            });
+            refreshSubscriptionCount();
+        } catch (RuntimeException failure) {
+            // 실시간이 없어도 조회한 차트는 그대로 볼 수 있다. 조용히 넘기지 않고 알린다.
+            status.setText("실시간 차트 갱신을 시작하지 못했습니다. " + failure.getMessage());
+        }
+    }
+
+    /**
+     * 실시간 연결 상태를 상태 표시줄에 계속 반영한다.
+     *
+     * <p>전에는 "실시간 미연결" 이 고정 문자열이라, 실제로 붙어 있어도 끊긴 것처럼 보였다.
+     * 화면을 볼 수 없는 사용자는 이 표시 말고 연결을 확인할 방법이 없다.
+     */
+    private void watchRealtimeConnection() {
+        connectionWatch = marketApplication.observeConnection(this::applyConnectionState);
+        // 구독은 차트, 청각 차트, 관심종목 등 여러 곳에서 생기고 사라진다. 각 지점마다
+        // 갱신을 넣으면 하나만 빠뜨려도 표시가 실제와 어긋난다. 실제 값을 주기적으로 읽는다.
+        subscriptionTicker = new Timeline(
+                new KeyFrame(Duration.seconds(1), event -> refreshSubscriptionCount()));
+        subscriptionTicker.setCycleCount(Timeline.INDEFINITE);
+        subscriptionTicker.play();
+    }
+
+    /** 연결 상태를 글자와 접근 가능한 이름, 구독 수에 함께 옮긴다. */
+    private void applyConnectionState(ConnectionState state, String detail) {
+        realtimeStatus.setText("실시간 " + state.displayName());
+        realtimeStatus.getStyleClass().removeAll("status-live", "status-mock");
+        realtimeStatus.getStyleClass().add(state.isUsable() ? "status-live" : "status-mock");
+        realtimeStatus.setAccessibleText("실시간 시세 연결. " + state.displayName()
+                + (detail == null || detail.isBlank() ? "" : ". " + detail));
+        refreshSubscriptionCount();
+        if (detail != null && !detail.isBlank()) {
+            status.setText("실시간 " + state.displayName() + ". " + detail);
+        }
+    }
+
+    /** 구독 수는 화면을 오갈 때마다 달라진다. */
+    private void refreshSubscriptionCount() {
+        int count = marketApplication.liveSubscriptionCount();
+        subscriptionCount.setText("실시간 구독 " + count + " / " + maxSubscriptions);
+        subscriptionCount.setAccessibleText("실시간 구독 종목 " + count + "개. 최대 " + maxSubscriptions + "개.");
+    }
+
     /** 음성이 나가는 동안 청각 차트 음량을 낮춘다. 차트를 못 연 상태면 할 일이 없다. */
     private void setChartSpeechActive(boolean active) {
         AccessibleChartController controller = accessibleChartController;
@@ -764,6 +829,11 @@ public final class DesktopApplication extends Application {
                 accessibleChartController.stopLive();
                 accessibleChartController.stop();
             }
+            // 종목 상세를 떠나면 봉 구독을 놓는다. 보이지 않는 차트를 계속 갱신할 이유가 없다.
+            if (old == Screen.STOCK_DETAIL && screen != Screen.STOCK_DETAIL) {
+                stockDetailViewModel.stopLiveChart();
+            }
+            refreshSubscriptionCount();
             if (screen == null) return;
             revealNavigationGroup(screen);
             String location = switch (screen) {
@@ -1074,6 +1144,7 @@ public final class DesktopApplication extends Application {
                 } else {
                     candleChart.setPoints(updated);
                     history.getItems().setAll(updated);
+                    startLiveChart(candleChart, history);
                     status.setText(detail.name() + " " + range.label() + " 차트로 변경했습니다.");
                 }
             });
@@ -1083,6 +1154,7 @@ public final class DesktopApplication extends Application {
         TabPane chartRepresentations = new TabPane(tab("그래프", candleChart), tab("접근 가능한 표", history));
         chartRepresentations.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE); chartRepresentations.setPrefHeight(430);
         VBox chart = new VBox(12, periods, indicators, chartRepresentations, soundChart); chart.setPadding(new Insets(10));
+        startLiveChart(candleChart, history);
 
         // 호가·체결·수급·기업정보는 아직 연동하지 않았다. 예전에는 현재가에 임의의 값을
         // 더해 호가를 만들어 보여 주고, 그 호가를 주문 가격으로 넣을 수도 있었다. 시장에
@@ -2031,13 +2103,14 @@ public final class DesktopApplication extends Application {
         rest.setAccessibleText(live
                 ? "시세 공급원. " + marketDataSource + " 에 연결되어 있습니다."
                 : "시세 공급원. 증권사에 연결되어 있지 않습니다. " + marketDataSource);
-        Label realtime = new Label("실시간 미연결"); realtime.getStyleClass().addAll("status-item", "status-mock");
+        realtimeStatus.getStyleClass().add("status-item");
+        subscriptionCount.getStyleClass().add("status-item");
+        applyConnectionState(ConnectionState.DISCONNECTED, null);
         Label mode = new Label("모의투자"); mode.getStyleClass().addAll("status-item", "status-mock");
-        Label subscriptions = new Label("실시간 구독 0 / 200"); subscriptions.getStyleClass().add("status-item");
         lastDataTime.setText(live ? "조회 시세 · 요청 시점 기준" : "데모 시세 · 로컬 스냅샷");
         lastDataTime.getStyleClass().add("status-item");
         Region spacer = new Region(); HBox.setHgrow(spacer, Priority.ALWAYS);
-        HBox bar = new HBox(14, status, spacer, rest, realtime, mode, subscriptions, lastDataTime);
+        HBox bar = new HBox(14, status, spacer, rest, realtimeStatus, mode, subscriptionCount, lastDataTime);
         bar.setAlignment(Pos.CENTER_LEFT); bar.getStyleClass().add("status-bar");
         bar.setPadding(new Insets(9, 16, 9, 16)); return bar;
     }
@@ -2117,6 +2190,9 @@ public final class DesktopApplication extends Application {
     @Override public void stop() {
         if (persistenceDelay != null) persistenceDelay.stop();
         saveLocalState();
+        stockDetailViewModel.stopLiveChart();
+        if (connectionWatch != null) connectionWatch.close();
+        if (subscriptionTicker != null) subscriptionTicker.stop();
         if (accessibleChartController != null) accessibleChartController.close();
         marketApplication.close();
         sonificationPort.close();

@@ -172,6 +172,23 @@ class AccessibleChartControllerTest {
             return CompletableFuture.completedFuture(candles());
         }
 
+        @Override public EventSubscription observeConnection(
+                org.ossproject.application.port.ConnectionListener listener) {
+            return () -> { };
+        }
+
+        @Override public int liveSubscriptionCount() {
+            return 0;
+        }
+
+        @Override public EventSubscription monitorCandles(
+                SecurityId security, CandleInterval interval,
+                List<Candle> history, org.ossproject.application.port.CandleListener listener
+        ) {
+            // 청각 차트는 봉이 아니라 체결 시세를 쓴다. 이 통로는 지나가지 않는다.
+            return () -> { };
+        }
+
         @Override public EventSubscription monitor(
                 SecurityId security, MarketApplicationListener listener
         ) {

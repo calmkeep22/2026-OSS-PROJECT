@@ -1,5 +1,6 @@
 package org.ossproject.desktop.viewmodel;
 
+import org.ossproject.application.port.EventSubscription;
 import org.ossproject.application.port.MarketApplicationPort;
 import org.ossproject.finance.model.Candle;
 import org.ossproject.finance.model.CandleInterval;
@@ -11,9 +12,11 @@ import org.ossproject.finance.model.StockDetail;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -69,6 +72,7 @@ public final class StockDetailViewModel {
     private final AtomicLong loadSequence = new AtomicLong();
     private final Map<ChartRange, List<PricePoint>> historyCache = new EnumMap<>(ChartRange.class);
     private final Map<ChartRange, List<Candle>> candleCache = new EnumMap<>(ChartRange.class);
+    private EventSubscription candleSubscription;
     private SecurityId cachedSecurity;
     private StockDetail cachedDetail;
     private ChartRange selectedChartRange = ChartRange.DAY;
@@ -270,6 +274,67 @@ public final class StockDetailViewModel {
     private Throwable unwrap(Throwable failure) {
         return failure instanceof java.util.concurrent.CompletionException && failure.getCause() != null
                 ? failure.getCause() : failure;
+    }
+
+    /**
+     * 선택한 기간의 마지막 봉을 실시간 체결로 갱신받는다.
+     *
+     * <p>거래소는 실시간 차트를 보내 주지 않으므로 체결을 모아 마지막 봉을 직접 갱신한다.
+     * 이미 조회해 둔 봉을 함께 넘겨 같은 조회가 두 번 나가지 않게 하고, 마지막 봉이 둘로
+     * 갈라지지 않게 한다.
+     *
+     * <p>이미 구독 중이면 먼저 해제한다. 기간이나 종목을 바꿀 때마다 새 구독이 쌓이면
+     * 체결 한 건에 여러 번 다시 그리게 된다.
+     *
+     * @param onUpdated 갱신된 전체 지점. 화면 스레드에서 호출된다
+     */
+    public void startLiveChart(Consumer<List<PricePoint>> onUpdated) {
+        Objects.requireNonNull(onUpdated, "onUpdated");
+        requireCurrentChartData();
+        stopLiveChart();
+
+        SecurityId security = selection().securityId();
+        ChartRange range = selectedChartRange;
+        candleSubscription = market.monitorCandles(security, range.interval(),
+                candleCache.get(range), candle -> stateExecutor.execute(() -> {
+                    // 늦게 도착한 콜백이 이미 바뀐 종목이나 기간의 차트를 건드리면 안 된다.
+                    if (!security.equals(selection().securityId()) || range != selectedChartRange) {
+                        return;
+                    }
+                    applyLiveCandle(range, candle);
+                    onUpdated.accept(historyCache.get(range));
+                }));
+    }
+
+    /** 구독을 해제한다. 여러 번 불러도 안전하다. */
+    public void stopLiveChart() {
+        EventSubscription current = candleSubscription;
+        candleSubscription = null;
+        if (current != null) {
+            current.close();
+        }
+    }
+
+    /**
+     * 진행 중인 봉으로 마지막 항목을 바꾼다. 새 봉이면 뒤에 붙인다.
+     *
+     * <p>시각 차트와 청각 차트가 같은 스냅샷을 보도록 두 캐시를 함께 고친다. 한쪽만 고치면
+     * 같은 화면에서 두 표현이 다른 값을 말하게 된다.
+     */
+    private void applyLiveCandle(ChartRange range, Candle candle) {
+        List<Candle> candles = candleCache.get(range);
+        if (candles == null || candles.isEmpty()) {
+            return;
+        }
+        List<Candle> updated = new ArrayList<>(candles);
+        Candle last = updated.get(updated.size() - 1);
+        if (last.timestamp().equals(candle.timestamp())) {
+            updated.set(updated.size() - 1, candle);
+        } else {
+            updated.add(candle);
+        }
+        candleCache.put(range, List.copyOf(updated));
+        historyCache.put(range, toPricePoints(updated));
     }
 
     private void executeStateChange(CompletableFuture<?> result, Runnable change) {

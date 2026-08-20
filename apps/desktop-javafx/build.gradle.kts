@@ -85,6 +85,7 @@ dependencies {
     implementation(project(":modules:secret-store-api"))
     implementation(project(":modules:windows-secret-store"))
 
+    testImplementation(testFixtures(project(":modules:application")))
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

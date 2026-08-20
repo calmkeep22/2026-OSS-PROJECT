@@ -20,6 +20,33 @@ public interface MarketApplicationPort extends AutoCloseable {
 
     EventSubscription monitor(SecurityId security, MarketApplicationListener listener);
 
+    /**
+     * 실시간 체결로 마지막 봉을 갱신받는다.
+     *
+     * <p>거래소는 실시간 차트를 보내 주지 않는다. 과거 봉은 {@link #loadCandles} 로 한 번
+     * 받고, 그 뒤 마지막 봉은 체결을 모아 직접 갱신해야 한다.
+     *
+     * @param history 화면이 이미 받아 둔 과거 봉. 마지막 봉을 집계기에 이어 붙인다.
+     *                넘기지 않으면 같은 시간대의 봉이 둘로 갈라져 마지막 봉이 두 번 그려진다
+     * @param listener 갱신 수신자. 구현이 정한 이벤트 실행자에서 호출된다
+     */
+    EventSubscription monitorCandles(SecurityId security, CandleInterval interval,
+                                     List<Candle> history, CandleListener listener);
+
+    /**
+     * 종목과 무관하게 실시간 연결 상태를 관찰한다.
+     *
+     * <p>{@link #monitor} 는 종목을 하나 붙잡고 있어야 상태를 알려 준다. 상태 표시줄처럼
+     * 종목과 상관없이 연결만 보여 주는 자리는 이 통로를 쓴다.
+     *
+     * <p>등록 직후 현재 상태로 한 번 호출한다. 화면이 만들어진 뒤 다음 변화가 올 때까지
+     * 낡은 값을 보여 주지 않게 하기 위해서다.
+     */
+    EventSubscription observeConnection(ConnectionListener listener);
+
+    /** 지금 실시간으로 구독 중인 종목 수. */
+    int liveSubscriptionCount();
+
     /** 앱 종료 시 실시간 연결과 남은 구독을 정리한다. */
     @Override
     void close();
