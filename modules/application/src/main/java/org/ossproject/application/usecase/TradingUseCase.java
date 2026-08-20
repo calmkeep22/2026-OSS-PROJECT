@@ -7,6 +7,7 @@ import org.ossproject.finance.model.Account;
 import org.ossproject.finance.model.Order;
 import org.ossproject.finance.model.OrderCommand;
 import org.ossproject.finance.model.OrderSide;
+import org.ossproject.finance.model.FeeSchedule;
 import org.ossproject.finance.model.TradePreview;
 
 import java.math.BigDecimal;
@@ -25,8 +26,16 @@ public final class TradingUseCase {
     private final OrderLifecyclePort orderPort;
     private final AccountPort accountPort;
     private final OrderGuard guard;
+    /** 주문 확인 창에 보여 줄 비용 계산에 쓴다. 모르면 계산하지 않는다. */
+    private final FeeSchedule fees;
 
     public TradingUseCase(OrderLifecyclePort orderPort, AccountPort accountPort, OrderGuard guard) {
+        this(orderPort, accountPort, guard, FeeSchedule.unknown());
+    }
+
+    public TradingUseCase(OrderLifecyclePort orderPort, AccountPort accountPort, OrderGuard guard,
+                          FeeSchedule fees) {
+        this.fees = fees == null ? FeeSchedule.unknown() : fees;
         if (orderPort == null) {
             throw new IllegalArgumentException("주문 포트는 필수입니다.");
         }
@@ -65,7 +74,8 @@ public final class TradingUseCase {
                 throw new IllegalArgumentException("매도 가능 수량이 부족합니다.");
             }
         }
-        return new TradePreview(command, referencePrice, estimatedAmount, availableBefore, availableAfter);
+        return new TradePreview(command, referencePrice, estimatedAmount, availableBefore,
+                availableAfter, fees.costsFor(command.side(), estimatedAmount));
     }
 
     /**
