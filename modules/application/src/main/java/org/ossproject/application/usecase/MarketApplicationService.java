@@ -197,7 +197,8 @@ public final class MarketApplicationService implements MarketApplicationPort {
         AtomicBoolean done = new AtomicBoolean();
         return () -> {
             if (!done.compareAndSet(false, true)) return;
-            live.stop(security.symbol());
+            // 구독 해제는 releaseMonitor 에 맡긴다. 여기서 직접 풀면 같은 종목을 보고 있는
+            // 다른 구독자의 시세까지 끊긴다. 집계 상태는 use case 와 함께 버려진다.
             live.close();
             releaseMonitor(security);
         };

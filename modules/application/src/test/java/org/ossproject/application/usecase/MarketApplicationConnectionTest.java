@@ -8,6 +8,9 @@ import org.ossproject.application.port.EventSubscription;
 import org.ossproject.application.port.MarketDataStreamPort;
 import org.ossproject.application.port.QuoteListener;
 import org.ossproject.application.port.StockQueryPort;
+import org.ossproject.application.port.MarketApplicationListener;
+import org.ossproject.finance.model.Exchange;
+import org.ossproject.finance.model.SecurityId;
 import org.ossproject.finance.model.Candle;
 import org.ossproject.finance.model.CandleInterval;
 import org.ossproject.finance.model.SecuritySummary;
@@ -100,5 +103,28 @@ class MarketApplicationConnectionTest {
         @Override public List<Candle> getCandles(String symbol, CandleInterval interval, int count) {
             return List.of();
         }
+    }
+
+    /**
+     * 같은 종목을 차트와 청각 차트가 함께 볼 수 있다. 한쪽이 닫혔다고 스트림 구독까지
+     * 풀어 버리면 남은 쪽이 조용히 시세를 잃는다.
+     */
+    @Test void closingOneWatcherKeepsTheSubscriptionForTheOther() {
+        SecurityId samsung = new SecurityId("005930", Exchange.KRX);
+        EventSubscription chart = market.monitorCandles(samsung, CandleInterval.MINUTE_1,
+                List.of(), candle -> { });
+        EventSubscription sound = market.monitor(samsung, new MarketApplicationListener() {
+            @Override public void onQuote(org.ossproject.finance.model.Quote quote) { }
+            @Override public void onConnectionChanged(ConnectionState state, String detail) { }
+        });
+        assertEquals(1, market.liveSubscriptionCount());
+
+        chart.close();
+
+        assertEquals(1, market.liveSubscriptionCount(), "남은 구독자가 있으면 유지해야 합니다");
+
+        sound.close();
+
+        assertEquals(0, market.liveSubscriptionCount(), "마지막 구독자가 닫히면 풀어야 합니다");
     }
 }

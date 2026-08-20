@@ -1,6 +1,8 @@
 package org.ossproject.desktop;
 
+import javafx.animation.KeyFrame;
 import javafx.animation.PauseTransition;
+import javafx.animation.Timeline;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
@@ -96,6 +98,7 @@ public final class DesktopApplication extends Application {
     private final Label realtimeStatus = new Label("실시간 연결 끊김");
     private final Label subscriptionCount = new Label("실시간 구독 0");
     private EventSubscription connectionWatch;
+    private Timeline subscriptionTicker;
     private final StackPane screenHost = new StackPane();
     private final Map<Screen, Button> navigationButtons = new EnumMap<>(Screen.class);
     private final Map<Screen.NavigationGroup, Button> navigationGroupButtons =
@@ -730,6 +733,7 @@ public final class DesktopApplication extends Application {
                 candleChart.setPoints(points);
                 history.getItems().setAll(points);
             });
+            refreshSubscriptionCount();
         } catch (RuntimeException failure) {
             // 실시간이 없어도 조회한 차트는 그대로 볼 수 있다. 조용히 넘기지 않고 알린다.
             status.setText("실시간 차트 갱신을 시작하지 못했습니다. " + failure.getMessage());
@@ -744,6 +748,12 @@ public final class DesktopApplication extends Application {
      */
     private void watchRealtimeConnection() {
         connectionWatch = marketApplication.observeConnection(this::applyConnectionState);
+        // 구독은 차트, 청각 차트, 관심종목 등 여러 곳에서 생기고 사라진다. 각 지점마다
+        // 갱신을 넣으면 하나만 빠뜨려도 표시가 실제와 어긋난다. 실제 값을 주기적으로 읽는다.
+        subscriptionTicker = new Timeline(
+                new KeyFrame(Duration.seconds(1), event -> refreshSubscriptionCount()));
+        subscriptionTicker.setCycleCount(Timeline.INDEFINITE);
+        subscriptionTicker.play();
     }
 
     /** 연결 상태를 글자와 접근 가능한 이름, 구독 수에 함께 옮긴다. */
@@ -2182,6 +2192,7 @@ public final class DesktopApplication extends Application {
         saveLocalState();
         stockDetailViewModel.stopLiveChart();
         if (connectionWatch != null) connectionWatch.close();
+        if (subscriptionTicker != null) subscriptionTicker.stop();
         if (accessibleChartController != null) accessibleChartController.close();
         marketApplication.close();
         sonificationPort.close();
