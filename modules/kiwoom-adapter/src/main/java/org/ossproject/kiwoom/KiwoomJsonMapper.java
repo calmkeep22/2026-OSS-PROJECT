@@ -6,6 +6,8 @@ import org.ossproject.broker.BrokerException;
 import org.ossproject.broker.SensitiveDataMasker;
 import org.ossproject.finance.model.Account;
 import org.ossproject.finance.model.Balance;
+import org.ossproject.finance.model.Trade;
+import java.time.LocalTime;
 import org.ossproject.finance.model.OrderBook;
 import org.ossproject.finance.model.Deposits;
 import org.ossproject.finance.model.ReportedValuation;
@@ -52,6 +54,10 @@ public final class KiwoomJsonMapper {
 
     private final ObjectMapper objectMapper;
     private final Clock clock;
+
+    private static final java.time.ZoneId SEOUL = java.time.ZoneId.of("Asia/Seoul");
+    private static final java.time.format.DateTimeFormatter TRADE_TIME =
+            java.time.format.DateTimeFormatter.ofPattern("HHmmss");
 
     public KiwoomJsonMapper(ObjectMapper objectMapper, Clock clock) {
         if (objectMapper == null) {
@@ -331,6 +337,53 @@ public final class KiwoomJsonMapper {
     /** {@code ka10004} 호가 응답을 도메인 호가창으로 옮긴다. 파싱 규칙은 파서가 안다. */
     public OrderBook toOrderBook(String symbol, JsonNode root) {
         return KiwoomOrderBookParser.fromRest(symbol, root, clock.instant());
+    }
+
+    /**
+     * {@code ka10003} 체결정보 응답을 체결 목록으로 옮긴다.
+     *
+     * <p>{@code cntr_trde_qty} 는 체결 수량인데 <b>부호가 방향</b>이다. 실시간 FID 15 와
+     * 같은 규칙으로, 양수면 매수 체결이고 음수면 매도 체결이다.
+     *
+     * <p>{@code cur_prc} 의 부호는 전일 대비 방향이지 체결 방향이 아니다. 절대값을 쓴다.
+     * 두 부호의 뜻이 달라서 한쪽 규칙을 다른 쪽에 적용하면 방향이 뒤집힌다.
+     *
+     * <p>응답은 최근 것이 앞에 온다. 그대로 유지한다.
+     */
+    public List<Trade> toTrades(String symbol, JsonNode root) {
+        if (symbol == null || symbol.isBlank()) {
+            throw new IllegalArgumentException("종목 코드는 필수입니다.");
+        }
+        JsonNode entries = root == null ? null : root.get("cntr_infr");
+        if (entries == null || !entries.isArray()) {
+            return List.of();
+        }
+        List<Trade> trades = new ArrayList<>();
+        for (JsonNode entry : entries) {
+            BigDecimal price = optionalDecimal(entry, "cur_prc").map(BigDecimal::abs).orElse(null);
+            BigDecimal signedQuantity = optionalDecimal(entry, "cntr_trde_qty").orElse(null);
+            if (price == null || price.signum() <= 0
+                    || signedQuantity == null || signedQuantity.signum() == 0) {
+                continue;
+            }
+            OrderSide side = signedQuantity.signum() > 0 ? OrderSide.BUY : OrderSide.SELL;
+            trades.add(new Trade(symbol, price, signedQuantity.abs().longValue(), side,
+                    tradeTime(optionalText(entry, "tm").orElse(null))));
+        }
+        return List.copyOf(trades);
+    }
+
+    /** {@code HHmmss} 를 오늘 시각으로 읽는다. 읽을 수 없으면 지금으로 둔다. */
+    private Instant tradeTime(String raw) {
+        if (raw != null && raw.length() == 6 && raw.chars().allMatch(Character::isDigit)) {
+            try {
+                LocalTime time = LocalTime.parse(raw, TRADE_TIME);
+                return LocalDate.now(SEOUL).atTime(time).atZone(SEOUL).toInstant();
+            } catch (RuntimeException ignored) {
+                // 형식이 다르면 조회 시각으로 물러선다.
+            }
+        }
+        return clock.instant();
     }
 
     /** 계좌 응답의 {@code A005930} 형태에서 접두어를 떼어 낸다. */

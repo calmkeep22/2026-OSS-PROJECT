@@ -6,6 +6,7 @@ import org.ossproject.application.port.ConnectionListener;
 import org.ossproject.application.port.ConnectionState;
 import org.ossproject.application.port.MarketDataStreamPort;
 import org.ossproject.application.port.OrderBookQueryPort;
+import org.ossproject.application.port.TradeQueryPort;
 import org.ossproject.application.port.OrderLifecyclePort;
 import org.ossproject.application.port.QuoteListener;
 import org.ossproject.application.port.StockQueryPort;
@@ -14,6 +15,7 @@ import org.ossproject.finance.model.Candle;
 import org.ossproject.finance.model.CandleInterval;
 import org.ossproject.finance.model.Order;
 import org.ossproject.finance.model.OrderBook;
+import org.ossproject.finance.model.Trade;
 import org.ossproject.finance.model.OrderCommand;
 import org.ossproject.finance.model.SecuritySummary;
 import org.ossproject.finance.model.StockDetail;
@@ -45,7 +47,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  */
 final class UnavailableMarketData
         implements StockQueryPort, CandleQueryPort, AccountPort, OrderLifecyclePort,
-        OrderBookQueryPort, MarketDataStreamPort {
+        OrderBookQueryPort, TradeQueryPort, MarketDataStreamPort {
 
     private final String reason;
     private final List<ConnectionListener> connectionListeners = new CopyOnWriteArrayList<>();
@@ -78,6 +80,11 @@ final class UnavailableMarketData
 
     @Override
     public OrderBook getOrderBook(String symbol) {
+        throw unavailable();
+    }
+
+    @Override
+    public List<Trade> getRecentTrades(String symbol) {
         throw unavailable();
     }
 

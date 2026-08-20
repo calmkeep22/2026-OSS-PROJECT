@@ -24,8 +24,11 @@ class TradeTapeViewModelTest {
     private static final SecurityId HYNIX = new SecurityId("000660", Exchange.KRX);
 
     private final FakeMarketDataStreamAdapter stream = new FakeMarketDataStreamAdapter();
+    private final List<Trade> snapshot = new ArrayList<>();
     private final MarketApplicationService market = new MarketApplicationService(
-            new FakeStockQueryAdapter(), new FakeCandleQueryAdapter(), stream, Runnable::run);
+            new FakeStockQueryAdapter(), new FakeCandleQueryAdapter(), null,
+            symbol -> List.copyOf(snapshot), stream,
+            Runnable::run, Runnable::run, java.time.Clock.systemUTC());
     private final List<List<Trade>> pushes = new ArrayList<>();
     private final AtomicInteger heldCount = new AtomicInteger(-1);
 
@@ -129,5 +132,46 @@ class TradeTapeViewModelTest {
         stream.emitTrade(trade("005930", 10L, 1));
 
         assertEquals(1, pushes.size(), "구독이 하나만 살아 있어야 합니다");
+    }
+
+    /**
+     * 실시간만 붙이면 다음 체결이 올 때까지 목록이 비어 있다. 장 시간 외에는 영영 오지
+     * 않으므로 화면을 열 때 최근 내역을 받아 둔다.
+     */
+    @Test void showsQueriedTradesBeforeAnyRealtimeOneArrives() {
+        snapshot.add(trade("005930", 30L, 3));
+        snapshot.add(trade("005930", 20L, 2));
+        snapshot.add(trade("005930", 10L, 1));
+
+        TradeTapeViewModel model = started(10);
+
+        assertEquals(3, model.trades().size());
+        assertEquals(30L, model.trades().get(0).quantity(), "조회 결과도 최신이 앞이어야 합니다");
+        assertEquals(10L, model.trades().get(2).quantity());
+    }
+
+    /** 조회한 뒤 들어온 실시간 체결이 앞에 붙어야 한다. */
+    @Test void putsRealtimeTradesAheadOfTheQueriedOnes() {
+        snapshot.add(trade("005930", 20L, 2));
+        TradeTapeViewModel model = started(10);
+
+        stream.emitTrade(trade("005930", 99L, 9));
+
+        assertEquals(99L, model.trades().get(0).quantity());
+        assertEquals(20L, model.trades().get(1).quantity());
+    }
+
+    /** 조회가 실패해도 구독은 살려 둔다. 지금 못 받는 것과 앞으로도 못 받는 것은 다르다. */
+    @Test void keepsTheSubscriptionWhenTheSnapshotQueryFails() {
+        MarketApplicationService failing = new MarketApplicationService(
+                new FakeStockQueryAdapter(), new FakeCandleQueryAdapter(), null,
+                symbol -> { throw new IllegalStateException("조회 실패"); }, stream,
+                Runnable::run, Runnable::run, java.time.Clock.systemUTC());
+        TradeTapeViewModel model = new TradeTapeViewModel(failing, Runnable::run, 10);
+
+        assertDoesNotThrow(() -> model.start(SAMSUNG, pushes::add, heldCount::set));
+        stream.emitTrade(trade("005930", 10L, 1));
+
+        assertEquals(1, model.trades().size(), "이후 실시간 체결은 받아야 합니다");
     }
 }

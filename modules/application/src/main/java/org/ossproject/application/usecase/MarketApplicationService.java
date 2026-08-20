@@ -12,10 +12,12 @@ import org.ossproject.application.port.OrderBookListener;
 import org.ossproject.application.port.OrderBookQueryPort;
 import org.ossproject.application.port.QuoteListener;
 import org.ossproject.application.port.TradeListener;
+import org.ossproject.application.port.TradeQueryPort;
 import org.ossproject.application.port.StockQueryPort;
 import org.ossproject.finance.model.Candle;
 import org.ossproject.finance.model.CandleInterval;
 import org.ossproject.finance.model.OrderBook;
+import org.ossproject.finance.model.Trade;
 import org.ossproject.finance.model.SecurityId;
 import org.ossproject.finance.model.SecuritySummary;
 import org.ossproject.finance.model.StockDetail;
@@ -44,6 +46,8 @@ public final class MarketApplicationService implements MarketApplicationPort {
     private final CandleQueryPort candleQuery;
     /** 화면을 열 때 호가 한 장을 받아 두는 조회. 없으면 실시간이 올 때까지 비어 있다. */
     private final OrderBookQueryPort orderBookQuery;
+    /** 화면을 열 때 최근 체결을 받아 두는 조회. 없으면 실시간이 올 때까지 비어 있다. */
+    private final TradeQueryPort tradeQuery;
     private final MarketDataStreamPort marketStream;
     private final Executor ioExecutor;
     private final Executor eventExecutor;
@@ -84,7 +88,6 @@ public final class MarketApplicationService implements MarketApplicationPort {
         this(stockQuery, candleQuery, null, marketStream, ioExecutor, eventExecutor, clock);
     }
 
-    /** 호가 조회까지 갖춘 구성. 조회가 {@code null} 이면 실시간만으로 동작한다. */
     public MarketApplicationService(
             StockQueryPort stockQuery,
             CandleQueryPort candleQuery,
@@ -94,8 +97,24 @@ public final class MarketApplicationService implements MarketApplicationPort {
             Executor eventExecutor,
             Clock clock
     ) {
+        this(stockQuery, candleQuery, orderBookQuery, null, marketStream,
+                ioExecutor, eventExecutor, clock);
+    }
+
+    /** 조회까지 갖춘 구성. 조회가 {@code null} 이면 실시간만으로 동작한다. */
+    public MarketApplicationService(
+            StockQueryPort stockQuery,
+            CandleQueryPort candleQuery,
+            OrderBookQueryPort orderBookQuery,
+            TradeQueryPort tradeQuery,
+            MarketDataStreamPort marketStream,
+            Executor ioExecutor,
+            Executor eventExecutor,
+            Clock clock
+    ) {
         this.clock = Objects.requireNonNull(clock, "clock");
         this.orderBookQuery = orderBookQuery;
+        this.tradeQuery = tradeQuery;
         this.stockQuery = Objects.requireNonNull(stockQuery, "stockQuery");
         this.candleQuery = Objects.requireNonNull(candleQuery, "candleQuery");
         this.marketStream = Objects.requireNonNull(marketStream, "marketStream");
@@ -307,6 +326,21 @@ public final class MarketApplicationService implements MarketApplicationPort {
             }
         };
         marketStream.addTradeListener(relay);
+
+        // 실시간만 붙이면 다음 체결이 올 때까지 목록이 비어 있고 장 시간 외에는 영영 오지
+        // 않는다. 최근 내역을 먼저 내보내고 그 뒤로 실시간으로 잇는다. 오래된 것부터
+        // 내보내야 화면이 최신을 앞에 쌓는 순서가 맞는다.
+        if (tradeQuery != null) {
+            try {
+                List<Trade> recent = tradeQuery.getRecentTrades(security.symbol());
+                for (int i = recent.size() - 1; i >= 0; i--) {
+                    Trade past = recent.get(i);
+                    dispatch(() -> listener.onTrade(past));
+                }
+            } catch (RuntimeException ignored) {
+                // 조회 실패는 화면이 "체결을 기다리는 중" 으로 보여 준다.
+            }
+        }
 
         boolean retained = false;
         try {
