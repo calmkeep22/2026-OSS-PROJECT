@@ -1113,7 +1113,8 @@ public final class DesktopApplication extends Application {
         // 표가 원본이고 그래프는 보조다. 차트 탭과 같은 순서로 둔다.
         TabPane views = new TabPane(tab("호가 표", ladder.root()), tab("누적 깊이 그래프", depth));
         views.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
-        views.setPrefHeight(430);
+        // 높이를 고정하면 호가 표가 잘려 아래 단계에 아예 닿을 수 없다. 내용에 맞춰 늘어나게
+        // 두고, 화면이 길어지면 바깥 스크롤로 닿는다.
         views.setMinSize(0, 0);
         views.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
         views.getStyleClass().add("order-book-panel");
@@ -1533,7 +1534,8 @@ public final class DesktopApplication extends Application {
                 }));
         ScrollPane scroll = new ScrollPane(host);
         scroll.setFitToWidth(true);
-        scroll.setFitToHeight(true);
+        // 높이를 맞추면 내용이 늘어나지 못해 잘린다. 넘치면 스크롤되게 둔다.
+        scroll.setFitToHeight(false);
         scroll.setAccessibleText("주문 화면");
         scroll.getStyleClass().add("workspace-scroll");
         return scroll;
