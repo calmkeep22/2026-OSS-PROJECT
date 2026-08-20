@@ -16,7 +16,7 @@ class PropertiesAccessibilityPreferencesRepositoryTest {
         Path file = temporaryDirectory.resolve("accessibility.properties");
         var repository = new PropertiesAccessibilityPreferencesRepository(file);
         var preferences = new AccessibilityPreferences(
-                true, false, true, true, true, true, "자세히", "Microsoft Heami", 1.25, 75);
+                true, false, true, true, true, true, "넓게", "Microsoft Heami", 1.25, 75);
 
         repository.save(preferences);
 
@@ -59,6 +59,7 @@ class PropertiesAccessibilityPreferencesRepositoryTest {
         assertTrue(loaded.speechEnabled());
         assertFalse(loaded.soundEnabled());
         assertTrue(loaded.highContrastEnabled());
+        assertEquals("넓게", loaded.informationDensity());
         assertEquals("Legacy Voice", loaded.voiceName());
         assertEquals(65, loaded.speechVolume());
     }

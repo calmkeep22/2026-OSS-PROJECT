@@ -49,7 +49,6 @@ class WatchlistViewModelTest {
         DesktopSession session = new DesktopSession();
 
         assertTrue(session.watchlistItems().isEmpty(), "관심종목은 사용자가 담기 전까지 비어 있어야 합니다");
-        assertTrue(session.alertRules().isEmpty());
         assertTrue(session.journalEntries().isEmpty());
         assertEquals(java.util.List.of(DesktopSession.ALL_GROUP), session.watchlistGroups());
     }

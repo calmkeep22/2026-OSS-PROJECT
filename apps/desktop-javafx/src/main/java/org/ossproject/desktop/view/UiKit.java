@@ -18,7 +18,7 @@ public final class UiKit {
     private UiKit() {}
 
     public static ScrollPane scrollPage(String accessibleName, VBox body) {
-        body.setPadding(new Insets(28));
+        body.setPadding(new Insets(20));
         body.setFillWidth(true);
         body.setMinWidth(0);
         body.getStyleClass().add("screen-content");

@@ -178,10 +178,7 @@ public final class MarketApplicationService implements MarketApplicationPort {
         try {
             retainMonitor(security);
             retained = true;
-            if (marketStream.connectionState() == ConnectionState.DISCONNECTED
-                    || marketStream.connectionState() == ConnectionState.FAILED) {
-                marketStream.connect();
-            }
+            ensureConnectedAsync();
         } catch (RuntimeException failure) {
             marketStream.removeQuoteListener(quoteListener);
             marketStream.removeConnectionListener(connectionListener);
@@ -223,10 +220,7 @@ public final class MarketApplicationService implements MarketApplicationPort {
             live.startFrom(security.symbol(), history);
             retainMonitor(security);
             retained = true;
-            if (marketStream.connectionState() == ConnectionState.DISCONNECTED
-                    || marketStream.connectionState() == ConnectionState.FAILED) {
-                marketStream.connect();
-            }
+            ensureConnectedAsync();
         } catch (RuntimeException failure) {
             live.close();
             if (retained) releaseMonitor(security);
@@ -277,24 +271,21 @@ public final class MarketApplicationService implements MarketApplicationPort {
         // 오지 않는다. 한 장을 먼저 받아 두고 그 뒤로 실시간으로 잇는다. 조회가 실패해도
         // 구독은 살려 둔다. 지금 못 받는 것과 앞으로도 못 받는 것은 다르다.
         if (orderBookQuery != null) {
-            try {
-                OrderBook snapshot = orderBookQuery.getOrderBook(security.symbol());
-                if (snapshot != null) {
-                    dispatch(() -> listener.onOrderBook(snapshot));
+            CompletableFuture.runAsync(() -> {
+                try {
+                    OrderBook snapshot = orderBookQuery.getOrderBook(security.symbol());
+                    if (snapshot != null) dispatch(() -> listener.onOrderBook(snapshot));
+                } catch (RuntimeException ignored) {
+                    // 조회 실패는 화면이 이미 "호가를 기다리는 중" 으로 보여 준다.
                 }
-            } catch (RuntimeException ignored) {
-                // 조회 실패는 화면이 이미 "호가를 기다리는 중" 으로 보여 준다.
-            }
+            }, ioExecutor);
         }
 
         boolean retained = false;
         try {
             retainMonitor(security);
             retained = true;
-            if (marketStream.connectionState() == ConnectionState.DISCONNECTED
-                    || marketStream.connectionState() == ConnectionState.FAILED) {
-                marketStream.connect();
-            }
+            ensureConnectedAsync();
         } catch (RuntimeException failure) {
             marketStream.removeOrderBookListener(relay);
             if (retained) releaseMonitor(security);
@@ -331,25 +322,24 @@ public final class MarketApplicationService implements MarketApplicationPort {
         // 않는다. 최근 내역을 먼저 내보내고 그 뒤로 실시간으로 잇는다. 오래된 것부터
         // 내보내야 화면이 최신을 앞에 쌓는 순서가 맞는다.
         if (tradeQuery != null) {
-            try {
-                List<Trade> recent = tradeQuery.getRecentTrades(security.symbol());
-                for (int i = recent.size() - 1; i >= 0; i--) {
-                    Trade past = recent.get(i);
-                    dispatch(() -> listener.onTrade(past));
+            CompletableFuture.runAsync(() -> {
+                try {
+                    List<Trade> recent = tradeQuery.getRecentTrades(security.symbol());
+                    for (int i = recent.size() - 1; i >= 0; i--) {
+                        Trade past = recent.get(i);
+                        dispatch(() -> listener.onTrade(past));
+                    }
+                } catch (RuntimeException ignored) {
+                    // 조회 실패는 화면이 "체결을 기다리는 중" 으로 보여 준다.
                 }
-            } catch (RuntimeException ignored) {
-                // 조회 실패는 화면이 "체결을 기다리는 중" 으로 보여 준다.
-            }
+            }, ioExecutor);
         }
 
         boolean retained = false;
         try {
             retainMonitor(security);
             retained = true;
-            if (marketStream.connectionState() == ConnectionState.DISCONNECTED
-                    || marketStream.connectionState() == ConnectionState.FAILED) {
-                marketStream.connect();
-            }
+            ensureConnectedAsync();
         } catch (RuntimeException failure) {
             marketStream.removeTradeListener(relay);
             if (retained) releaseMonitor(security);
@@ -426,6 +416,18 @@ public final class MarketApplicationService implements MarketApplicationPort {
         } catch (RuntimeException ignored) {
             // 종료 중 executor가 작업을 거부해도 WebSocket 수신 루프까지 실패시키지 않는다.
         }
+    }
+
+    private void ensureConnectedAsync() {
+        ConnectionState state = marketStream.connectionState();
+        if (state != ConnectionState.DISCONNECTED && state != ConnectionState.FAILED) return;
+        CompletableFuture.runAsync(() -> {
+            try {
+                marketStream.connect();
+            } catch (RuntimeException ignored) {
+                // 스트림 구현이 FAILED 상태와 안전한 오류 설명을 연결 리스너에 전달한다.
+            }
+        }, ioExecutor);
     }
 
     private <T> CompletionStage<T> closedStage() {

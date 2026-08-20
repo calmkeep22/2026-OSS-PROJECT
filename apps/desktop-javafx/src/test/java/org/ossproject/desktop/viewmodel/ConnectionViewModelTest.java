@@ -50,6 +50,17 @@ class ConnectionViewModelTest {
         assertFalse(viewModel.testConnection("", "only-secret".toCharArray(), true));
     }
 
+    @Test
+    void doesNotStoreCredentialsWhenKiwoomProbeFails() {
+        MemorySecretStore store = new MemorySecretStore();
+        ConnectionViewModel viewModel = new ConnectionViewModel(store, (key, secret) -> {
+            throw new IllegalStateException("토큰 발급 실패");
+        });
+
+        assertFalse(viewModel.testConnection("bad-key", "bad-secret".toCharArray(), true));
+        assertTrue(store.aliases().isEmpty());
+    }
+
     private static final class MemorySecretStore implements SecretStore {
         private final Map<String, char[]> values = new LinkedHashMap<>();
 

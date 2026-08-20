@@ -20,9 +20,10 @@ import java.util.List;
  * 키움이나 JavaFX Controller에 의존하지 않아 실제 데이터 연결 후에도 그대로 재사용한다.
  */
 public final class CandlestickChartView extends Region {
-    private static final double LEFT = 62;
-    private static final double RIGHT = 18;
-    private static final double TOP = 28;
+    private static final double LEFT = 16;
+    private static final double RIGHT = 86;
+    private static final double TOP = 42;
+    private static final double BOTTOM = 24;
 
     private final Canvas canvas = new Canvas();
     private List<PricePoint> points;
@@ -113,17 +114,18 @@ public final class CandlestickChartView extends Region {
         if (width < 200 || height < 180) return;
 
         GraphicsContext g = canvas.getGraphicsContext2D();
-        g.setFill(Color.web("#ffffff"));
+        g.setFill(Color.web("#0b1220"));
         g.fillRect(0, 0, width, height);
-        g.setFont(Font.font("Malgun Gothic", 11));
+        g.setFont(Font.font("Noto Sans KR", 11));
         g.setTextBaseline(VPos.CENTER);
 
         int start = Math.max(0, points.size() - visibleCount);
         List<PricePoint> visible = points.subList(start, points.size());
         double plotRight = width - RIGHT;
-        double mainBottom = height * 0.72;
-        double indicatorTop = mainBottom + 16;
-        double indicatorBottom = height - 22;
+        double usableHeight = Math.max(120, height - TOP - BOTTOM);
+        double mainBottom = TOP + usableHeight * 0.72;
+        double indicatorTop = mainBottom + 14;
+        double indicatorBottom = height - BOTTOM;
 
         double min = visible.stream().map(PricePoint::low).mapToDouble(BigDecimal::doubleValue).min().orElse(0);
         double max = visible.stream().map(PricePoint::high).mapToDouble(BigDecimal::doubleValue).max().orElse(1);
@@ -131,7 +133,7 @@ public final class CandlestickChartView extends Region {
         min -= padding;
         max += padding;
 
-        drawGrid(g, width, mainBottom, min, max);
+        drawGrid(g, plotRight, mainBottom, indicatorTop, indicatorBottom, min, max);
 
         double slot = (plotRight - LEFT) / visible.size();
         double candleWidth = Math.max(3, Math.min(14, slot * 0.62));
@@ -145,51 +147,60 @@ public final class CandlestickChartView extends Region {
             double high = y(point.high().doubleValue(), min, max, TOP, mainBottom);
             double low = y(point.low().doubleValue(), min, max, TOP, mainBottom);
             boolean up = point.close().compareTo(point.open()) >= 0;
-            Color color = Color.web(up ? "#d92d20" : "#175cd3");
+            Color color = Color.web(up ? "#ff4d4f" : "#3b82f6");
             g.setStroke(color);
             g.setFill(color);
-            g.setLineWidth(1.4);
+            g.setLineWidth(1.2);
             g.strokeLine(x, high, x, low);
             double bodyTop = Math.min(open, close);
             double bodyHeight = Math.max(2, Math.abs(close - open));
-            if (up) g.fillRect(x - candleWidth / 2, bodyTop, candleWidth, bodyHeight);
-            else g.strokeRect(x - candleWidth / 2, bodyTop, candleWidth, bodyHeight);
+            g.fillRect(x - candleWidth / 2, bodyTop, candleWidth, bodyHeight);
 
             double volumeHeight = (indicatorBottom - indicatorTop) * point.volume() / Math.max(1d, maxVolume);
-            g.setGlobalAlpha(0.24);
+            g.setGlobalAlpha(0.52);
             g.fillRect(x - candleWidth / 2, indicatorBottom - volumeHeight, candleWidth, volumeHeight);
             g.setGlobalAlpha(1);
         }
 
         if (showMa) {
-            drawAverage(g, visible, 5, Color.web("#7f56d9"), min, max, mainBottom, slot);
-            drawAverage(g, visible, 20, Color.web("#f79009"), min, max, mainBottom, slot);
+            drawAverage(g, visible, 5, Color.web("#c084fc"), min, max, mainBottom, slot);
+            drawAverage(g, visible, 20, Color.web("#fbbf24"), min, max, mainBottom, slot);
         }
         if (showBollinger) drawBollinger(g, visible, min, max, mainBottom, slot);
         if (showRsi) drawRsi(g, visible, indicatorTop, indicatorBottom, slot);
         if (showMacd) drawMacd(g, visible, indicatorTop, indicatorBottom, slot);
 
         double previousClose = points.get(Math.max(0, start - 1)).close().doubleValue();
-        drawPriceLine(g, previousClose, min, max, mainBottom, width, "전일종가", Color.web("#667085"));
-        double average = visible.stream().map(PricePoint::close).mapToDouble(BigDecimal::doubleValue).average().orElse(previousClose);
-        drawPriceLine(g, average, min, max, mainBottom, width, "평균", Color.web("#087443"));
-        drawExecutionMarkers(g, visible, min, max, mainBottom, slot);
+        drawPriceLine(g, previousClose, min, max, mainBottom, width, "전일", Color.web("#64748b"));
+        drawCurrentPrice(g, visible.get(visible.size() - 1), min, max, mainBottom, plotRight);
+        drawTimeAxis(g, visible, slot, height);
+        drawOhlcHeader(g, visible.get(visible.size() - 1));
         drawLegend(g, width);
         drawCrosshair(g, visible, min, max, mainBottom, slot, width);
     }
 
-    private void drawGrid(GraphicsContext g, double width, double mainBottom, double min, double max) {
-        g.setStroke(Color.web("#e4e7ec"));
-        g.setFill(Color.web("#667085"));
+    private void drawGrid(GraphicsContext g, double plotRight, double mainBottom,
+                          double indicatorTop, double indicatorBottom, double min, double max) {
+        g.setStroke(Color.web("#243247"));
+        g.setFill(Color.web("#94a3b8"));
         g.setLineWidth(1);
-        for (int i = 0; i <= 4; i++) {
-            double ratio = i / 4d;
+        for (int i = 0; i <= 5; i++) {
+            double ratio = i / 5d;
             double y = TOP + (mainBottom - TOP) * ratio;
             double price = max - (max - min) * ratio;
-            g.strokeLine(LEFT, y, width - RIGHT, y);
-            g.setTextAlign(TextAlignment.RIGHT);
-            g.fillText(String.format("%,.0f", price), LEFT - 7, y);
+            g.strokeLine(LEFT, y, plotRight, y);
+            g.setTextAlign(TextAlignment.LEFT);
+            g.fillText(String.format("%,.0f", price), plotRight + 8, y);
         }
+        for (int i = 0; i <= 6; i++) {
+            double x = LEFT + (plotRight - LEFT) * i / 6d;
+            g.strokeLine(x, TOP, x, indicatorBottom);
+        }
+        g.setStroke(Color.web("#334155"));
+        g.strokeLine(LEFT, indicatorTop - 7, plotRight, indicatorTop - 7);
+        g.setFill(Color.web("#64748b"));
+        g.setTextAlign(TextAlignment.LEFT);
+        g.fillText("거래량", LEFT + 4, indicatorTop + 4);
     }
 
     private void drawAverage(GraphicsContext g, List<PricePoint> visible, int period, Color color,
@@ -220,7 +231,7 @@ public final class CandlestickChartView extends Region {
 
     private void drawBand(GraphicsContext g, List<PricePoint> visible, double min, double max,
                           double mainBottom, double slot, boolean upper) {
-        g.setStroke(Color.web("#0ba5ec"));
+        g.setStroke(Color.web("#38bdf8"));
         g.setLineWidth(1.1);
         boolean started = false;
         for (int i = 0; i < visible.size(); i++) {
@@ -238,7 +249,7 @@ public final class CandlestickChartView extends Region {
     }
 
     private void drawRsi(GraphicsContext g, List<PricePoint> visible, double top, double bottom, double slot) {
-        g.setStroke(Color.web("#7f56d9"));
+        g.setStroke(Color.web("#c084fc"));
         g.setLineWidth(1.4);
         g.beginPath();
         for (int i = 0; i < visible.size(); i++) {
@@ -248,7 +259,7 @@ public final class CandlestickChartView extends Region {
             if (i == 0) g.moveTo(x, y); else g.lineTo(x, y);
         }
         g.stroke();
-        g.setFill(Color.web("#7f56d9"));
+        g.setFill(Color.web("#c084fc"));
         g.setTextAlign(TextAlignment.LEFT);
         g.fillText("RSI", LEFT + 4, top + 8);
     }
@@ -264,10 +275,10 @@ public final class CandlestickChartView extends Region {
         for (int i = 0; i < values.length; i++) {
             double x = LEFT + slot * i + slot * 0.2;
             double height = (bottom - top) * 0.42 * values[i] / maxAbs;
-            g.setFill(Color.web(values[i] >= 0 ? "#d92d20" : "#175cd3", 0.55));
+            g.setFill(Color.web(values[i] >= 0 ? "#ff4d4f" : "#3b82f6", 0.62));
             g.fillRect(x, middle - Math.max(0, height), Math.max(2, slot * 0.6), Math.abs(height));
         }
-        g.setFill(Color.web("#344054"));
+        g.setFill(Color.web("#94a3b8"));
         g.setTextAlign(TextAlignment.RIGHT);
         g.fillText("MACD", canvas.getWidth() - RIGHT - 4, top + 8);
     }
@@ -285,42 +296,64 @@ public final class CandlestickChartView extends Region {
         g.fillText(name, LEFT + 5, y - 8);
     }
 
-    private void drawExecutionMarkers(GraphicsContext g, List<PricePoint> visible, double min, double max,
-                                      double mainBottom, double slot) {
-        if (visible.size() < 8) return;
-        int buyIndex = visible.size() / 3;
-        int sellIndex = visible.size() * 2 / 3;
-        drawMarker(g, visible, buyIndex, min, max, mainBottom, slot, "매수", Color.web("#d92d20"), true);
-        drawMarker(g, visible, sellIndex, min, max, mainBottom, slot, "매도", Color.web("#175cd3"), false);
+    private void drawCurrentPrice(GraphicsContext g, PricePoint latest, double min, double max,
+                                  double mainBottom, double plotRight) {
+        double current = latest.close().doubleValue();
+        if (current < min || current > max) return;
+        boolean up = latest.close().compareTo(latest.open()) >= 0;
+        Color color = Color.web(up ? "#ff4d4f" : "#3b82f6");
+        double y = y(current, min, max, TOP, mainBottom);
+        g.setStroke(color);
+        g.setLineDashes(4, 3);
+        g.strokeLine(LEFT, y, plotRight, y);
+        g.setLineDashes();
+        g.setFill(color);
+        g.fillRoundRect(plotRight + 4, y - 10, RIGHT - 9, 20, 4, 4);
+        g.setFill(Color.WHITE);
+        g.setTextAlign(TextAlignment.CENTER);
+        g.fillText(String.format("%,.0f", current), plotRight + (RIGHT - 1) / 2, y);
     }
 
-    private void drawMarker(GraphicsContext g, List<PricePoint> visible, int index, double min, double max,
-                            double mainBottom, double slot, String text, Color color, boolean below) {
-        PricePoint point = visible.get(index);
-        double x = LEFT + slot * index + slot / 2;
-        double y = y((below ? point.low() : point.high()).doubleValue(), min, max, TOP, mainBottom) + (below ? 12 : -12);
-        g.setFill(color);
-        double direction = below ? -1 : 1;
-        g.fillPolygon(new double[]{x, x - 5, x + 5}, new double[]{y + direction * 6, y - direction * 4, y - direction * 4}, 3);
+    private void drawTimeAxis(GraphicsContext g, List<PricePoint> visible, double slot, double height) {
+        int step = Math.max(1, (int) Math.ceil(visible.size() / 6d));
+        g.setFill(Color.web("#94a3b8"));
         g.setTextAlign(TextAlignment.CENTER);
-        g.fillText(text, x, y + (below ? 13 : -13));
+        for (int index = 0; index < visible.size(); index += step) {
+            PricePoint point = visible.get(index);
+            double x = LEFT + slot * index + slot / 2;
+            g.fillText(String.format("%02d/%02d", point.date().getMonthValue(), point.date().getDayOfMonth()),
+                    x, height - 10);
+        }
+    }
+
+    private void drawOhlcHeader(GraphicsContext g, PricePoint point) {
+        boolean up = point.close().compareTo(point.open()) >= 0;
+        g.setFill(Color.web(up ? "#ff6b6d" : "#60a5fa"));
+        g.setTextAlign(TextAlignment.LEFT);
+        String text = point.date() + "  O " + formatPrice(point.open())
+                + "  H " + formatPrice(point.high())
+                + "  L " + formatPrice(point.low())
+                + "  C " + formatPrice(point.close())
+                + "  V " + String.format("%,d", point.volume());
+        g.fillText(text, LEFT, 18);
     }
 
     private void drawLegend(GraphicsContext g, double width) {
-        g.setFill(Color.web("#344054"));
+        g.setFill(Color.web("#94a3b8"));
         g.setTextAlign(TextAlignment.RIGHT);
         StringBuilder legend = new StringBuilder("거래량");
         if (showMa) legend.append(" · MA5 · MA20");
         if (showBollinger) legend.append(" · Bollinger");
         if (showRsi) legend.append(" · RSI");
         if (showMacd) legend.append(" · MACD");
-        g.fillText(legend.toString(), width - RIGHT, 13);
+        g.fillText(legend.toString(), width - RIGHT, 32);
     }
 
     private void drawCrosshair(GraphicsContext g, List<PricePoint> visible, double min, double max,
                                double mainBottom, double slot, double width) {
         if (crossX < LEFT || crossX > width - RIGHT || crossY < TOP || crossY > mainBottom) return;
-        g.setStroke(Color.web("#344054"));
+        double plotRight = width - RIGHT;
+        g.setStroke(Color.web("#cbd5e1"));
         g.setLineDashes(3, 3);
         g.strokeLine(crossX, TOP, crossX, mainBottom);
         g.strokeLine(LEFT, crossY, width - RIGHT, crossY);
@@ -329,15 +362,23 @@ public final class CandlestickChartView extends Region {
         int index = Math.max(0, Math.min(visible.size() - 1, (int) ((crossX - LEFT) / slot)));
         PricePoint point = visible.get(index);
         double price = max - (crossY - TOP) / (mainBottom - TOP) * (max - min);
-        String label = point.date() + "  종가 " + format(point.close()) + "  위치 " + String.format("%,.0f", price);
-        g.setFont(Font.font("Malgun Gothic", 12));
+        String label = point.date() + "  O " + formatPrice(point.open())
+                + "  H " + formatPrice(point.high()) + "  L " + formatPrice(point.low())
+                + "  C " + formatPrice(point.close()) + "  V " + String.format("%,d", point.volume());
+        g.setFont(Font.font("Noto Sans KR", 12));
         g.setTextAlign(TextAlignment.LEFT);
-        double boxWidth = Math.min(width - LEFT - RIGHT, 280);
-        double boxX = Math.min(Math.max(LEFT, crossX + 8), width - RIGHT - boxWidth);
-        g.setFill(Color.web("#101828", 0.9));
+        double boxWidth = Math.min(plotRight - LEFT, 440);
+        double boxX = Math.min(Math.max(LEFT, crossX + 8), plotRight - boxWidth);
+        g.setFill(Color.web("#1e293b", 0.96));
         g.fillRoundRect(boxX, TOP + 6, boxWidth, 28, 7, 7);
         g.setFill(Color.WHITE);
         g.fillText(label, boxX + 9, TOP + 20);
+
+        g.setFill(Color.web("#334155"));
+        g.fillRoundRect(plotRight + 4, crossY - 10, RIGHT - 9, 20, 4, 4);
+        g.setFill(Color.WHITE);
+        g.setTextAlign(TextAlignment.CENTER);
+        g.fillText(String.format("%,.0f", price), plotRight + (RIGHT - 1) / 2, crossY);
     }
 
     private double rsiAt(List<PricePoint> values, int index, int period) {
@@ -374,5 +415,9 @@ public final class CandlestickChartView extends Region {
 
     private String format(BigDecimal value) {
         return value.setScale(0, RoundingMode.HALF_UP).toPlainString();
+    }
+
+    private String formatPrice(BigDecimal value) {
+        return String.format("%,.0f", value.doubleValue());
     }
 }

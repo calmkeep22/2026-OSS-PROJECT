@@ -18,7 +18,9 @@ public record AccessibilityPreferences(
 
     public AccessibilityPreferences {
         informationDensity = switch (informationDensity == null ? "" : informationDensity.trim()) {
-            case "간단히", "표준", "자세히" -> informationDensity.trim();
+            case "간단히", "좁게" -> "좁게";
+            case "자세히", "넓게" -> "넓게";
+            case "표준" -> "표준";
             default -> "표준";
         };
         voiceName = voiceName == null ? "" : voiceName.trim();

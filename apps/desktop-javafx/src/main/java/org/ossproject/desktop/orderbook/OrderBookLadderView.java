@@ -82,6 +82,9 @@ public final class OrderBookLadderView {
 
         root = new VBox(10, summary, announcement, walls, table);
         root.setPadding(new Insets(12));
+        root.setMinSize(0, 0);
+        root.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
+        VBox.setVgrow(table, Priority.ALWAYS);
     }
 
     /**

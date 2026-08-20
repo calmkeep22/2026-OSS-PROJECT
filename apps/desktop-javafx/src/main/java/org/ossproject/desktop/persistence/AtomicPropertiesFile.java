@@ -1,8 +1,8 @@
 package org.ossproject.desktop.persistence;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -17,8 +17,8 @@ final class AtomicPropertiesFile {
     static Optional<Properties> load(Path file) {
         if (!Files.isRegularFile(file)) return Optional.empty();
         Properties properties = new Properties();
-        try (InputStream input = Files.newInputStream(file)) {
-            properties.load(input);
+        try (var reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+            properties.load(reader);
             return Optional.of(properties);
         } catch (IOException | IllegalArgumentException invalid) {
             return Optional.empty();
