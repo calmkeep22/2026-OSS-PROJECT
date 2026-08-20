@@ -47,6 +47,20 @@ public interface MarketApplicationPort extends AutoCloseable {
     /** 지금 실시간으로 구독 중인 종목 수. */
     int liveSubscriptionCount();
 
+    /**
+     * 실시간 호가창을 구독한다.
+     *
+     * <p>공급원이 호가를 주지 않으면 구독은 만들어지되 아무것도 오지 않는다. 예외를 던지면
+     * 종목 상세 화면 진입 자체가 막히는데, 호가를 못 받는 것과 화면을 열지 못하는 것은
+     * 다른 문제다. 화면은 {@link #supportsOrderBook()} 로 미리 구분한다.
+     *
+     * @param listener 갱신 수신자. 구현이 정한 이벤트 실행자에서 호출된다
+     */
+    EventSubscription monitorOrderBook(SecurityId security, OrderBookListener listener);
+
+    /** 공급원이 실시간 호가를 주는지. 거짓이면 화면은 호가창 대신 안내를 보여 준다. */
+    boolean supportsOrderBook();
+
     /** 앱 종료 시 실시간 연결과 남은 구독을 정리한다. */
     @Override
     void close();

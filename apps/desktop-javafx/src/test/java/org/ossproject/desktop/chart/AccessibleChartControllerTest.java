@@ -172,6 +172,15 @@ class AccessibleChartControllerTest {
             return CompletableFuture.completedFuture(candles());
         }
 
+        @Override public EventSubscription monitorOrderBook(
+                SecurityId security, org.ossproject.application.port.OrderBookListener listener) {
+            return () -> { };
+        }
+
+        @Override public boolean supportsOrderBook() {
+            return false;
+        }
+
         @Override public EventSubscription observeConnection(
                 org.ossproject.application.port.ConnectionListener listener) {
             return () -> { };

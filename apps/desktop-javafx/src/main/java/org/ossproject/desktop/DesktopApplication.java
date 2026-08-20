@@ -51,6 +51,8 @@ import org.ossproject.desktop.viewmodel.StockSearchItem;
 import org.ossproject.desktop.viewmodel.StockSearchViewModel;
 import org.ossproject.desktop.viewmodel.ConnectionViewModel;
 import org.ossproject.desktop.viewmodel.WatchlistViewModel;
+import org.ossproject.desktop.orderbook.OrderBookLadderView;
+import org.ossproject.desktop.viewmodel.OrderBookViewModel;
 import org.ossproject.desktop.viewmodel.StockDetailViewModel;
 import org.ossproject.desktop.viewmodel.StockSelection;
 import org.ossproject.desktop.viewmodel.ScannerViewModel;
@@ -111,6 +113,7 @@ public final class DesktopApplication extends Application {
     private final ConnectionViewModel connectionViewModel;
     private final WatchlistViewModel watchlistViewModel;
     private final StockDetailViewModel stockDetailViewModel;
+    private final OrderBookViewModel orderBookViewModel;
     private final ScannerViewModel scannerViewModel = new ScannerViewModel();
     private final DesktopStateRepository stateRepository;
     private final AccessibilityPreferencesRepository accessibilityPreferencesRepository;
@@ -158,6 +161,7 @@ public final class DesktopApplication extends Application {
                 session, marketApplication, Platform::runLater);
         this.stockDetailViewModel = new StockDetailViewModel(
                 session, marketApplication, Platform::runLater);
+        this.orderBookViewModel = new OrderBookViewModel(marketApplication, Platform::runLater);
     }
 
     @Override public void start(Stage stage) {
@@ -776,6 +780,28 @@ public final class DesktopApplication extends Application {
         subscriptionCount.setAccessibleText("실시간 구독 종목 " + count + "개. 최대 " + maxSubscriptions + "개.");
     }
 
+    /**
+     * 실시간 호가창.
+     *
+     * <p>공급원이 호가를 주지 않으면 호가창 대신 안내를 보여 준다. 빈 표를 띄우면 잔량이
+     * 없는 것인지 연결이 안 된 것인지 구분할 수 없다.
+     */
+    private javafx.scene.Node createOrderBookPanel(String stockName) {
+        OrderBookLadderView ladder = new OrderBookLadderView(stockName);
+        if (!orderBookViewModel.supported()) {
+            ladder.showUnavailable("실시간 호가를 제공하지 않는 연결입니다. " + marketDataSource);
+            return ladder.root();
+        }
+        ladder.showUnavailable("호가를 기다리고 있습니다.");
+        try {
+            orderBookViewModel.start(session.selectedStock().securityId(), ladder::update);
+        } catch (RuntimeException failure) {
+            ladder.showUnavailable("호가 구독을 시작하지 못했습니다. " + failure.getMessage());
+        }
+        refreshSubscriptionCount();
+        return ladder.root();
+    }
+
     /** 음성이 나가는 동안 청각 차트 음량을 낮춘다. 차트를 못 연 상태면 할 일이 없다. */
     private void setChartSpeechActive(boolean active) {
         AccessibleChartController controller = accessibleChartController;
@@ -832,6 +858,7 @@ public final class DesktopApplication extends Application {
             // 종목 상세를 떠나면 봉 구독을 놓는다. 보이지 않는 차트를 계속 갱신할 이유가 없다.
             if (old == Screen.STOCK_DETAIL && screen != Screen.STOCK_DETAIL) {
                 stockDetailViewModel.stopLiveChart();
+                orderBookViewModel.stop();
             }
             refreshSubscriptionCount();
             if (screen == null) return;
@@ -1159,7 +1186,7 @@ public final class DesktopApplication extends Application {
         // 호가·체결·수급·기업정보는 아직 연동하지 않았다. 예전에는 현재가에 임의의 값을
         // 더해 호가를 만들어 보여 주고, 그 호가를 주문 가격으로 넣을 수도 있었다. 시장에
         // 없는 가격으로 주문이 나갈 수 있어 표시 자체를 없앤다.
-        javafx.scene.Node orderBook = notConnectedPanel("호가", "ka10004 주식호가요청");
+        javafx.scene.Node orderBook = createOrderBookPanel(detail.name());
         javafx.scene.Node trades = notConnectedPanel("체결", "ka10003 체결정보요청");
         javafx.scene.Node supply = notConnectedPanel("투자자 수급",
                 "ka10059 종목별투자자기관별, ka10008 외국인 종목별 매매동향");
@@ -2191,6 +2218,7 @@ public final class DesktopApplication extends Application {
         if (persistenceDelay != null) persistenceDelay.stop();
         saveLocalState();
         stockDetailViewModel.stopLiveChart();
+        orderBookViewModel.stop();
         if (connectionWatch != null) connectionWatch.close();
         if (subscriptionTicker != null) subscriptionTicker.stop();
         if (accessibleChartController != null) accessibleChartController.close();

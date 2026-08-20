@@ -8,6 +8,7 @@ import org.ossproject.application.port.EventSubscription;
 import org.ossproject.application.port.MarketApplicationListener;
 import org.ossproject.application.port.MarketApplicationPort;
 import org.ossproject.application.port.MarketDataStreamPort;
+import org.ossproject.application.port.OrderBookListener;
 import org.ossproject.application.port.QuoteListener;
 import org.ossproject.application.port.StockQueryPort;
 import org.ossproject.finance.model.Candle;
@@ -219,6 +220,46 @@ public final class MarketApplicationService implements MarketApplicationPort {
             if (!done.compareAndSet(false, true)) return;
             marketStream.removeConnectionListener(relay);
         };
+    }
+
+    @Override
+    public EventSubscription monitorOrderBook(SecurityId security, OrderBookListener listener) {
+        if (closed.get()) throw new IllegalStateException("시장 Application 서비스가 종료되었습니다.");
+        Objects.requireNonNull(security, "security");
+        Objects.requireNonNull(listener, "listener");
+
+        OrderBookListener relay = book -> {
+            if (security.symbol().equalsIgnoreCase(book.symbol())) {
+                dispatch(() -> listener.onOrderBook(book));
+            }
+        };
+        marketStream.addOrderBookListener(relay);
+
+        boolean retained = false;
+        try {
+            retainMonitor(security);
+            retained = true;
+            if (marketStream.connectionState() == ConnectionState.DISCONNECTED
+                    || marketStream.connectionState() == ConnectionState.FAILED) {
+                marketStream.connect();
+            }
+        } catch (RuntimeException failure) {
+            marketStream.removeOrderBookListener(relay);
+            if (retained) releaseMonitor(security);
+            throw failure;
+        }
+
+        AtomicBoolean done = new AtomicBoolean();
+        return () -> {
+            if (!done.compareAndSet(false, true)) return;
+            marketStream.removeOrderBookListener(relay);
+            releaseMonitor(security);
+        };
+    }
+
+    @Override
+    public boolean supportsOrderBook() {
+        return marketStream.supportsOrderBook();
     }
 
     @Override

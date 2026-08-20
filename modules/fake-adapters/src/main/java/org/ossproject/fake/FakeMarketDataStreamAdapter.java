@@ -3,7 +3,9 @@ package org.ossproject.fake;
 import org.ossproject.application.port.ConnectionListener;
 import org.ossproject.application.port.ConnectionState;
 import org.ossproject.application.port.MarketDataStreamPort;
+import org.ossproject.application.port.OrderBookListener;
 import org.ossproject.application.port.QuoteListener;
+import org.ossproject.finance.model.OrderBook;
 import org.ossproject.finance.model.Quote;
 
 import java.util.Collection;
@@ -16,6 +18,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public final class FakeMarketDataStreamAdapter implements MarketDataStreamPort {
     private final Set<String> subscriptions = new LinkedHashSet<>();
     private final List<QuoteListener> quoteListeners = new CopyOnWriteArrayList<>();
+    private final List<OrderBookListener> orderBookListeners = new CopyOnWriteArrayList<>();
     private final List<ConnectionListener> connectionListeners = new CopyOnWriteArrayList<>();
     private ConnectionState state = ConnectionState.DISCONNECTED;
     private boolean closed;
@@ -68,6 +71,30 @@ public final class FakeMarketDataStreamAdapter implements MarketDataStreamPort {
         return state;
     }
 
+    @Override
+    public boolean supportsOrderBook() {
+        return true;
+    }
+
+    @Override
+    public void addOrderBookListener(OrderBookListener listener) {
+        if (listener != null) orderBookListeners.add(listener);
+    }
+
+    @Override
+    public void removeOrderBookListener(OrderBookListener listener) {
+        orderBookListeners.remove(listener);
+    }
+
+    /** Emits an order book only when connected and subscribed to its symbol. */
+    public void emitOrderBook(OrderBook book) {
+        if (book == null) throw new IllegalArgumentException("Order book is required.");
+        synchronized (this) {
+            if (state != ConnectionState.CONNECTED || !subscriptions.contains(book.symbol())) return;
+        }
+        orderBookListeners.forEach(listener -> listener.onOrderBook(book));
+    }
+
     /** Emits a quote only when connected and subscribed to its symbol. */
     public void emit(Quote quote) {
         if (quote == null) throw new IllegalArgumentException("Quote is required.");
@@ -82,6 +109,7 @@ public final class FakeMarketDataStreamAdapter implements MarketDataStreamPort {
         if (closed) return;
         closed = true;
         subscriptions.clear();
+        orderBookListeners.clear();
         changeState(ConnectionState.DISCONNECTED, null);
     }
 
