@@ -1,16 +1,20 @@
 package org.ossproject.desktop.viewmodel;
 
 import org.ossproject.application.port.EventSubscription;
+import org.ossproject.application.port.ConnectionState;
+import org.ossproject.application.port.MarketApplicationListener;
 import org.ossproject.application.port.MarketApplicationPort;
 import org.ossproject.finance.model.DepthChart;
 import org.ossproject.finance.model.DepthChartConfig;
 import org.ossproject.finance.model.DepthChartView;
 import org.ossproject.finance.model.OrderBook;
+import org.ossproject.finance.model.Quote;
 import org.ossproject.finance.model.PriceLadder;
 import org.ossproject.finance.model.PriceLadderConfig;
 import org.ossproject.finance.model.PriceLadderView;
 import org.ossproject.finance.model.SecurityId;
 
+import java.math.BigDecimal;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.Executor;
@@ -35,7 +39,10 @@ public final class OrderBookViewModel {
     private DepthChart depth;
     private DepthChartView depthView;
     private EventSubscription subscription;
+    private EventSubscription quoteSubscription;
     private SecurityId watching;
+    /** 마지막 체결가. 격자 중심을 잡는 기준이다. 아직 못 받았으면 {@code null}. */
+    private BigDecimal lastTradedPrice;
 
     public OrderBookViewModel(MarketApplicationPort market, Executor stateExecutor) {
         this(market, stateExecutor, PriceLadderConfig.defaults());
@@ -70,6 +77,16 @@ public final class OrderBookViewModel {
     }
 
     /**
+     * 격자 중심이 실제 체결가인지 여부.
+     *
+     * <p>거짓이면 호가 중간값으로 잡은 것이다. 둘은 다른 값이므로 화면이 이름을 구분해
+     * 표시해야 한다. 중간값을 "현재가" 라고 읽어 주면 사용자가 체결가로 오해한다.
+     */
+    public boolean centeredOnTradedPrice() {
+        return lastTradedPrice != null;
+    }
+
+    /**
      * 호가 구독을 시작한다.
      *
      * <p>이미 구독 중이면 먼저 해제한다. 종목을 바꿀 때마다 구독이 쌓이면 호가 한 건에
@@ -100,8 +117,26 @@ public final class OrderBookViewModel {
             depth = DepthChart.create(depth.config());
             view = null;
             depthView = null;
+            lastTradedPrice = null;
         }
         watching = security;
+
+        // 격자 중심은 체결가로 잡는다. 호가 중간값은 스프레드가 벌어지면 체결가와 눈에
+        // 띄게 달라지고, 체결이 나도 호가가 그대로면 움직이지 않는다.
+        quoteSubscription = market.monitor(security, new MarketApplicationListener() {
+            @Override public void onQuote(Quote quote) {
+                stateExecutor.execute(() -> {
+                    if (security.equals(watching) && quote.price() != null
+                            && quote.price().signum() > 0) {
+                        lastTradedPrice = quote.price();
+                    }
+                });
+            }
+
+            @Override public void onConnectionChanged(ConnectionState state, String detail) {
+                // 연결 상태는 상태 표시줄이 따로 보여 준다.
+            }
+        });
 
         subscription = market.monitorOrderBook(security, book -> stateExecutor.execute(() -> {
             // 늦게 도착한 갱신이 이미 바뀐 종목의 화면을 건드리면 안 된다.
@@ -116,19 +151,24 @@ public final class OrderBookViewModel {
 
     /** 구독을 해제한다. 여러 번 불러도 안전하다. */
     public void stop() {
-        EventSubscription current = subscription;
+        EventSubscription book = subscription;
+        EventSubscription quotes = quoteSubscription;
         subscription = null;
-        if (current != null) {
-            current.close();
+        quoteSubscription = null;
+        if (book != null) {
+            book.close();
+        }
+        if (quotes != null) {
+            quotes.close();
         }
     }
 
     private void apply(OrderBook book) {
-        PriceLadder.Update update = ladder.update(book, null);
+        PriceLadder.Update update = ladder.update(book, lastTradedPrice);
         ladder = update.ladder();
         view = update.view();
 
-        DepthChart.Update depthUpdate = depth.update(book, null);
+        DepthChart.Update depthUpdate = depth.update(book, lastTradedPrice);
         depth = depthUpdate.chart();
         depthView = depthUpdate.view();
     }

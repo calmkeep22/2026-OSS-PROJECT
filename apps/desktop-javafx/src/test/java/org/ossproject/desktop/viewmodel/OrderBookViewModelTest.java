@@ -10,6 +10,7 @@ import org.ossproject.finance.model.Exchange;
 import org.ossproject.finance.model.OrderBook;
 import org.ossproject.finance.model.OrderBookLevel;
 import org.ossproject.finance.model.PriceLadderView;
+import org.ossproject.finance.model.Quote;
 import org.ossproject.finance.model.SecurityId;
 
 import java.math.BigDecimal;
@@ -174,5 +175,55 @@ class OrderBookViewModelTest {
         viewModel.start(HYNIX, view -> { }, view -> { });
 
         assertTrue(viewModel.currentDepthView().isEmpty(), "종목이 바뀌면 그래프도 새로 잡아야 합니다");
+    }
+
+    /**
+     * 격자 중심은 체결가로 잡는다. 호가 중간값은 스프레드가 벌어지면 체결가와 달라지고,
+     * 체결이 나도 호가가 그대로면 움직이지 않는다.
+     */
+    @Test void centersTheLadderOnTheLastTradedPriceWhenOneIsKnown() {
+        AtomicReference<PriceLadderView> pushed = new AtomicReference<>();
+        viewModel.start(SAMSUNG, pushed::set);
+
+        stream.emit(new Quote("005930", new BigDecimal("70000"), null, null, null,
+                0L, 0L, 10L, Instant.now()));
+        stream.emitOrderBook(book("005930", 200L));
+
+        assertTrue(viewModel.centeredOnTradedPrice());
+        assertEquals(0, new BigDecimal("70000").compareTo(
+                        pushed.get().currentPriceRow().orElseThrow().price()),
+                "체결가가 있으면 그 가격이 중심이어야 합니다");
+    }
+
+    /** 체결가를 아직 못 받았으면 호가 중간값으로 물러선다. 이름은 화면이 구분한다. */
+    @Test void fallsBackToTheMidPriceBeforeAnyTradeArrives() {
+        AtomicReference<PriceLadderView> pushed = new AtomicReference<>();
+        viewModel.start(SAMSUNG, pushed::set);
+
+        stream.emitOrderBook(book("005930", 200L));
+
+        assertFalse(viewModel.centeredOnTradedPrice());
+        assertTrue(pushed.get().currentPriceRow().isPresent());
+    }
+
+    @Test void forgetsTheTradedPriceWhenTheStockChanges() {
+        viewModel.start(SAMSUNG, view -> { });
+        stream.emit(new Quote("005930", new BigDecimal("70000"), null, null, null,
+                0L, 0L, 10L, Instant.now()));
+        assertTrue(viewModel.centeredOnTradedPrice());
+
+        viewModel.start(HYNIX, view -> { });
+
+        assertFalse(viewModel.centeredOnTradedPrice(), "이전 종목의 체결가를 쓰면 안 됩니다");
+    }
+
+    @Test void stoppingReleasesTheQuoteSubscriptionToo() {
+        viewModel.start(SAMSUNG, view -> { });
+        assertTrue(stream.subscriptions().contains("005930"));
+
+        viewModel.stop();
+
+        assertFalse(stream.subscriptions().contains("005930"),
+                "호가와 체결 구독을 모두 놓아야 합니다");
     }
 }

@@ -43,12 +43,13 @@ public final class OrderBookLadderView {
     private final Label announcement = new Label();
     private final VBox root;
     private boolean live = true;
+    private boolean tradedCenter = true;
 
     public OrderBookLadderView(String stockName) {
         Objects.requireNonNull(stockName, "stockName");
         TableColumn<PriceLadderRow, PriceLadderRow> askColumn = barColumn("매도 잔량", true);
         TableColumn<PriceLadderRow, String> priceColumn =
-                UiKit.textColumn("가격", OrderBookLadderView::priceLabel);
+                UiKit.textColumn("가격", this::priceLabel);
         priceColumn.setStyle("-fx-alignment: CENTER;");
         TableColumn<PriceLadderRow, PriceLadderRow> bidColumn = barColumn("매수 잔량", false);
         table = new TableView<>(rows);
@@ -164,7 +165,7 @@ public final class OrderBookLadderView {
             return;
         }
         String text = view.currentPriceRow()
-                .map(row -> "현재가 " + price(row.price()) + ". ")
+                .map(row -> (tradedCenter ? "현재가 " : "호가 중간가 ") + price(row.price()) + ". ")
                 .orElse("")
                 + "표시 범위 " + view.highestPrice().map(OrderBookLadderView::price).orElse("-")
                 + " 부터 " + view.lowestPrice().map(OrderBookLadderView::price).orElse("-")
@@ -214,8 +215,22 @@ public final class OrderBookLadderView {
         return text;
     }
 
-    private static String priceLabel(PriceLadderRow row) {
-        return price(row.price()) + (row.currentPriceRow() ? "  현재가" : "");
+    private String priceLabel(PriceLadderRow row) {
+        if (!row.currentPriceRow()) {
+            return price(row.price());
+        }
+        return price(row.price()) + (tradedCenter ? "  현재가" : "  중간가");
+    }
+
+    /**
+     * 격자 중심이 체결가인지 호가 중간값인지 알려 준다.
+     *
+     * <p>둘은 다른 값이다. 스프레드가 벌어지면 눈에 띄게 차이 나고, 체결이 나도 호가가
+     * 그대로면 중간값은 움직이지 않는다. 중간값을 "현재가" 라고 읽어 주면 사용자가
+     * 체결가로 오해한다.
+     */
+    public void setTradedCenter(boolean value) {
+        this.tradedCenter = value;
     }
 
     private static String price(BigDecimal value) {

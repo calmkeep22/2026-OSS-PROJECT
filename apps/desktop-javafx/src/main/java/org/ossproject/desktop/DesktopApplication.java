@@ -801,8 +801,11 @@ public final class DesktopApplication extends Application {
         }
         ladder.showUnavailable("호가를 기다리고 있습니다.");
         try {
-            orderBookViewModel.start(session.selectedStock().securityId(),
-                    ladder::update, depth::update);
+            orderBookViewModel.start(session.selectedStock().securityId(), view -> {
+                // 체결가를 아직 못 받았으면 격자 중심은 호가 중간값이다. 이름을 구분한다.
+                ladder.setTradedCenter(orderBookViewModel.centeredOnTradedPrice());
+                ladder.update(view);
+            }, depth::update);
         } catch (RuntimeException failure) {
             ladder.showUnavailable("호가 구독을 시작하지 못했습니다. " + failure.getMessage());
         }
