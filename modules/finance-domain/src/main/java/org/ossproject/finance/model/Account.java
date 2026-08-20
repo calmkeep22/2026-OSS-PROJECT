@@ -11,12 +11,13 @@ import java.util.Optional;
  * <p>불변 객체이며 변경은 새 인스턴스를 반환한다.
  *
  * @param deposits        예수금 단계. 증권사가 주지 않으면 {@link Deposits#from(Balance)} 로 채운다
- * @param estimatedAssets 증권사가 계산해 내려준 추정예탁자산. 없으면 {@code null}.
- *                        직접 더한 값보다 이쪽이 우선이다. 미수·신용·대출처럼 우리가 세지
- *                        않는 항목까지 포함하므로, 직접 더하면 증권사 화면과 어긋난다
+ * @param reported        증권사가 계산해 내려준 계좌 총계. 직접 더한 값보다 이쪽이 우선이다.
+ *                        미수·신용·대출·수수료처럼 우리가 세지 않는 항목까지 포함하므로,
+ *                        직접 더하면 증권사 화면과 어긋난다
+ * @param estimatedAssets 증권사 추정예탁자산. 없으면 {@code null}
  */
 public record Account(String accountNo, Balance balance, List<Position> positions,
-                      Deposits deposits, BigDecimal estimatedAssets) {
+                      Deposits deposits, ReportedValuation reported, BigDecimal estimatedAssets) {
 
     public Account {
         if (accountNo == null || accountNo.isBlank()) {
@@ -27,11 +28,12 @@ public record Account(String accountNo, Balance balance, List<Position> position
         }
         positions = List.copyOf(positions == null ? List.of() : positions);
         deposits = deposits == null ? Deposits.from(balance) : deposits;
+        reported = reported == null ? ReportedValuation.none() : reported;
     }
 
     /** 증권사 요약 없이 원장만으로 만든 계좌. 모의 거래가 쓴다. */
     public Account(String accountNo, Balance balance, List<Position> positions) {
-        this(accountNo, balance, positions, null, null);
+        this(accountNo, balance, positions, null, null, null);
     }
 
     public static Account of(String accountNo, BigDecimal cash) {
@@ -45,10 +47,16 @@ public record Account(String accountNo, Balance balance, List<Position> position
         return positions.stream().filter(p -> p.symbol().equals(symbol)).findFirst();
     }
 
-    /** 보유 종목 평가 금액 합계. 예수금은 제외한다. */
+    /** 보유 종목 평가 금액 합계. 예수금은 제외한다. 증권사가 준 총평가금액이 있으면 그것을 쓴다. */
     public BigDecimal totalMarketValue() {
-        return positions.stream().map(Position::marketValue)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return reported.or(reported.evaluation(), positions.stream().map(Position::marketValue)
+                .reduce(BigDecimal.ZERO, BigDecimal::add));
+    }
+
+    /** 총매입금액. 증권사가 준 값이 있으면 그것을 쓴다. */
+    public BigDecimal totalPurchase() {
+        return reported.or(reported.purchaseAmount(), positions.stream().map(Position::costBasis)
+                .reduce(BigDecimal.ZERO, BigDecimal::add));
     }
 
     /**
@@ -73,14 +81,24 @@ public record Account(String accountNo, Balance balance, List<Position> position
         return estimatedAssets != null;
     }
 
+    /**
+     * 총 평가손익. 증권사가 준 값이 있으면 그것을 쓴다.
+     *
+     * <p>직접 더한 값은 매매수수료와 거래세를 세지 않아 증권사 화면보다 이익 쪽으로 치우친다.
+     */
     public BigDecimal totalProfitLoss() {
-        return positions.stream().map(Position::profitLoss)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return reported.or(reported.profitLoss(), positions.stream().map(Position::profitLoss)
+                .reduce(BigDecimal.ZERO, BigDecimal::add));
+    }
+
+    /** 계좌 총계가 증권사가 계산한 값인지. 거짓이면 앱이 직접 더한 값이다. */
+    public boolean valuationReportedByBroker() {
+        return reported.isPresent() || estimatedAssets != null;
     }
 
     /** 원장이 바뀌면 증권사 요약은 더 이상 맞지 않는다. 예수금 단계도 원장에서 다시 잡는다. */
     public Account withBalance(Balance newBalance) {
-        return new Account(accountNo, newBalance, positions, null, null);
+        return new Account(accountNo, newBalance, positions, null, null, null);
     }
 
     /**
@@ -106,8 +124,8 @@ public record Account(String accountNo, Balance balance, List<Position> position
         if (!replaced && position.quantity() > 0) {
             updated.add(position);
         }
-        // 보유가 바뀌면 증권사가 준 총액은 낡은 값이다. 예수금은 그대로 두고 총액만 버린다.
-        return new Account(accountNo, balance, updated, deposits, null);
+        // 보유가 바뀌면 증권사가 준 총계는 낡은 값이다. 예수금은 그대로 두고 총계만 버린다.
+        return new Account(accountNo, balance, updated, deposits, null, null);
     }
 
     /** 실시간 시세를 보유 종목에 반영한다. 보유하지 않은 종목이면 그대로 돌려준다. */
