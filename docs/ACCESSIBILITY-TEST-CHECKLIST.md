@@ -2,6 +2,18 @@
 
 자동 검사는 접근 가능한 이름과 ViewModel 정책을 확인한다. 실제 스크린리더의 읽기 순서와 음성 품질은 아래 절차로 별도 확인한다.
 
+## 자동 검사
+
+`ScreenAccessibilityTest` 가 실제 화면 조각을 만들어 `AccessibilityAudit` 를 돌린다. 초점을 받을 수 있는데 접근 가능한 이름이 없는 노드가 있으면 실패한다.
+
+```
+gradlew.bat :apps:desktop-javafx:test --tests "*ScreenAccessibilityTest*"
+```
+
+Monocle 로 표시 장치 없이 JavaFX 툴킷을 띄우므로 CI 에서도 그대로 돌아간다. 화면을 새로 만들면 이 검사에 추가한다.
+
+이름이 있는지만 본다. 그 이름이 읽기 좋은지, 초점 순서가 자연스러운지, 음성이 알아들을 만한지는 아래 수동 절차로 확인한다.
+
 ## NVDA + Windows
 
 1. NVDA를 실행하고 앱을 `gradlew.bat :apps:desktop-javafx:run`으로 시작한다.

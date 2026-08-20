@@ -18,6 +18,15 @@ application {
     mainClass = "org.ossproject.desktop.DesktopApplication"
 }
 
+// 화면 계층을 검증하려면 JavaFX 툴킷이 필요하다. 표시 장치 없이 띄운다.
+tasks.withType<Test>().configureEach {
+    systemProperty("glass.platform", "Monocle")
+    systemProperty("monocle.platform", "Headless")
+    systemProperty("prism.order", "sw")
+    systemProperty("prism.text", "t2k")
+    systemProperty("java.awt.headless", "true")
+}
+
 val desktopJava = javaToolchains.launcherFor {
     languageVersion = JavaLanguageVersion.of(17)
 }
@@ -86,6 +95,9 @@ dependencies {
     implementation(project(":modules:windows-secret-store"))
 
     testImplementation(testFixtures(project(":modules:application")))
+    // 헤드리스로 JavaFX 툴킷을 띄운다. CI 는 ubuntu 와 windows 를 모두 돌리는데
+    // xvfb 는 windows 러너에서 쓸 수 없다.
+    testRuntimeOnly("org.testfx:openjfx-monocle:jdk-12.0.1+2")
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
