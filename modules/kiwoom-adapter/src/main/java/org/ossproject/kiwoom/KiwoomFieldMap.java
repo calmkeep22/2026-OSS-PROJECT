@@ -56,7 +56,7 @@ public final class KiwoomFieldMap {
                 .map(KiwoomField.ACCOUNT_CASH, "entr")
                 .map(KiwoomField.ACCOUNT_SETTLED_CASH, "d2_entra")
                 .map(KiwoomField.ACCOUNT_ORDERABLE, "ord_alow_amt")
-                .map(KiwoomField.ACCOUNT_WITHDRAWABLE, "wthd_alowa")
+                .map(KiwoomField.ACCOUNT_WITHDRAWABLE, "pymn_alow_amt")
                 .map(KiwoomField.ACCOUNT_ESTIMATED_ASSETS, "prsm_dpst_aset_amt")
                 .map(KiwoomField.ACCOUNT_POSITIONS, "acnt_evlt_remn_indv_tot")
                 .map(KiwoomField.POSITION_SYMBOL, "stk_cd")

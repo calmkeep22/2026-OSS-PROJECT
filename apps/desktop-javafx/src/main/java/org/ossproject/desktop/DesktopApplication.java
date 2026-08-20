@@ -792,8 +792,8 @@ public final class DesktopApplication extends Application {
                         "평가금액 " + Formatters.won(snapshot.totalMarketValue())
                                 + " · " + assetsSource(snapshot),
                         snapshot.totalProfitLoss().signum() >= 0 ? "positive" : "negative"),
-                summaryCard("주문 가능 금액", Formatters.won(snapshot.balance().available()),
-                        "예수금 " + Formatters.won(snapshot.balance().cash()), "neutral"));
+                summaryCard("주문 가능 금액", Formatters.won(snapshot.deposits().orderable()),
+                        "예수금 " + Formatters.won(snapshot.deposits().cash()), "neutral"));
 
         TableView<ObservableList<String>> holdings = textTable("홈 보유종목 요약",
                 snapshot.positions().stream().map(position -> row(
