@@ -448,6 +448,16 @@ def text_bar(s: float, width: int = 40) -> str:
     return "".join(bar)
 
 
+# 제목에서 뽑을 수치. `summarize_event` 가 쓰는데 정의가 빠져 있어서 요약을 만들 때마다
+# NameError 로 죽었다 — `analyze()` 가 통째로 실패해 뉴스 기능이 한 번도 동작하지 않았다.
+#
+# 단위를 붙여 잡는 이유는 숫자만 뽑으면 "3분기" 의 3 과 "3퍼센트" 의 3 이 구별되지 않기
+# 때문이다. 긴 단위를 앞에 두어야 "억원" 이 "억" 으로 잘리지 않는다.
+_NUM_PAT = re.compile(
+    r"([-+]?\d[\d,]*(?:\.\d+)?)\s*"
+    r"(조원|억원|만원|퍼센트|포인트|달러|조|억|만|원|배|%|bp)")
+
+
 def summarize_event(row: pd.Series, titles: list[str] | None = None) -> str:
     """
     사건 하나를 한 문장으로.

@@ -11,9 +11,10 @@ import java.util.Optional;
  *
  * @param similarityPercent 모양이 얼마나 닮았나. 형태 0.7 · 진폭 0.2 · 수익률 0.1
  * @param comovementPercent 봉마다 실제로 함께 움직였나. 유사도와 다른 질문이다
+ * @param explanation       어디가 어떻게 닮았는지. 서비스가 쓴 문장을 그대로 쓴다
  */
 public record SimilarStock(String symbol, String name, BigDecimal similarityPercent,
-                           Optional<BigDecimal> comovementPercent) {
+                           Optional<BigDecimal> comovementPercent, String explanation) {
 
     public SimilarStock {
         if (symbol == null || symbol.isBlank()) {
@@ -22,10 +23,21 @@ public record SimilarStock(String symbol, String name, BigDecimal similarityPerc
         name = name == null || name.isBlank() ? symbol : name;
         similarityPercent = similarityPercent == null ? BigDecimal.ZERO : similarityPercent;
         comovementPercent = comovementPercent == null ? Optional.empty() : comovementPercent;
+        explanation = explanation == null ? "" : explanation.trim();
     }
 
     public SimilarStock(String symbol, String name, BigDecimal similarityPercent) {
-        this(symbol, name, similarityPercent, Optional.empty());
+        this(symbol, name, similarityPercent, Optional.empty(), "");
+    }
+
+    public SimilarStock(String symbol, String name, BigDecimal similarityPercent,
+                        Optional<BigDecimal> comovementPercent) {
+        this(symbol, name, similarityPercent, comovementPercent, "");
+    }
+
+    /** 설명이 있는지. 없으면 화면이 대신 지어내지 않는다. */
+    public boolean hasExplanation() {
+        return !explanation.isBlank();
     }
 
     /**

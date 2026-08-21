@@ -325,7 +325,10 @@ public final class HttpAiInsightAdapter implements AiInsightPort {
                 score = decimal(entry, "similarity");
             }
             stocks.add(new SimilarStock(symbol, name, percent(score),
-                    Optional.ofNullable(decimal(entry, "동조도")).map(HttpAiInsightAdapter::percent)));
+                    Optional.ofNullable(decimal(entry, "동조도")).map(HttpAiInsightAdapter::percent),
+                    // 어디가 어떻게 닮았는지는 서비스가 문장으로 준다. 화면이 성분 숫자를
+                    // 보고 말을 지어내면 서비스가 쓴 것과 다른 근거가 된다.
+                    text(entry, "explain")));
         }
         return List.copyOf(stocks);
     }

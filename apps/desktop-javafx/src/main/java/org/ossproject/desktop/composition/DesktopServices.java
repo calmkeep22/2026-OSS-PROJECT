@@ -59,6 +59,7 @@ public record DesktopServices(
         AccessibilityPreferencesRepository accessibilityPreferences,
         SonificationPreferencesRepository sonificationPreferences,
         AiInsightPort aiInsight,
+        org.ossproject.ai.NewsPort news,
         AiServiceProcess aiServiceProcess,
         String marketDataSource
 ) {
@@ -93,7 +94,7 @@ public record DesktopServices(
                         stateDirectory.resolve("accessibility.properties"), legacyState),
                 new PropertiesSonificationPreferencesRepository(
                         stateDirectory.resolve("sonification.properties")),
-                ai.port(), ai.process(),
+                ai.port(), ai.news(), ai.process(),
                 source.description());
     }
 
@@ -103,8 +104,14 @@ public record DesktopServices(
      * <p>실시간 스트림도 여기 함께 담는다. 조회는 증권사에서 받고 실시간은 가짜를 쓰면,
      * 화면에 시세가 멈춰 있어도 연결이 끊긴 것인지 장이 조용한 것인지 알 수 없다.
      */
-    /** AI 분석 창구와 그것을 띄운 프로세스. 프로세스는 앱이 꺼질 때 함께 내린다. */
-    private record AiService(AiInsightPort port, AiServiceProcess process) {
+    /**
+     * AI 창구들과 그것을 띄운 프로세스. 프로세스는 앱이 꺼질 때 함께 내린다.
+     *
+     * <p>분석과 뉴스를 나눈 이유는 실패 범위가 다르기 때문이다. 뉴스는 남의 서버(RSS)를
+     * 거치므로 예측·이상감지가 멀쩡해도 혼자 실패한다.
+     */
+    private record AiService(AiInsightPort port, org.ossproject.ai.NewsPort news,
+                             AiServiceProcess process) {
     }
 
     /**
@@ -119,21 +126,24 @@ public record DesktopServices(
      */
     private static AiService createAiService() {
         int port = aiPort();
+        URI baseUri = URI.create("http://127.0.0.1:" + port);
         AiInsightPort adapter = new HttpAiInsightAdapter(
-                URI.create("http://127.0.0.1:" + port), java.time.Clock.systemDefaultZone());
+                baseUri, java.time.Clock.systemDefaultZone());
+        org.ossproject.ai.NewsPort news =
+                new org.ossproject.ai.http.HttpNewsAdapter(baseUri);
 
         Optional<Path> directory = AiServiceProcess.locateServiceDirectory();
         if (directory.isEmpty()) {
             LOGGER.log(System.Logger.Level.INFO, "ai-service 를 찾지 못했습니다. AI 기능은 꺼집니다.");
-            return new AiService(adapter, null);
+            return new AiService(adapter, news, null);
         }
         AiServiceProcess process = new AiServiceProcess(directory.get(), port);
         if (!process.start()) {
             LOGGER.log(System.Logger.Level.INFO,
                     "AI 서버를 띄우지 못했습니다. ai-service 에서 pip install -r requirements.txt 를 실행해주세요.");
-            return new AiService(adapter, null);
+            return new AiService(adapter, news, null);
         }
-        return new AiService(adapter, process);
+        return new AiService(adapter, news, process);
     }
 
     /** 포트를 바꿔야 하는 환경을 위해 열어 둔다. */
