@@ -19,6 +19,9 @@ import java.util.function.Consumer;
  */
 public final class AiInsightCard {
 
+    /** 한 줄이 이보다 길면 눈이 다음 줄 첫머리를 놓친다. */
+    private static final double MAX_READING_WIDTH = 820;
+
     private final Label narration = new Label();
     private final Label caveats = new Label();
     private final Button listen;
@@ -54,10 +57,16 @@ public final class AiInsightCard {
         waiting();
     }
 
-    /** 카드 폭에 맞춰 줄을 바꾼다. 좌우 여백 16 씩을 뺀다. */
+    /**
+     * 읽기 좋은 폭에서 줄을 바꾼다.
+     *
+     * <p>카드 폭에만 맞추면 카드가 창보다 넓어졌을 때 문장이 창 밖으로 나가 잘린다. 한 줄이
+     * 너무 길어도 눈이 다음 줄 첫머리를 찾기 어렵다. 둘 중 좁은 쪽을 쓴다.
+     */
     private void bindWrapWidth(Label label) {
         label.setMinWidth(0);
-        label.maxWidthProperty().bind(root.widthProperty().subtract(32));
+        label.maxWidthProperty().bind(javafx.beans.binding.Bindings.min(
+                root.widthProperty().subtract(32), MAX_READING_WIDTH));
     }
 
     private String spoken = "";
