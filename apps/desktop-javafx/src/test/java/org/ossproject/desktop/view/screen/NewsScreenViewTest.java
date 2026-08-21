@@ -242,4 +242,42 @@ class NewsScreenViewTest {
         }
         return null;
     }
+
+    /**
+     * 칸을 조용히 빼지 않는다. 사건 칸이 아예 없는 것과 사건이 없는 것은 다른 뜻인데,
+     * 없어져 버리면 사용자는 화면이 덜 그려진 것인지 사건이 없는 것인지 알 수 없다.
+     */
+    @Test
+    @DisplayName("사건이 없어도 칸은 남기고 없다고 적는다")
+    void keepsTheEventSectionEvenWhenEmpty() {
+        JavaFxToolkit.onFxThread(() -> {
+            NewsScreenView view = new NewsScreenView("A전자", (a, b) -> { },
+                    (question, onAnswer) -> { }, () -> { });
+            Node root = view.create();
+            view.show(emptyDigest());
+
+            List<String> texts = textsOf(root);
+            assertTrue(texts.contains("주요 사건"), texts.toString());
+            assertTrue(texts.contains("묶어 낼 만한 사건을 찾지 못했습니다."), texts.toString());
+            assertTrue(texts.contains("기사"), texts.toString());
+        });
+    }
+
+    @Test
+    @DisplayName("사건과 기사를 받으면 둘 다 목록으로 보여 준다")
+    void showsEveryEventAndArticle() {
+        JavaFxToolkit.onFxThread(() -> {
+            NewsScreenView view = new NewsScreenView("A전자", (a, b) -> { },
+                    (question, onAnswer) -> { }, () -> { });
+            Node root = view.create();
+            view.show(digest());
+
+            List<String> texts = textsOf(root);
+            assertTrue(texts.stream().anyMatch(t -> t.contains("1. A전자가 신규 시설 투자를")),
+                    texts.toString());
+            assertTrue(texts.contains("A전자, 신규 시설 투자 계획 공시"), texts.toString());
+            assertTrue(texts.stream().anyMatch(t -> t.contains("오늘 시황 보도입니다.")),
+                    texts.toString());
+        });
+    }
 }

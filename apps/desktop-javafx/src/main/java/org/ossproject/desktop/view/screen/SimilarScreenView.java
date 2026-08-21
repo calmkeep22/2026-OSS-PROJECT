@@ -142,12 +142,43 @@ public final class SimilarScreenView {
         listen.setOnAction(event -> speak.accept(spokenOf(queryName, stock), "similar-stock"));
         Button watch = new Button("관심 종목에 추가");
         watch.setOnAction(event -> addToWatchlist.accept(stock.symbol(), stock.name()));
-        Button compareButton = new Button("나란히 보기");
+        Button compareButton = new Button("차트 비교 보기");
         compareButton.setOnAction(event -> compare.accept(stock.symbol(), stock.name()));
 
         card.getChildren().add(wrappingRow(8, listen, compareButton, watch));
-        card.setAccessibleText(rank + "위 " + stock.describe());
+
+        // 카드를 눌러도 차트가 열린다. 버튼만 두면 눈으로 보는 사람은 카드를 눌러 보고
+        // 아무 일도 안 일어나 고장으로 읽는다.
+        openChartOnActivate(card, stock, compareButton);
+        card.setAccessibleText(rank + "위 " + stock.describe() + ". 누르면 차트를 비교합니다.");
         return card;
+    }
+
+    /**
+     * 카드를 눌렀을 때 차트를 연다.
+     *
+     * <p>마우스뿐 아니라 키보드로도 열려야 한다. 클릭만 받으면 키보드로 다니는 사용자에게는
+     * 이 카드가 없는 것과 같다. 그래서 초점을 받을 수 있게 하고 엔터와 스페이스를 함께 받는다.
+     *
+     * <p>버튼 위에서 누른 것은 흘려보낸다. 안 그러면 "관심 종목에 추가" 를 눌렀는데 차트까지
+     * 열린다.
+     */
+    private static void openChartOnActivate(VBox card, SimilarStock stock, Button primary) {
+        card.setFocusTraversable(true);
+        card.getStyleClass().add("clickable-card");
+        card.setOnMouseClicked(event -> {
+            if (event.getTarget() instanceof Button) {
+                return;
+            }
+            primary.fire();
+        });
+        card.setOnKeyPressed(event -> {
+            if (event.getCode() == javafx.scene.input.KeyCode.ENTER
+                    || event.getCode() == javafx.scene.input.KeyCode.SPACE) {
+                primary.fire();
+                event.consume();
+            }
+        });
     }
 
     /**

@@ -94,26 +94,28 @@ public final class NewsScreenView {
                     wrappingRow(8, listen, countsLabel(digest)));
         });
 
-        if (!digest.events().isEmpty()) {
-            VBox events = new VBox(8);
-            int index = 1;
-            for (String event : digest.events()) {
-                events.getChildren().add(eventRow(index++, event));
-            }
-            newsBody.getChildren().add(card("주요 사건", events));
+        // 칸을 조용히 빼지 않는다. 사건 칸이 아예 없는 것과 사건이 없는 것은 다른 뜻인데,
+        // 없어져 버리면 사용자는 화면이 덜 그려진 것인지 사건이 없는 것인지 알 수 없다.
+        VBox events = new VBox(8);
+        int index = 1;
+        for (String event : digest.events()) {
+            events.getChildren().add(eventRow(index++, event));
         }
+        if (digest.events().isEmpty()) {
+            events.getChildren().add(new Label("묶어 낼 만한 사건을 찾지 못했습니다."));
+        }
+        newsBody.getChildren().add(card("주요 사건", events));
 
         // 시황은 사건이 아니라 배경이다. 위치로 그 차이를 알린다.
         digest.marketLine().ifPresent(line ->
                 newsBody.getChildren().add(card("시황", wrappingLabel(line))));
 
-        if (digest.articles().isEmpty()) {
-            newsBody.getChildren().add(new Label(digest.briefing()));
-            return;
-        }
         VBox articles = new VBox(10);
         for (NewsArticle article : digest.articles()) {
             articles.getChildren().add(articleCard(article));
+        }
+        if (digest.articles().isEmpty()) {
+            articles.getChildren().add(wrappingLabel(digest.briefing()));
         }
         newsBody.getChildren().add(card("기사", articles));
     }

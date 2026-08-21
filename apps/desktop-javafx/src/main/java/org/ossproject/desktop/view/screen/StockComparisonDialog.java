@@ -10,7 +10,9 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
+import org.ossproject.desktop.chart.CandlestickChartView;
 import org.ossproject.finance.model.Candle;
+import org.ossproject.finance.model.PricePoint;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -22,8 +24,9 @@ import java.util.Optional;
 /**
  * 두 종목을 나란히 보여 준다.
  *
- * <p>차트를 그리지 않는다. 화면을 볼 수 없는 사용자에게 두 개의 선은 아무것도 아니다.
- * 대신 두 종목의 같은 기간 등락을 같은 말로 적어 견줄 수 있게 한다.
+ * <p>차트와 말을 함께 둔다. 눈으로 보는 사람에게는 두 곡선을 겹쳐 보는 것이 가장 빠르고,
+ * 화면을 볼 수 없는 사람에게 두 개의 선은 아무것도 아니다. 그래서 같은 기간 등락을 같은
+ * 말로도 적어 둔다. 차트에는 접근성 이름이 붙어 있어 읽어 줄 수 있다.
  *
  * <p>봉을 못 받으면 가격 자리를 비운다. 채워 넣지 않는다 — 화면을 볼 수 없는 사용자는
  * 지어낸 값과 실제 시세를 구별할 방법이 없고, 그 값으로 주문을 낸다.
@@ -105,6 +108,9 @@ public final class StockComparisonDialog {
         price.getStyleClass().add("metric-value");
         column.getChildren().add(price);
 
+        // 차트는 곁들이는 것이다. 못 그려도 숫자와 말은 그대로 남아야 한다.
+        chartOf(bars).ifPresent(column.getChildren()::add);
+
         changeOverWeek(bars).ifPresent(change -> {
             Label label = new Label(prefixed(change) + "퍼센트");
             label.getStyleClass().add(change.signum() >= 0 ? "price-up" : "price-down");
@@ -113,6 +119,26 @@ public final class StockComparisonDialog {
         column.setAccessibleText(name + " " + WON.format(last.get()) + "원"
                 + changeOverWeek(bars).map(c -> ", 최근 5거래일 " + prefixed(c) + "퍼센트").orElse(""));
         return column;
+    }
+
+    /**
+     * 봉을 캔들 차트로.
+     *
+     * <p>같은 그림 도구를 종목 상세와 함께 쓴다. 여기서만 다르게 그리면 같은 종목이 화면에
+     * 따라 다르게 보인다.
+     */
+    private static Optional<CandlestickChartView> chartOf(List<Candle> bars) {
+        List<PricePoint> points = new java.util.ArrayList<>();
+        for (Candle bar : bars) {
+            points.add(bar.toPricePoint(java.time.ZoneId.of("Asia/Seoul")));
+        }
+        if (points.isEmpty()) {
+            return Optional.empty();
+        }
+        CandlestickChartView chart = new CandlestickChartView(points);
+        chart.setPrefHeight(220);
+        chart.setMinHeight(200);
+        return Optional.of(chart);
     }
 
     /**

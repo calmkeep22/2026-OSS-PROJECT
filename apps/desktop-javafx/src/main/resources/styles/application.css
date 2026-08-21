@@ -233,6 +233,10 @@
     -fx-background-radius: 13; -fx-padding: 0 6; }
 /* 챗봇과 나. 말풍선 방향 대신 배경으로 가른다 — 화면을 볼 수 없으면 방향은 안 들린다.
    그래서 접근성 이름에도 누가 한 말인지 먼저 넣는다. */
+/* 눌러서 여는 카드. 초점 테두리를 굵게 준다 — 키보드로 다니는 사용자에게는 지금 어디에
+   있는지가 이 테두리 하나뿐이다. */
+.clickable-card:hover { -fx-border-color: #3d6aff; -fx-cursor: hand; }
+.clickable-card:focused { -fx-border-color: #3d6aff; -fx-border-width: 2; }
 .chat-bot { -fx-background-color: #f4f7ff; -fx-border-color: #c9d6ff; }
 .chat-user { -fx-background-color: #ffffff; -fx-border-color: #dfe3e8; }
 .state-preview { -fx-background-color: #ffffff; -fx-border-color: #d1d6db; -fx-border-radius: 12; -fx-background-radius: 12; -fx-padding: 18; }

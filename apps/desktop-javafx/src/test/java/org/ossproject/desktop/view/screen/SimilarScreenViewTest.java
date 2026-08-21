@@ -184,4 +184,94 @@ class SimilarScreenViewTest {
             parent.getChildrenUnmodifiable().forEach(child -> collectButtons(child, into));
         }
     }
+
+    /** 버튼만 두면 눈으로 보는 사람은 카드를 눌러 보고 아무 일도 안 일어나 고장으로 읽는다. */
+    @Test
+    @DisplayName("카드를 눌러도 차트가 열린다")
+    void opensTheChartWhenTheCardIsClicked() {
+        JavaFxToolkit.onFxThread(() -> {
+            AtomicReference<String> compared = new AtomicReference<>();
+            SimilarScreenView view = new SimilarScreenView("A전자",
+                    (text, channel) -> { }, (symbol, name) -> { },
+                    (symbol, name) -> compared.set(name), retry -> { });
+            Node root = view.create();
+            view.show(insight(Optional.empty(),
+                    new SimilarStock("000660", "B종목", new BigDecimal("91"))));
+
+            cardOf(root).getOnMouseClicked().handle(new javafx.scene.input.MouseEvent(
+                    javafx.scene.input.MouseEvent.MOUSE_CLICKED, 0, 0, 0, 0,
+                    javafx.scene.input.MouseButton.PRIMARY, 1,
+                    false, false, false, false, true, false, false, false, false, false, null));
+
+            assertEquals("B종목", compared.get());
+        });
+    }
+
+    /** 클릭만 받으면 키보드로 다니는 사용자에게는 이 카드가 없는 것과 같다. */
+    @Test
+    @DisplayName("엔터로도 차트가 열린다")
+    void opensTheChartFromTheKeyboard() {
+        JavaFxToolkit.onFxThread(() -> {
+            AtomicReference<String> compared = new AtomicReference<>();
+            SimilarScreenView view = new SimilarScreenView("A전자",
+                    (text, channel) -> { }, (symbol, name) -> { },
+                    (symbol, name) -> compared.set(name), retry -> { });
+            Node root = view.create();
+            view.show(insight(Optional.empty(),
+                    new SimilarStock("000660", "B종목", new BigDecimal("91"))));
+
+            javafx.scene.layout.VBox card = cardOf(root);
+            assertTrue(card.isFocusTraversable(), "카드가 초점을 받지 못하면 키보드로 닿을 수 없다.");
+            card.getOnKeyPressed().handle(new javafx.scene.input.KeyEvent(
+                    javafx.scene.input.KeyEvent.KEY_PRESSED, "", "",
+                    javafx.scene.input.KeyCode.ENTER, false, false, false, false));
+
+            assertEquals("B종목", compared.get());
+        });
+    }
+
+    /** 관심 종목에 담으려고 눌렀는데 차트까지 열리면 안 된다. */
+    @Test
+    @DisplayName("카드 안의 버튼을 누르면 차트는 열지 않는다")
+    void ignoresClicksThatLandOnAButton() {
+        JavaFxToolkit.onFxThread(() -> {
+            AtomicReference<String> compared = new AtomicReference<>();
+            SimilarScreenView view = new SimilarScreenView("A전자",
+                    (text, channel) -> { }, (symbol, name) -> { },
+                    (symbol, name) -> compared.set(name), retry -> { });
+            Node root = view.create();
+            view.show(insight(Optional.empty(),
+                    new SimilarStock("000660", "B종목", new BigDecimal("91"))));
+
+            javafx.scene.layout.VBox card = cardOf(root);
+            javafx.scene.control.Button watch = new javafx.scene.control.Button("관심 종목에 추가");
+            javafx.scene.input.MouseEvent onButton = new javafx.scene.input.MouseEvent(
+                    null, watch, javafx.scene.input.MouseEvent.MOUSE_CLICKED, 0, 0, 0, 0,
+                    javafx.scene.input.MouseButton.PRIMARY, 1,
+                    false, false, false, false, true, false, false, false, false, false, null);
+            card.getOnMouseClicked().handle(onButton);
+
+            assertNull(compared.get());
+        });
+    }
+
+    /** 닮은 종목 카드를 찾는다. 첫 카드가 1위다. */
+    private static javafx.scene.layout.VBox cardOf(Node root) {
+        List<javafx.scene.layout.VBox> found = new ArrayList<>();
+        collectCards(root, found);
+        assertFalse(found.isEmpty(), "닮은 종목 카드를 찾지 못했습니다.");
+        return found.get(0);
+    }
+
+    private static void collectCards(Node node, List<javafx.scene.layout.VBox> into) {
+        if (node instanceof javafx.scene.layout.VBox box
+                && box.getStyleClass().contains("clickable-card")) {
+            into.add(box);
+        }
+        if (node instanceof ScrollPane scroll && scroll.getContent() != null) {
+            collectCards(scroll.getContent(), into);
+        } else if (node instanceof Parent parent) {
+            parent.getChildrenUnmodifiable().forEach(child -> collectCards(child, into));
+        }
+    }
 }
