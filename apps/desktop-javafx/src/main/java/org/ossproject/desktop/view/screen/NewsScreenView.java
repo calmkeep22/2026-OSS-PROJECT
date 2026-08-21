@@ -120,9 +120,16 @@ public final class NewsScreenView {
         newsBody.getChildren().add(card("기사", articles));
     }
 
+    /**
+     * 무엇을 몇 건 받았는지.
+     *
+     * <p>논조별 건수만 적으면 화면에 보이는 목록과 맞는지 알 수 없다. 받은 기사와 사건
+     * 개수를 함께 적어 두면 화면이 덜 그려진 것인지 원래 없는 것인지 바로 드러난다.
+     */
     private Label countsLabel(NewsDigest digest) {
         Label label = new Label("긍정 " + digest.positive() + "건 · 중립 " + digest.neutral()
-                + "건 · 부정 " + digest.negative() + "건");
+                + "건 · 부정 " + digest.negative() + "건 · 받은 기사 " + digest.articles().size()
+                + "건 · 사건 " + digest.events().size() + "개");
         label.getStyleClass().add("metric-detail");
         return label;
     }

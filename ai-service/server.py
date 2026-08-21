@@ -233,7 +233,8 @@ def news(request: NewsRequest) -> dict:
     # 이 종목을 미리받기 목록에 넣는다. 사용자가 실제로 보는 종목이 곧 쌓아야 할 종목이다.
     NEWS_CACHE.track([meta["label"]])
 
-    result = N.analyze(meta["label"], days=request.days)
+    # 들고 있는 것이 있으면 그대로 준다. 매번 새로 받으면 화면을 열 때마다 11초다.
+    result = NEWS_CACHE.digest(meta["label"])
     if not result:
         # 기사가 없는 것과 조회 실패는 다르다. 빈 목록으로 뭉개면 구별되지 않는다.
         return {"종목코드": meta["code"], "종목명": meta["label"],
@@ -312,7 +313,7 @@ def chat(request: ChatRequest) -> dict:
     )
     # 뉴스는 앱이 안 보낸다. 이미 받아 둔 것이 있으면 쓰고, 없으면 없는 대로 답한다.
     try:
-        result = N.analyze(meta["label"], days=7)
+        result = NEWS_CACHE.digest(meta["label"])
         if result:
             facts.news_score = result["score"]
             facts.news_events = list(result["summaries"])

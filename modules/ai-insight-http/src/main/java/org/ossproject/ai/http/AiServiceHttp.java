@@ -28,8 +28,13 @@ final class AiServiceHttp {
 
     /** 분석은 167ms 안에 끝난다. 이보다 오래 걸리면 서버가 준비 중이거나 막힌 것이다. */
     private static final Duration CALL_TIMEOUT = Duration.ofSeconds(15);
-    /** 뉴스는 남의 서버(RSS)를 거친다. 분석과 같은 잣대로 재면 늘 시간 초과가 난다. */
-    private static final Duration NEWS_TIMEOUT = Duration.ofSeconds(30);
+    /**
+     * 뉴스 시간 제한.
+     *
+     * <p>남의 서버(RSS)를 거친다. 실측 11~40초라 30초로는 실제로 걸렸다. 서비스가 결과를
+     * 들고 있으므로 이만큼 기다리는 것은 그 종목을 처음 여는 한 번뿐이다.
+     */
+    private static final Duration NEWS_TIMEOUT = Duration.ofSeconds(90);
 
     private final URI baseUri;
     private final HttpClient http;
