@@ -1679,7 +1679,7 @@ public final class DesktopApplication extends Application {
                         "미국주식 주문은 아직 연동되지 않았습니다. 연동 예정: ust20000 매수, ust20001 매도"));
     }
 
-    private VBox createAnomalyScreen() {
+    private javafx.scene.Node createAnomalyScreen() {
         Label title = heading("이상 감지");
         Label monitoring = new Label(anomalySubscriptions.isEmpty()
                 ? "보유종목이나 관심종목이 있으면 실시간 감시를 시작합니다."
@@ -1770,7 +1770,13 @@ public final class DesktopApplication extends Application {
         body.getStyleClass().addAll("screen-content", "anomaly-screen");
         body.setPadding(new Insets(12));
         VBox.setVgrow(centered, Priority.ALWAYS);
-        return body;
+        // 내용이 창보다 길어지면 BorderPane 은 넘친 만큼 위쪽 막대를 덮는다. 잘라 내지 않고
+        // 스크롤로 닿게 한다. AI 분석이 여러 줄로 접히면 화면이 쉽게 길어진다.
+        ScrollPane scroll = new ScrollPane(body);
+        scroll.setFitToWidth(true);
+        scroll.setAccessibleText("이상 감지 화면");
+        scroll.getStyleClass().add("workspace-scroll");
+        return scroll;
     }
 
     /**
