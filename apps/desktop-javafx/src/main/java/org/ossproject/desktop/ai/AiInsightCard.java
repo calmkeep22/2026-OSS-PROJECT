@@ -24,6 +24,9 @@ public final class AiInsightCard {
     private static final double MAX_READING_WIDTH = 820;
 
     private final Label narration = new Label();
+    private final Label direction = new Label();
+    private final Label risk = new Label();
+    private final Label similar = new Label();
     private final Label caveats = new Label();
     private final Button listen;
     private final Button retry;
@@ -33,6 +36,20 @@ public final class AiInsightCard {
         Objects.requireNonNull(onListen, "onListen");
         narration.setWrapText(true);
         narration.getStyleClass().add("ai-narration");
+        // 방향 예측은 문안과 섞지 않는다. 문안은 변동성 이야기라 한 덩이로 읽으면 어느
+        // 확률이 무엇에 대한 것인지 흐려진다.
+        direction.setWrapText(true);
+        direction.getStyleClass().add("ai-narration");
+        direction.setVisible(false);
+        direction.setManaged(false);
+        // 위험도와 닮은 차트도 문안과 섞지 않는다. 한 덩이가 되면 어느 문장이 사실이고
+        // 어느 문장이 참고인지 귀로 가려내기 어렵다.
+        for (Label label : new Label[]{risk, similar}) {
+            label.setWrapText(true);
+            label.getStyleClass().add("ai-narration");
+            label.setVisible(false);
+            label.setManaged(false);
+        }
         caveats.setWrapText(true);
         caveats.getStyleClass().add("safety-note");
         caveats.setVisible(false);
@@ -48,12 +65,16 @@ public final class AiInsightCard {
 
         Label title = new Label("AI 분석");
         title.getStyleClass().add("card-title");
-        root = new VBox(10, title, narration, caveats, new javafx.scene.layout.HBox(8, listen, retry));
+        root = new VBox(10, title, narration, direction, risk, similar, caveats,
+                new javafx.scene.layout.HBox(8, listen, retry));
         root.getStyleClass().add("panel-card");
         root.setPadding(new Insets(16));
         // 부모가 폭을 잡아 주지 않으면 wrapText 만으로는 줄이 바뀌지 않는다. 라벨이 한 줄로
         // 늘어나 문장 뒤쪽이 잘린다. 잘린 문장은 신뢰도와 면책이 사라진 문장이다.
         bindWrapWidth(narration);
+        bindWrapWidth(direction);
+        bindWrapWidth(risk);
+        bindWrapWidth(similar);
         bindWrapWidth(caveats);
         waiting();
     }
@@ -108,6 +129,9 @@ public final class AiInsightCard {
         String caveatText = String.join(" ", insight.requiredCaveats());
         String failureText = insight.partialFailureText().orElse("");
         show(insight.narration(), (caveatText + " " + failureText).trim());
+        setLine(direction, insight.directionText().orElse(""));
+        setLine(risk, insight.riskText().orElse(""));
+        setLine(similar, insight.similarText().orElse(""));
         spoken = insight.fullNarration();
         listen.setDisable(false);
     }
@@ -141,7 +165,19 @@ public final class AiInsightCard {
         retry.setManaged(false);
     }
 
+    /** 값이 없으면 줄 자체를 없앤다. 빈 줄은 스크린리더가 지나가며 읽을 것이 없다. */
+    private static void setLine(Label label, String text) {
+        boolean has = !text.isBlank();
+        label.setText(text);
+        label.setAccessibleText(text);
+        label.setVisible(has);
+        label.setManaged(has);
+    }
+
     private void show(String main, String extra) {
+        setLine(direction, "");
+        setLine(risk, "");
+        setLine(similar, "");
         narration.setText(main);
         narration.setAccessibleText(main);
         spoken = main;

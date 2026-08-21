@@ -125,6 +125,31 @@ def brief(request: BriefRequest) -> dict:
         raise HTTPException(400, str(error))
 
 
+@app.post("/predict")
+def predict(request: BriefRequest) -> dict:
+    """
+    한 가지 예측만 받는다.
+
+    `brief` 는 기본값인 변동성만 담는다. 방향(오를까 내릴까)까지 보여 주려면 따로 부른다.
+    방향은 검증에서 우연과 구별되지 않아 응답에 `유의미: false` 가 실려 나간다. 부르는
+    쪽이 그 사실을 함께 보여야 한다.
+    """
+    bars = _to_frame(request.bars)
+    try:
+        return SV.predict(
+            request.code,
+            bars=bars,
+            target=request.target,
+            with_news=request.with_news,
+        )
+    except SV.UnknownSymbol:
+        raise HTTPException(404, "그런 종목이 없습니다")
+    except SV.InsufficientData as error:
+        raise HTTPException(422, f"자료가 부족합니다 ({error})")
+    except SV.ServiceError as error:
+        raise HTTPException(400, str(error))
+
+
 def _to_frame(bars: list[Bar]):
     """봉을 넘기면 네트워크 요청이 나가지 않는다. 비어 있으면 자체 조회에 맡긴다."""
     if not bars:

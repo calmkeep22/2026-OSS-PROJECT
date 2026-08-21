@@ -18,7 +18,9 @@ import java.util.Optional;
  * 신뢰도가 낮으면 그 사실이 문장 안에 들어 있다. 화면이 문장을 새로 지어내지 말고 이것을
  * 그대로 쓴다.
  *
- * @param partialFailures 일부만 실패했을 때 무엇이 실패했는지. 전체를 실패로 만들지 않는다
+ * @param forecast          기본 예측. 다음 거래일에 크게 움직일지 잔잔할지
+ * @param directionForecast 오를지 내릴지. 검증에서 우연과 구별되지 않아 함께 알려야 한다
+ * @param partialFailures   일부만 실패했을 때 무엇이 실패했는지. 전체를 실패로 만들지 않는다
  */
 public record AiInsight(
         String symbol,
@@ -27,6 +29,7 @@ public record AiInsight(
         Confidence confidence,
         boolean statisticallyMeaningful,
         Optional<Forecast> forecast,
+        Optional<Forecast> directionForecast,
         Optional<AnomalySignal> anomaly,
         List<SimilarStock> similar,
         Map<String, String> partialFailures
@@ -41,6 +44,7 @@ public record AiInsight(
         name = name == null || name.isBlank() ? symbol : name;
         confidence = confidence == null ? Confidence.UNKNOWN : confidence;
         forecast = forecast == null ? Optional.empty() : forecast;
+        directionForecast = directionForecast == null ? Optional.empty() : directionForecast;
         anomaly = anomaly == null ? Optional.empty() : anomaly;
         similar = List.copyOf(similar == null ? List.of() : similar);
         partialFailures = Map.copyOf(partialFailures == null ? Map.of() : partialFailures);
@@ -60,6 +64,12 @@ public record AiInsight(
         if (!statisticallyMeaningful) {
             caveats.add("이 예측은 검증에서 우연과 구별되지 않았습니다. 판단 근거로 삼지 마세요.");
         }
+        // 방향 예측은 검증에서 우연과 구별되지 않았다. 차익거래로 지워지기 때문이다.
+        // 누가 내일 오를 것을 알면 오늘 산다. 이 사실을 빼면 동전 던지기를 신호로 읽는다.
+        if (directionForecast.isPresent() && !directionForecast.get().meaningful()) {
+            caveats.add("오를지 내릴지에 대한 예측은 검증에서 우연과 구별되지 않았습니다. "
+                    + "참고만 하고 판단 근거로 삼지 마세요.");
+        }
         if (!similar.isEmpty()) {
             caveats.add("닮은 차트는 과거 모양이 비슷하다는 뜻일 뿐, 앞으로 같이 움직인다는 뜻이 아닙니다.");
         }
@@ -67,9 +77,57 @@ public record AiInsight(
         return List.copyOf(caveats);
     }
 
-    /** 화면과 음성이 함께 쓰는 전체 문장. 문안 뒤에 단서를 잇는다. */
+    /**
+     * 방향 예측을 읽어 줄 문장. 받지 못했으면 비어 있다.
+     *
+     * <p>없을 때 빈 문장을 지어내지 않는다. 화면을 볼 수 없는 사용자는 지어낸 문장과 실제
+     * 예측을 구별할 방법이 없다.
+     */
+    public Optional<String> directionText() {
+        return directionForecast.map(Forecast::narration);
+    }
+
+    /**
+     * 이 종목을 다루는 방법에 대한 문장. 위험도와 그에 딸린 조언이다.
+     *
+     * <p>문안에는 오늘 무슨 일이 있었는지만 들어 있고 위험도는 빠져 있다. 같은 이상
+     * 신호라도 평소 크게 흔들리는 종목과 잔잔한 종목은 뜻이 다르다.
+     */
+    public Optional<String> riskText() {
+        return anomaly.flatMap(signal -> {
+            String grade = signal.riskGrade();
+            String advice = signal.riskAdvice();
+            if (grade.isBlank() && advice.isBlank()) {
+                return Optional.empty();
+            }
+            String head = grade.isBlank() ? "" : "이 종목의 위험도는 " + grade + "입니다.";
+            return Optional.of((head + " " + advice).trim());
+        });
+    }
+
+    /**
+     * 닮은 종목을 모두 읽어 줄 문장.
+     *
+     * <p>문안은 가장 닮은 하나만 말한다. 하나만 들으면 그 종목이 특별해 보이는데, 실제로는
+     * 비슷한 후보가 여럿이고 그중 첫째일 뿐이다.
+     */
+    public Optional<String> similarText() {
+        if (similar.isEmpty()) {
+            return Optional.empty();
+        }
+        List<String> parts = new ArrayList<>();
+        for (SimilarStock stock : similar) {
+            parts.add(stock.describe());
+        }
+        return Optional.of("닮은 차트: " + String.join(", ", parts) + ".");
+    }
+
+    /** 화면과 음성이 함께 쓰는 전체 문장. 문안과 곁들일 사실 뒤에 단서를 잇는다. */
     public String fullNarration() {
         StringBuilder sb = new StringBuilder(narration);
+        directionText().ifPresent(text -> sb.append(' ').append(text));
+        riskText().ifPresent(text -> sb.append(' ').append(text));
+        similarText().ifPresent(text -> sb.append(' ').append(text));
         for (String caveat : requiredCaveats()) {
             sb.append(' ').append(caveat);
         }
@@ -93,7 +151,7 @@ public record AiInsight(
     public static AiInsight of(String symbol, String name, String narration, Confidence confidence,
                                boolean meaningful) {
         return new AiInsight(symbol, name, narration, confidence, meaningful,
-                Optional.empty(), Optional.empty(), List.of(), Map.of());
+                Optional.empty(), Optional.empty(), Optional.empty(), List.of(), Map.of());
     }
 
     @Override

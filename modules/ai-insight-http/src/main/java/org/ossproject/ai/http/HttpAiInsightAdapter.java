@@ -95,13 +95,25 @@ public final class HttpAiInsightAdapter implements AiInsightPort {
             throw new AiUnavailableException(
                     "분석에 넣을 확정된 봉이 없습니다. 장 마감 뒤에 다시 시도해주세요.");
         }
-        return toInsight(security, post("/brief", requestBody(security, settled, withSimilar)));
+        JsonNode brief = post("/brief", requestBody(security, settled, withSimilar, "변동성"));
+        // 방향은 brief 가 담지 않는다. 따로 받아 함께 보여 준다. 검증에서 우연과 구별되지
+        // 않았으므로 그 사실도 값에 실려 온다. 실패해도 나머지를 버리지 않는다.
+        Optional<Forecast> direction = Optional.empty();
+        try {
+            direction = toForecast(post("/predict",
+                    requestBody(security, settled, false, "방향")));
+        } catch (RuntimeException ignored) {
+            // 방향을 못 받아도 변동성과 이상감지는 그대로 쓴다.
+        }
+        return toInsight(security, brief, direction);
     }
 
-    private String requestBody(SecurityId security, List<Candle> bars, boolean withSimilar) {
+    private String requestBody(SecurityId security, List<Candle> bars, boolean withSimilar,
+                               String target) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"code\":\"").append(security.symbol()).append("\",")
                 .append("\"with_similar\":").append(withSimilar).append(",")
+                .append("\"target\":\"").append(target).append("\",")
                 // 뉴스를 켜면 1~3초가 되고 거의 전부 RSS 요청이다. 화면이 기다릴 시간이 아니다.
                 .append("\"with_news\":false,")
                 .append("\"bars\":[");
@@ -181,7 +193,7 @@ public final class HttpAiInsightAdapter implements AiInsightPort {
         };
     }
 
-    private AiInsight toInsight(SecurityId security, JsonNode root) {
+    private AiInsight toInsight(SecurityId security, JsonNode root, Optional<Forecast> direction) {
         JsonNode forecastNode = root.path("예측");
         String narration = text(root, "문안");
         if (narration.isBlank()) {
@@ -195,6 +207,7 @@ public final class HttpAiInsightAdapter implements AiInsightPort {
                 // 방향 예측은 검증에서 우연과 구별되지 않았다. 서비스가 그 사실을 실어 보낸다.
                 forecastNode.path("유의미").asBoolean(false),
                 toForecast(forecastNode),
+                direction,
                 toAnomaly(root.path("이상감지")),
                 toSimilar(root.path("유사종목")),
                 toFailures(root.path("오류")));
@@ -216,7 +229,8 @@ public final class HttpAiInsightAdapter implements AiInsightPort {
         }
         return Optional.of(new Forecast(target, verdict,
                 probability == null ? BigDecimal.ZERO : probability,
-                date(node, "대상일"), node.path("금일여부").asBoolean(false)));
+                date(node, "대상일"), node.path("금일여부").asBoolean(false),
+                node.path("유의미").asBoolean(false)));
     }
 
     private Optional<AnomalySignal> toAnomaly(JsonNode node) {

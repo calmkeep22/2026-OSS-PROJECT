@@ -58,7 +58,7 @@ class AiInsightTest {
     @DisplayName("닮은 종목이 있으면 예측이 아니라는 사실을 함께 전한다")
     void warnsThatSimilarityIsNotAForecast() {
         AiInsight withSimilar = new AiInsight("005930", "삼성전자", "문장", Confidence.HIGH, true,
-                Optional.empty(), Optional.empty(),
+                Optional.empty(), Optional.empty(), Optional.empty(),
                 List.of(new SimilarStock("000660", "SK하이닉스", new BigDecimal("77"))), Map.of());
 
         assertTrue(withSimilar.requiredCaveats().stream()
@@ -81,7 +81,7 @@ class AiInsightTest {
     @DisplayName("일부 실패를 감추지 않는다")
     void reportsPartialFailures() {
         AiInsight partial = new AiInsight("005930", "삼성전자", "문장", Confidence.HIGH, true,
-                Optional.empty(), Optional.empty(), List.of(),
+                Optional.empty(), Optional.empty(), Optional.empty(), List.of(),
                 Map.of("유사도", "ReferenceMissing"));
 
         assertTrue(partial.hasPartialFailure());
@@ -101,5 +101,103 @@ class AiInsightTest {
         assertEquals(Confidence.UNKNOWN, Confidence.from("이상한값"));
         assertTrue(Confidence.UNKNOWN.needsWarning());
         assertTrue(Confidence.from("높음").needsWarning() == false);
+    }
+
+    /**
+     * 방향 예측은 검증에서 우연과 구별되지 않았다. 차익거래로 지워지기 때문이다. 누가
+     * 내일 오를 것을 알면 오늘 산다. 이 사실을 빼면 동전 던지기를 신호로 읽는다.
+     */
+    @Test
+    @DisplayName("방향 예측을 보여 줄 때는 우연과 구별되지 않았다는 사실을 함께 전한다")
+    void warnsAboutTheDirectionForecast() {
+        Forecast direction = new Forecast("방향", "상승", new BigDecimal("52.9"),
+                java.time.LocalDate.of(2026, 8, 24), false, false);
+        AiInsight insight = new AiInsight("005930", "삼성전자", "문장", Confidence.HIGH, true,
+                Optional.empty(), Optional.of(direction), Optional.empty(), List.of(), Map.of());
+
+        assertTrue(insight.requiredCaveats().stream()
+                .anyMatch(c -> c.contains("오를지 내릴지")), insight.requiredCaveats().toString());
+    }
+
+    /** 검증을 통과한 예측까지 싸잡아 경고하면 경고가 무뎌진다. */
+    @Test
+    @DisplayName("검증을 통과한 방향 예측에는 경고를 붙이지 않는다")
+    void staysQuietWhenTheDirectionForecastIsMeaningful() {
+        Forecast direction = new Forecast("방향", "상승", new BigDecimal("52.9"),
+                java.time.LocalDate.of(2026, 8, 24), false, true);
+        AiInsight insight = new AiInsight("005930", "삼성전자", "문장", Confidence.HIGH, true,
+                Optional.empty(), Optional.of(direction), Optional.empty(), List.of(), Map.of());
+
+        assertFalse(insight.requiredCaveats().stream()
+                .anyMatch(c -> c.contains("오를지 내릴지")));
+    }
+
+    /**
+     * 위험도는 문안에 없다. 같은 이상 신호라도 평소 크게 흔들리는 종목과 잔잔한 종목은
+     * 뜻이 다르다. 빠지면 사용자는 그 차이를 알 방법이 없다.
+     */
+    @Test
+    @DisplayName("위험도와 조언을 읽어 줄 문장으로 만든다")
+    void readsOutTheRiskGrade() {
+        AnomalySignal signal = new AnomalySignal(true, "강함", "하락",
+                java.time.LocalDate.of(2026, 8, 21), new BigDecimal("-4.2"),
+                "상위 12퍼센트", "한 번에 사지 말고 나누어 담으세요.");
+        AiInsight insight = new AiInsight("005930", "삼성전자", "문장", Confidence.HIGH, true,
+                Optional.empty(), Optional.empty(), Optional.of(signal), List.of(), Map.of());
+
+        assertEquals("이 종목의 위험도는 상위 12퍼센트입니다. 한 번에 사지 말고 나누어 담으세요.",
+                insight.riskText().orElseThrow());
+        assertTrue(insight.fullNarration().contains("상위 12퍼센트"));
+    }
+
+    /** 위험도를 받지 못했으면 지어내지 않는다. 지어낸 문장은 실제와 구별되지 않는다. */
+    @Test
+    @DisplayName("위험도가 없으면 문장을 만들지 않는다")
+    void staysSilentWithoutARiskGrade() {
+        AnomalySignal signal = new AnomalySignal(false, "약함", "상승",
+                java.time.LocalDate.of(2026, 8, 21), new BigDecimal("0.3"), "", "");
+        AiInsight insight = new AiInsight("005930", "삼성전자", "문장", Confidence.HIGH, true,
+                Optional.empty(), Optional.empty(), Optional.of(signal), List.of(), Map.of());
+
+        assertTrue(insight.riskText().isEmpty());
+    }
+
+    /**
+     * 문안은 가장 닮은 하나만 말한다. 하나만 들으면 그 종목이 특별해 보이는데 실제로는
+     * 비슷한 후보가 여럿이고 그중 첫째일 뿐이다.
+     */
+    @Test
+    @DisplayName("닮은 종목을 받은 만큼 모두 읽어 준다")
+    void readsOutEverySimilarStock() {
+        AiInsight insight = new AiInsight("005930", "삼성전자", "문장", Confidence.HIGH, true,
+                Optional.empty(), Optional.empty(), Optional.empty(),
+                List.of(new SimilarStock("000660", "SK하이닉스", new BigDecimal("88")),
+                        new SimilarStock("035420", "NAVER", new BigDecimal("85"))),
+                Map.of());
+
+        String text = insight.similarText().orElseThrow();
+        assertTrue(text.contains("SK하이닉스"), text);
+        assertTrue(text.contains("NAVER"), text);
+    }
+
+    /** 화면 글자와 음성이 다르면 스크린리더 사용자만 다른 내용을 듣는다. */
+    @Test
+    @DisplayName("읽어 주는 문장에 방향·위험도·닮은 차트가 모두 들어간다")
+    void spokenTextCarriesEveryPart() {
+        Forecast direction = new Forecast("방향", "상승", new BigDecimal("52.9"),
+                java.time.LocalDate.of(2026, 8, 24), false, false);
+        AnomalySignal signal = new AnomalySignal(true, "강함", "하락",
+                java.time.LocalDate.of(2026, 8, 21), new BigDecimal("-4.2"),
+                "상위 12퍼센트", "나누어 담으세요.");
+        AiInsight insight = new AiInsight("005930", "삼성전자", "문안", Confidence.HIGH, true,
+                Optional.empty(), Optional.of(direction), Optional.of(signal),
+                List.of(new SimilarStock("000660", "SK하이닉스", new BigDecimal("88"))), Map.of());
+
+        String spoken = insight.fullNarration();
+        assertTrue(spoken.startsWith("문안"), spoken);
+        assertTrue(spoken.contains("방향 예측은 상승입니다"), spoken);
+        assertTrue(spoken.contains("상위 12퍼센트"), spoken);
+        assertTrue(spoken.contains("SK하이닉스"), spoken);
+        assertTrue(spoken.contains("투자 권유가 아닙니다"), spoken);
     }
 }
