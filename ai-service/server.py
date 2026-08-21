@@ -5,7 +5,7 @@ HTTP 서버 — 자바 앱이 부르는 창구.
 라이브러리에는 손대지 않는다. 여기서 하는 일은 셋뿐이다.
 
     1. 기동할 때 warm() 을 부른다
-    2. brief() 를 HTTP 로 감싼다
+    2. brief() · predict() · similar() 를 HTTP 로 감싼다
     3. health() 를 그대로 내보낸다
 
 왜 서버인가
@@ -142,6 +142,35 @@ def predict(request: BriefRequest) -> dict:
             target=request.target,
             with_news=request.with_news,
         )
+    except SV.UnknownSymbol:
+        raise HTTPException(404, "그런 종목이 없습니다")
+    except SV.InsufficientData as error:
+        raise HTTPException(422, f"자료가 부족합니다 ({error})")
+    except SV.ServiceError as error:
+        raise HTTPException(400, str(error))
+
+
+@app.post("/similar")
+def similar(request: BriefRequest) -> dict:
+    """
+    닮은 차트를 통째로 받는다.
+
+    `brief` 도 유사종목을 담지만 종목명·코드·유사도만 추린 요약이다. 거기서 빠지는 것이
+    셋 있고 셋 다 UI 가 반드시 써야 하는 값이다.
+
+        forward     닮은 구간 다음에 상승 몇 건 · 하락 몇 건이었나
+        disclaimer  이건 예측이 아니라는 서비스가 쓴 문장
+        동조도      봉마다 실제로 함께 움직였나
+
+    특히 `forward` 는 유사도 기능이 사실로 말할 수 있는 거의 전부다. 평균 수익률로
+    요약하지 않는 이유는 요약하는 순간 예측처럼 읽히기 때문이다.
+
+    `동조도` 없이 유사도만 보여 주면 오해한다. 모양이 0.98 로 닮았는데 동조가 0.21 인
+    짝이 흔하다 — 다른 시기의 다른 종목이 우연히 같은 곡선을 그린 경우다.
+    """
+    bars = _to_frame(request.bars)
+    try:
+        return SV.similar(request.code, bars=bars)
     except SV.UnknownSymbol:
         raise HTTPException(404, "그런 종목이 없습니다")
     except SV.InsufficientData as error:

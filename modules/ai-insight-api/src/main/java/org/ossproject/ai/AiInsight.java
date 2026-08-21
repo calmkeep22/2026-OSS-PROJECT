@@ -20,6 +20,7 @@ import java.util.Optional;
  *
  * @param forecast          기본 예측. 다음 거래일에 크게 움직일지 잔잔할지
  * @param directionForecast 오를지 내릴지. 검증에서 우연과 구별되지 않아 함께 알려야 한다
+ * @param similarOutlook    닮은 구간 다음에 실제로 무슨 일이 있었는지와 서비스가 쓴 단서
  * @param partialFailures   일부만 실패했을 때 무엇이 실패했는지. 전체를 실패로 만들지 않는다
  */
 public record AiInsight(
@@ -32,6 +33,7 @@ public record AiInsight(
         Optional<Forecast> directionForecast,
         Optional<AnomalySignal> anomaly,
         List<SimilarStock> similar,
+        Optional<SimilarOutlook> similarOutlook,
         Map<String, String> partialFailures
 ) {
     public AiInsight {
@@ -47,6 +49,7 @@ public record AiInsight(
         directionForecast = directionForecast == null ? Optional.empty() : directionForecast;
         anomaly = anomaly == null ? Optional.empty() : anomaly;
         similar = List.copyOf(similar == null ? List.of() : similar);
+        similarOutlook = similarOutlook == null ? Optional.empty() : similarOutlook;
         partialFailures = Map.copyOf(partialFailures == null ? Map.of() : partialFailures);
     }
 
@@ -71,7 +74,12 @@ public record AiInsight(
                     + "참고만 하고 판단 근거로 삼지 마세요.");
         }
         if (!similar.isEmpty()) {
-            caveats.add("닮은 차트는 과거 모양이 비슷하다는 뜻일 뿐, 앞으로 같이 움직인다는 뜻이 아닙니다.");
+            // 서비스가 쓴 문장이 있으면 그것을 쓴다. 같은 뜻으로 고쳐 쓰면 무엇이 서비스의
+            // 주장이고 무엇이 우리 해석인지 사용자가 구별할 수 없게 된다.
+            caveats.add(similarOutlook.map(SimilarOutlook::disclaimer)
+                    .filter(text -> !text.isBlank())
+                    .orElse("닮은 차트는 과거 모양이 비슷하다는 뜻일 뿐, "
+                            + "앞으로 같이 움직인다는 뜻이 아닙니다."));
         }
         caveats.add("투자 권유가 아닙니다. 이 분석은 다음 거래일 하루만 봅니다.");
         return List.copyOf(caveats);
@@ -119,7 +127,12 @@ public record AiInsight(
         for (SimilarStock stock : similar) {
             parts.add(stock.describe());
         }
-        return Optional.of("닮은 차트: " + String.join(", ", parts) + ".");
+        String text = "닮은 차트: " + String.join(", ", parts) + ".";
+        // 닮았다는 사실만 말하면 그다음이 궁금해진다. 그 자리를 비워 두면 사용자가
+        // 스스로 채운다. 실제로 무슨 일이 있었는지는 세어 둔 값이 있다.
+        return Optional.of(similarOutlook.filter(SimilarOutlook::hasCounts)
+                .map(outlook -> text + " " + outlook.describe())
+                .orElse(text));
     }
 
     /** 화면과 음성이 함께 쓰는 전체 문장. 문안과 곁들일 사실 뒤에 단서를 잇는다. */
@@ -151,7 +164,8 @@ public record AiInsight(
     public static AiInsight of(String symbol, String name, String narration, Confidence confidence,
                                boolean meaningful) {
         return new AiInsight(symbol, name, narration, confidence, meaningful,
-                Optional.empty(), Optional.empty(), Optional.empty(), List.of(), Map.of());
+                Optional.empty(), Optional.empty(), Optional.empty(), List.of(),
+                Optional.empty(), Map.of());
     }
 
     @Override

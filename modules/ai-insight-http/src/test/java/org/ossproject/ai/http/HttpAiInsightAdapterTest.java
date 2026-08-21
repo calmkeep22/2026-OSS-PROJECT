@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.ossproject.ai.AiInsight;
+import org.ossproject.ai.Forecast;
 import org.ossproject.finance.model.Candle;
 import org.ossproject.finance.model.CandleInterval;
 import org.ossproject.finance.model.SecurityId;
@@ -57,6 +58,24 @@ class HttpAiInsightAdapterTest {
              "상승확률":52.9,"대상일":"2026-08-24","금일여부":false}
             """;
 
+    private static final String SIMILAR = """
+            {"종목코드":"005930","종목명":"삼성전자","후보종목수":299,
+             "results":[
+               {"rank":1,"code":"000660","name":"SK하이닉스","end":"2024-03-15",
+                "similarity":0.932,"동조도":0.21},
+               {"rank":2,"code":"035420","name":"NAVER","end":"2023-11-02",
+                "similarity":0.881,"동조도":0.64},
+               {"rank":3,"code":"051910","name":"LG화학","end":"2023-06-01",
+                "similarity":0.870,"동조도":0.33},
+               {"rank":4,"code":"005380","name":"현대차","end":"2023-02-14",
+                "similarity":0.862,"동조도":0.41},
+               {"rank":5,"code":"068270","name":"셀트리온","end":"2022-12-05",
+                "similarity":0.855,"동조도":0.19}],
+             "forward_summary":{"n":5,"up":3,"down":2,"median_pct":3.91,
+                                "note":"표본이 적고 미래를 보장하지 않습니다."},
+             "disclaimer":"이건 예측이 아닙니다. 닮은 구간 다음 일을 세었을 뿐입니다."}
+            """;
+
     private HttpServer server;
     private final Map<String, String> bodies = new ConcurrentHashMap<>();
     private final List<String> paths = new ArrayList<>();
@@ -66,6 +85,7 @@ class HttpAiInsightAdapterTest {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/brief", exchange -> respond(exchange, 200, BRIEF));
         server.createContext("/predict", exchange -> respond(exchange, 200, PREDICT));
+        server.createContext("/similar", exchange -> respond(exchange, 200, SIMILAR));
         server.start();
     }
 
@@ -143,6 +163,110 @@ class HttpAiInsightAdapterTest {
 
         assertTrue(insight.directionForecast().isEmpty());
         assertEquals("크게움직임", insight.forecast().orElseThrow().verdict());
+        assertTrue(insight.narration().contains("이례적"));
+    }
+
+    /**
+     * brief 의 유사종목 요약에는 함께 움직인 정도가 없다. 모양이 0.93 으로 닮았는데
+     * 동조가 0.21 인 짝이 흔하다 — 다른 시기의 다른 종목이 우연히 같은 곡선을 그린 경우다.
+     */
+    @Test
+    @DisplayName("닮은 종목은 /similar 원본에서 함께 움직인 정도까지 받는다")
+    void fetchesTheFullSimilarPayload() {
+        AiInsight insight = adapter().brief(SecurityId.of("005930", "KRX"), bars(), true);
+
+        assertEquals(3, insight.similar().size());
+        assertEquals(new BigDecimal("21"),
+                insight.similar().get(0).comovementPercent().orElseThrow());
+        assertTrue(bodies.containsKey("/similar"));
+    }
+
+    /** 유사도 기능이 사실로 말할 수 있는 거의 전부다. 요약에는 빠져 있다. */
+    @Test
+    @DisplayName("닮은 구간 다음의 상승·하락 건수와 서비스 단서를 받는다")
+    void fetchesTheForwardCountsAndDisclaimer() {
+        AiInsight insight = adapter().brief(SecurityId.of("005930", "KRX"), bars(), true);
+
+        assertEquals(3, insight.similarOutlook().orElseThrow().up());
+        assertEquals(2, insight.similarOutlook().orElseThrow().down());
+        assertTrue(insight.requiredCaveats().stream()
+                .anyMatch(c -> c.startsWith("이건 예측이 아닙니다")),
+                insight.requiredCaveats().toString());
+    }
+
+    /** 상세가 아니면 부를 이유가 없다. 목록 화면은 종목당 한 줄이다. */
+    @Test
+    @DisplayName("닮은 차트를 안 물었으면 /similar 를 부르지 않는다")
+    void skipsTheSimilarCallForListScreens() {
+        adapter().brief(SecurityId.of("005930", "KRX"), bars(), false);
+
+        assertFalse(bodies.containsKey("/similar"));
+    }
+
+    /** 유사도 하나 때문에 예측과 이상감지까지 잃을 이유가 없다. */
+    @Test
+    @DisplayName("/similar 가 실패하면 brief 요약으로 되돌아간다")
+    void fallsBackToTheBriefSummary() {
+        server.removeContext("/similar");
+        server.createContext("/similar", exchange -> respond(exchange, 500, "{}"));
+
+        AiInsight insight = adapter().brief(SecurityId.of("005930", "KRX"), bars(), true);
+
+        assertEquals(1, insight.similar().size());
+        assertEquals("SK하이닉스", insight.similar().get(0).name());
+        assertTrue(insight.similar().get(0).comovementPercent().isEmpty());
+        assertTrue(insight.similarOutlook().isEmpty());
+    }
+
+    /**
+     * 다섯 개면 종목명과 숫자 둘씩 열 개를 연달아 듣게 되어 앞의 것을 기억하지 못한 채
+     * 끝난다. 화면을 볼 수 없는 사용자에게는 이 문장이 목록의 전부다.
+     */
+    @Test
+    @DisplayName("닮은 종목은 셋까지만 읽어 준다")
+    void capsTheSimilarListAtThree() {
+        AiInsight insight = adapter().brief(SecurityId.of("005930", "KRX"), bars(), true);
+
+        assertEquals(3, insight.similar().size());
+        assertEquals("SK하이닉스", insight.similar().get(0).name());
+        assertEquals("LG화학", insight.similar().get(2).name());
+    }
+
+    /**
+     * 확률 이름이 타깃에 따라 바뀐다. 아무거나 집으면 "하락" 판정에 상승확률 49.3
+     * 퍼센트가 붙어 판정과 숫자가 서로 반대를 가리킨다. 화면을 볼 수 없는 사용자는 그
+     * 모순을 확인할 방법이 없다.
+     */
+    @Test
+    @DisplayName("판정이 하락이면 하락확률을 읽어 준다")
+    void pairsTheProbabilityWithTheVerdict() {
+        server.removeContext("/predict");
+        server.createContext("/predict", exchange -> respond(exchange, 200, """
+                {"타깃":"방향","예측":"하락","신뢰도":"보통","유의미":false,
+                 "상승확률":49.3,"하락확률":50.7,"대상일":"2026-08-24","금일여부":false}
+                """));
+
+        AiInsight insight = adapter().brief(SecurityId.of("005930", "KRX"), bars(), true);
+
+        Forecast direction = insight.directionForecast().orElseThrow();
+        assertEquals("하락", direction.verdict());
+        assertEquals(new BigDecimal("50.7"), direction.probability());
+    }
+
+    /** 판정과 반대쪽 확률을 보여 주는 것은 아무것도 안 보여 주는 것보다 나쁘다. */
+    @Test
+    @DisplayName("판정에 맞는 확률이 없으면 그 예측을 접는다")
+    void dropsTheForecastWhenNoProbabilityMatches() {
+        server.removeContext("/predict");
+        server.createContext("/predict", exchange -> respond(exchange, 200, """
+                {"타깃":"방향","예측":"보합","신뢰도":"보통","유의미":false,
+                 "상승확률":49.3,"하락확률":50.7,"대상일":"2026-08-24","금일여부":false}
+                """));
+
+        AiInsight insight = adapter().brief(SecurityId.of("005930", "KRX"), bars(), true);
+
+        assertTrue(insight.directionForecast().isEmpty());
+        // 문안은 그대로 나간다. 확률 하나 때문에 종목 요약을 잃지 않는다.
         assertTrue(insight.narration().contains("이례적"));
     }
 

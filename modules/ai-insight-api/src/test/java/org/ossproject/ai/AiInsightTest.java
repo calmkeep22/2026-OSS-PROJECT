@@ -59,7 +59,7 @@ class AiInsightTest {
     void warnsThatSimilarityIsNotAForecast() {
         AiInsight withSimilar = new AiInsight("005930", "삼성전자", "문장", Confidence.HIGH, true,
                 Optional.empty(), Optional.empty(), Optional.empty(),
-                List.of(new SimilarStock("000660", "SK하이닉스", new BigDecimal("77"))), Map.of());
+                List.of(new SimilarStock("000660", "SK하이닉스", new BigDecimal("77"))), Optional.empty(), Map.of());
 
         assertTrue(withSimilar.requiredCaveats().stream()
                 .anyMatch(c -> c.contains("같이 움직인다는 뜻이 아닙니다")));
@@ -82,7 +82,7 @@ class AiInsightTest {
     void reportsPartialFailures() {
         AiInsight partial = new AiInsight("005930", "삼성전자", "문장", Confidence.HIGH, true,
                 Optional.empty(), Optional.empty(), Optional.empty(), List.of(),
-                Map.of("유사도", "ReferenceMissing"));
+                Optional.empty(), Map.of("유사도", "ReferenceMissing"));
 
         assertTrue(partial.hasPartialFailure());
         assertTrue(partial.partialFailureText().orElseThrow().contains("유사도"));
@@ -113,7 +113,7 @@ class AiInsightTest {
         Forecast direction = new Forecast("방향", "상승", new BigDecimal("52.9"),
                 java.time.LocalDate.of(2026, 8, 24), false, false);
         AiInsight insight = new AiInsight("005930", "삼성전자", "문장", Confidence.HIGH, true,
-                Optional.empty(), Optional.of(direction), Optional.empty(), List.of(), Map.of());
+                Optional.empty(), Optional.of(direction), Optional.empty(), List.of(), Optional.empty(), Map.of());
 
         assertTrue(insight.requiredCaveats().stream()
                 .anyMatch(c -> c.contains("오를지 내릴지")), insight.requiredCaveats().toString());
@@ -126,7 +126,7 @@ class AiInsightTest {
         Forecast direction = new Forecast("방향", "상승", new BigDecimal("52.9"),
                 java.time.LocalDate.of(2026, 8, 24), false, true);
         AiInsight insight = new AiInsight("005930", "삼성전자", "문장", Confidence.HIGH, true,
-                Optional.empty(), Optional.of(direction), Optional.empty(), List.of(), Map.of());
+                Optional.empty(), Optional.of(direction), Optional.empty(), List.of(), Optional.empty(), Map.of());
 
         assertFalse(insight.requiredCaveats().stream()
                 .anyMatch(c -> c.contains("오를지 내릴지")));
@@ -143,7 +143,7 @@ class AiInsightTest {
                 java.time.LocalDate.of(2026, 8, 21), new BigDecimal("-4.2"),
                 "상위 12퍼센트", "한 번에 사지 말고 나누어 담으세요.");
         AiInsight insight = new AiInsight("005930", "삼성전자", "문장", Confidence.HIGH, true,
-                Optional.empty(), Optional.empty(), Optional.of(signal), List.of(), Map.of());
+                Optional.empty(), Optional.empty(), Optional.of(signal), List.of(), Optional.empty(), Map.of());
 
         assertEquals("이 종목의 위험도는 상위 12퍼센트입니다. 한 번에 사지 말고 나누어 담으세요.",
                 insight.riskText().orElseThrow());
@@ -157,7 +157,7 @@ class AiInsightTest {
         AnomalySignal signal = new AnomalySignal(false, "약함", "상승",
                 java.time.LocalDate.of(2026, 8, 21), new BigDecimal("0.3"), "", "");
         AiInsight insight = new AiInsight("005930", "삼성전자", "문장", Confidence.HIGH, true,
-                Optional.empty(), Optional.empty(), Optional.of(signal), List.of(), Map.of());
+                Optional.empty(), Optional.empty(), Optional.of(signal), List.of(), Optional.empty(), Map.of());
 
         assertTrue(insight.riskText().isEmpty());
     }
@@ -173,7 +173,7 @@ class AiInsightTest {
                 Optional.empty(), Optional.empty(), Optional.empty(),
                 List.of(new SimilarStock("000660", "SK하이닉스", new BigDecimal("88")),
                         new SimilarStock("035420", "NAVER", new BigDecimal("85"))),
-                Map.of());
+                Optional.empty(), Map.of());
 
         String text = insight.similarText().orElseThrow();
         assertTrue(text.contains("SK하이닉스"), text);
@@ -191,7 +191,7 @@ class AiInsightTest {
                 "상위 12퍼센트", "나누어 담으세요.");
         AiInsight insight = new AiInsight("005930", "삼성전자", "문안", Confidence.HIGH, true,
                 Optional.empty(), Optional.of(direction), Optional.of(signal),
-                List.of(new SimilarStock("000660", "SK하이닉스", new BigDecimal("88"))), Map.of());
+                List.of(new SimilarStock("000660", "SK하이닉스", new BigDecimal("88"))), Optional.empty(), Map.of());
 
         String spoken = insight.fullNarration();
         assertTrue(spoken.startsWith("문안"), spoken);
@@ -199,5 +199,80 @@ class AiInsightTest {
         assertTrue(spoken.contains("상위 12퍼센트"), spoken);
         assertTrue(spoken.contains("SK하이닉스"), spoken);
         assertTrue(spoken.contains("투자 권유가 아닙니다"), spoken);
+    }
+
+    /**
+     * 서비스가 쓴 단서가 있으면 그것을 쓴다. 같은 뜻으로 고쳐 쓰면 무엇이 서비스의
+     * 주장이고 무엇이 우리 해석인지 사용자가 구별할 수 없다.
+     */
+    @Test
+    @DisplayName("닮은 차트 단서는 서비스가 쓴 문장을 그대로 쓴다")
+    void usesTheServiceDisclaimerVerbatim() {
+        SimilarOutlook outlook = new SimilarOutlook(5, 3, 2, "표본이 적고 미래를 보장하지 않습니다.",
+                "이건 예측이 아닙니다. 닮은 구간 다음에 무슨 일이 있었는지만 셉니다.");
+        AiInsight insight = new AiInsight("005930", "삼성전자", "문장", Confidence.HIGH, true,
+                Optional.empty(), Optional.empty(), Optional.empty(),
+                List.of(new SimilarStock("000660", "SK하이닉스", new BigDecimal("88"))),
+                Optional.of(outlook), Map.of());
+
+        assertTrue(insight.requiredCaveats().contains(outlook.disclaimer()),
+                insight.requiredCaveats().toString());
+    }
+
+    /** 서비스가 단서를 안 주면 자리를 비우지 않는다. 단서 없는 닮은 차트가 더 위험하다. */
+    @Test
+    @DisplayName("서비스 단서가 없으면 우리 문장으로 대신한다")
+    void fallsBackToOurOwnDisclaimer() {
+        AiInsight insight = new AiInsight("005930", "삼성전자", "문장", Confidence.HIGH, true,
+                Optional.empty(), Optional.empty(), Optional.empty(),
+                List.of(new SimilarStock("000660", "SK하이닉스", new BigDecimal("88"))),
+                Optional.empty(), Map.of());
+
+        assertTrue(insight.requiredCaveats().stream()
+                .anyMatch(c -> c.contains("앞으로 같이 움직인다는 뜻이 아닙니다")),
+                insight.requiredCaveats().toString());
+    }
+
+    /**
+     * 닮았다는 사실만 말하면 그다음이 궁금해진다. 그 자리를 비워 두면 사용자가 스스로
+     * 채운다. 상승 몇 건 · 하락 몇 건은 세어 둔 사실이다.
+     */
+    @Test
+    @DisplayName("닮은 구간 다음에 무슨 일이 있었는지 건수로 말한다")
+    void readsOutWhatActuallyHappenedNext() {
+        AiInsight insight = new AiInsight("005930", "삼성전자", "문장", Confidence.HIGH, true,
+                Optional.empty(), Optional.empty(), Optional.empty(),
+                List.of(new SimilarStock("000660", "SK하이닉스", new BigDecimal("88"))),
+                Optional.of(new SimilarOutlook(5, 3, 2, "", "단서")), Map.of());
+
+        String text = insight.similarText().orElseThrow();
+        assertTrue(text.contains("오른 경우 3건"), text);
+        assertTrue(text.contains("내린 경우 2건"), text);
+    }
+
+    /** 0건 0건은 사실이 아니라 자료 없음이다. 그것을 사실처럼 읽어 주면 안 된다. */
+    @Test
+    @DisplayName("셀 것이 없으면 건수를 말하지 않는다")
+    void staysSilentWhenThereIsNothingToCount() {
+        AiInsight insight = new AiInsight("005930", "삼성전자", "문장", Confidence.HIGH, true,
+                Optional.empty(), Optional.empty(), Optional.empty(),
+                List.of(new SimilarStock("000660", "SK하이닉스", new BigDecimal("88"))),
+                Optional.of(new SimilarOutlook(5, 0, 0, "", "단서")), Map.of());
+
+        assertFalse(insight.similarText().orElseThrow().contains("건"),
+                insight.similarText().orElseThrow());
+    }
+
+    /**
+     * 모양이 0.98 로 닮았는데 함께 움직인 정도는 0.21 인 짝이 흔하다. 다른 시기의 다른
+     * 종목이 우연히 같은 곡선을 그린 경우다. 유사도만 말하면 그 둘이 구별되지 않는다.
+     */
+    @Test
+    @DisplayName("함께 움직인 정도를 받았으면 유사도와 함께 말한다")
+    void tellsSimilarityAndComovementApart() {
+        SimilarStock stock = new SimilarStock("000660", "SK하이닉스", new BigDecimal("98"),
+                Optional.of(new BigDecimal("21")));
+
+        assertEquals("SK하이닉스 유사도 98퍼센트, 함께 움직인 정도 21퍼센트", stock.describe());
     }
 }

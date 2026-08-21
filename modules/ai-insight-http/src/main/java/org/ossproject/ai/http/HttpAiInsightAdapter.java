@@ -8,6 +8,7 @@ import org.ossproject.ai.AiUnavailableException;
 import org.ossproject.ai.AnomalySignal;
 import org.ossproject.ai.Confidence;
 import org.ossproject.ai.Forecast;
+import org.ossproject.ai.SimilarOutlook;
 import org.ossproject.ai.SimilarStock;
 import org.ossproject.finance.model.Candle;
 import org.ossproject.finance.model.SecurityId;
@@ -42,6 +43,13 @@ public final class HttpAiInsightAdapter implements AiInsightPort {
     private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
     /** 분석은 167ms 안에 끝난다. 이보다 오래 걸리면 서버가 준비 중이거나 막힌 것이다. */
     private static final Duration CALL_TIMEOUT = Duration.ofSeconds(15);
+    /**
+     * 읽어 줄 닮은 종목 수.
+     *
+     * <p>서비스는 다섯 개를 준다. 다섯 개면 종목명과 숫자 둘씩 열 개를 연달아 듣게 되어
+     * 앞의 것을 기억하지 못한 채 끝난다. {@code brief} 도 요약에서 셋만 남긴다.
+     */
+    private static final int MAX_SIMILAR = 3;
 
     private final URI baseUri;
     private final HttpClient http;
@@ -105,7 +113,19 @@ public final class HttpAiInsightAdapter implements AiInsightPort {
         } catch (RuntimeException ignored) {
             // 방향을 못 받아도 변동성과 이상감지는 그대로 쓴다.
         }
-        return toInsight(security, brief, direction);
+        // brief 의 유사종목은 종목명·코드·유사도만 추린 요약이다. 함께 움직인 정도와
+        // 닮은 구간 다음에 무슨 일이 있었는지, 그리고 서비스가 쓴 단서가 빠진다. 셋 다
+        // 사용자에게 보여야 하는 값이라 상세에서는 통째로 받는다.
+        JsonNode similarNode = null;
+        if (withSimilar) {
+            try {
+                similarNode = post("/similar", requestBody(security, settled, true, "변동성"));
+            } catch (RuntimeException ignored) {
+                // 못 받으면 brief 가 준 요약으로 되돌아간다. 유사도 하나 때문에 예측과
+                // 이상감지까지 잃을 이유가 없다.
+            }
+        }
+        return toInsight(security, brief, direction, similarNode);
     }
 
     private String requestBody(SecurityId security, List<Candle> bars, boolean withSimilar,
@@ -193,7 +213,8 @@ public final class HttpAiInsightAdapter implements AiInsightPort {
         };
     }
 
-    private AiInsight toInsight(SecurityId security, JsonNode root, Optional<Forecast> direction) {
+    private AiInsight toInsight(SecurityId security, JsonNode root, Optional<Forecast> direction,
+                                JsonNode similarNode) {
         JsonNode forecastNode = root.path("예측");
         String narration = text(root, "문안");
         if (narration.isBlank()) {
@@ -209,8 +230,30 @@ public final class HttpAiInsightAdapter implements AiInsightPort {
                 toForecast(forecastNode),
                 direction,
                 toAnomaly(root.path("이상감지")),
-                toSimilar(root.path("유사종목")),
+                similarNode == null ? toSimilar(root.path("유사종목"))
+                        : toSimilar(similarNode.path("results")),
+                toOutlook(similarNode),
                 toFailures(root.path("오류")));
+    }
+
+    /**
+     * 판정과 같은 쪽을 가리키는 확률.
+     *
+     * <p>확률 이름이 타깃에 따라 바뀐다. 아무거나 집으면 "하락" 판정에 상승확률 49.3
+     * 퍼센트가 붙어, 판정과 숫자가 서로 반대를 가리킨다. 화면을 볼 수 없는 사용자는
+     * 그 모순을 확인할 방법이 없다.
+     *
+     * <p>서비스는 임계값을 50 으로 옮긴 뒤 이 값들을 계산하므로, 판정에 맞는 쪽을
+     * 고르기만 하면 언제나 50 을 넘는다.
+     */
+    private static BigDecimal probabilityFor(JsonNode node, String verdict) {
+        return switch (verdict) {
+            case "크게움직임" -> decimal(node, "크게움직임확률");
+            case "잔잔함" -> decimal(node, "잔잔함확률");
+            case "상승" -> decimal(node, "상승확률");
+            case "하락" -> decimal(node, "하락확률");
+            default -> null;
+        };
     }
 
     private Optional<Forecast> toForecast(JsonNode node) {
@@ -222,13 +265,13 @@ public final class HttpAiInsightAdapter implements AiInsightPort {
         if (target.isBlank() || verdict.isBlank()) {
             return Optional.empty();
         }
-        // 확률 이름이 타깃에 따라 바뀐다. 서비스가 라벨을 맞춰 보내므로 둘 다 본다.
-        BigDecimal probability = decimal(node, "크게움직임확률");
+        BigDecimal probability = probabilityFor(node, verdict);
         if (probability == null) {
-            probability = decimal(node, "상승확률");
+            // 판정에 맞는 숫자를 못 찾으면 예측을 통째로 접는다. 판정과 반대쪽 확률을
+            // 보여 주는 것은 아무것도 안 보여 주는 것보다 나쁘다. 문안은 그대로 나간다.
+            return Optional.empty();
         }
-        return Optional.of(new Forecast(target, verdict,
-                probability == null ? BigDecimal.ZERO : probability,
+        return Optional.of(new Forecast(target, verdict, probability,
                 date(node, "대상일"), node.path("금일여부").asBoolean(false),
                 node.path("유의미").asBoolean(false)));
     }
@@ -249,24 +292,73 @@ public final class HttpAiInsightAdapter implements AiInsightPort {
                 text(risk, "조언")));
     }
 
+    /**
+     * 닮은 종목 목록.
+     *
+     * <p>{@code /brief} 요약과 {@code /similar} 원본을 둘 다 받는다. 필드 이름이 다르다
+     * — 요약은 한국어 키를, 원본은 {@code code}/{@code name}/{@code similarity} 를 쓴다.
+     * 둘을 각각 읽으면 어느 쪽이 왔는지에 따라 화면이 달라진다.
+     */
     private List<SimilarStock> toSimilar(JsonNode node) {
         if (node == null || !node.isArray()) {
             return List.of();
         }
         List<SimilarStock> stocks = new ArrayList<>();
         for (JsonNode entry : node) {
+            if (stocks.size() == MAX_SIMILAR) {
+                break;
+            }
             String symbol = text(entry, "종목코드");
+            if (symbol.isBlank()) {
+                symbol = text(entry, "code");
+            }
             if (symbol.isBlank()) {
                 continue;
             }
+            String name = text(entry, "종목명");
+            if (name.isBlank()) {
+                name = text(entry, "name", symbol);
+            }
             // 유사도는 0~1 비율로 온다. 화면은 퍼센트로 읽으므로 여기서 옮긴다.
             BigDecimal score = decimal(entry, "유사도");
-            stocks.add(new SimilarStock(symbol, text(entry, "종목명", symbol),
-                    score == null ? BigDecimal.ZERO
-                            : score.multiply(BigDecimal.valueOf(100))
-                                    .setScale(0, java.math.RoundingMode.HALF_UP)));
+            if (score == null) {
+                score = decimal(entry, "similarity");
+            }
+            stocks.add(new SimilarStock(symbol, name, percent(score),
+                    Optional.ofNullable(decimal(entry, "동조도")).map(HttpAiInsightAdapter::percent)));
         }
         return List.copyOf(stocks);
+    }
+
+    /** 0~1 비율을 퍼센트로. 없으면 0 으로 둔다. */
+    private static BigDecimal percent(BigDecimal ratio) {
+        return ratio == null ? BigDecimal.ZERO
+                : ratio.multiply(BigDecimal.valueOf(100))
+                        .setScale(0, java.math.RoundingMode.HALF_UP);
+    }
+
+    /**
+     * 닮은 구간 다음에 무슨 일이 있었는지와 서비스가 쓴 단서.
+     *
+     * <p>{@code /brief} 는 이것을 담지 않는다. {@code /similar} 를 부른 경우에만 있다.
+     */
+    private Optional<SimilarOutlook> toOutlook(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return Optional.empty();
+        }
+        JsonNode forward = node.path("forward_summary");
+        String disclaimer = text(node, "disclaimer");
+        if (forward.isMissingNode() && disclaimer.isBlank()) {
+            return Optional.empty();
+        }
+        // 중앙 수익률(median_pct)도 함께 오지만 쓰지 않는다. 한 숫자로 요약하는 순간
+        // "닮은 구간 다음에 이랬다" 가 "다음에 이렇게 된다" 로 읽힌다.
+        return Optional.of(new SimilarOutlook(
+                Math.max(0, forward.path("n").asInt(0)),
+                Math.max(0, forward.path("up").asInt(0)),
+                Math.max(0, forward.path("down").asInt(0)),
+                text(forward, "note"),
+                disclaimer));
     }
 
     /** 일부만 실패한 것을 조용히 빼지 않는다. 무엇이 빠졌는지 알려야 판단이 된다. */
