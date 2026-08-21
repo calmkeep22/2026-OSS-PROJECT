@@ -45,6 +45,11 @@ import org.ossproject.desktop.chart.AccessibleChartController;
 import org.ossproject.desktop.chart.AccessibleChartView;
 import org.ossproject.desktop.chart.CandlestickChartView;
 import org.ossproject.desktop.presentation.Formatters;
+
+import static org.ossproject.desktop.presentation.Formatters.assetsSource;
+import static org.ossproject.desktop.presentation.Formatters.orderTime;
+import static org.ossproject.desktop.presentation.Formatters.signedChangeRate;
+import static org.ossproject.desktop.presentation.Formatters.signedWon;
 import org.ossproject.desktop.navigation.OrderDraft;
 import org.ossproject.desktop.navigation.Screen;
 import org.ossproject.desktop.controller.DesktopScreenController;
@@ -58,6 +63,7 @@ import org.ossproject.desktop.viewmodel.WatchlistViewModel;
 import org.ossproject.desktop.orderbook.DepthChartCanvas;
 import org.ossproject.desktop.orderbook.OrderBookLadderView;
 import org.ossproject.desktop.trades.TradeTapeView;
+import org.ossproject.desktop.viewmodel.AccountScreenData;
 import org.ossproject.desktop.viewmodel.OrderBookViewModel;
 import org.ossproject.desktop.viewmodel.TradeTapeViewModel;
 import org.ossproject.desktop.viewmodel.StockDetailViewModel;
@@ -65,6 +71,7 @@ import org.ossproject.desktop.viewmodel.StockSelection;
 import org.ossproject.desktop.viewmodel.ScannerViewModel;
 import org.ossproject.desktop.view.screen.SearchScreenView;
 import org.ossproject.desktop.view.screen.ConnectionScreenView;
+import org.ossproject.desktop.view.screen.AccountScreenView;
 import org.ossproject.desktop.view.screen.UsMarketScreenView;
 import org.ossproject.desktop.view.screen.WatchlistScreenView;
 import org.ossproject.desktop.view.screen.ScannerScreenView;
@@ -87,7 +94,6 @@ import java.util.concurrent.CompletableFuture;
 import static org.ossproject.desktop.view.UiKit.*;
 
 public final class DesktopApplication extends Application {
-    private record AccountScreenData(Account account, List<Order> orders) {}
     private final TradingUseCase tradingUseCase;
     private final MarketApplicationPort marketApplication;
     private final CandleQueryPort candleAdapter;
@@ -984,13 +990,6 @@ public final class DesktopApplication extends Application {
         return new AccessibleChartView(accessibleChartController);
     }
 
-
-    /**
-     * 미수 발생 경고.
-     *
-     * <p>D+2 예수금이 음수면 결제일까지 채워 넣지 않는 한 반대매매 대상이 된다. 색으로만
-     * 알리면 화면을 볼 수 없는 사용자에게 전달되지 않으므로 문장으로 남긴다.
-     */
     private javafx.scene.Node shortfallWarning(Deposits deposits) {
         String text = "미수금 " + Formatters.won(deposits.shortfall())
                 + "이 발생했습니다. 결제일까지 입금하지 않으면 반대매매가 될 수 있습니다.";
@@ -1007,9 +1006,6 @@ public final class DesktopApplication extends Application {
      * <p>증권사가 계산한 값과 앱이 더한 값은 다를 수 있다. 어느 쪽인지 밝히지 않으면
      * 사용자가 증권사 화면과 대조할 때 어느 숫자를 믿어야 할지 알 수 없다.
      */
-    private static String assetsSource(Account account) {
-        return account.valuationReportedByBroker() ? "증권사 제공 값" : "앱에서 합산한 값";
-    }
 
     /**
      * 실시간 체결로 마지막 봉을 갱신받기 시작한다.
@@ -1387,7 +1383,12 @@ public final class DesktopApplication extends Application {
                         loading.setText("계좌를 조회하지 못했습니다. 연결 상태를 확인해주세요.");
                         progress.setVisible(false);
                     } else {
-                        host.getChildren().setAll(createAccountScreenContent(data));
+                        host.getChildren().setAll(new AccountScreenView(session::journalEntries,
+                            table -> openSelectedStock(table, 0),
+                            (table, orderSide) -> navigateForSelectedStock(table, 0, orderSide),
+                            status::setText,
+                            this::showJournalDialog,
+                            this::deleteSelectedJournal).create(data));
                     }
                 }));
         return host;
@@ -1422,103 +1423,6 @@ public final class DesktopApplication extends Application {
         scroll.setAccessibleText("주문 화면");
         scroll.getStyleClass().add("workspace-scroll");
         return scroll;
-    }
-
-    private ScrollPane createAccountScreenContent(AccountScreenData data) {
-        Account snapshot = data.account();
-        Label title = heading("계좌");
-        // 계좌번호는 접근 토큰에 연결된 것을 그대로 보여 준다. 목록을 지어내지 않는다.
-        Label accountNo = new Label("모의계좌 " + snapshot.maskedAccountNo());
-        accountNo.getStyleClass().add("status-chip");
-        accountNo.setAccessibleText("조회 중인 계좌. 모의계좌 " + snapshot.maskedAccountNo());
-        Region spacer = new Region(); HBox.setHgrow(spacer, Priority.ALWAYS);
-        HBox header = new HBox(12, title, spacer, accountNo); header.setAlignment(Pos.CENTER_LEFT);
-
-        // 값은 모의주문 엔진이 들고 있는 실제 계좌 상태에서 읽는다. 화면이 따로 계산하거나
-        // 예시 숫자를 적어 두지 않는다.
-        FlowPane metrics = wrappingRow(14,
-                summaryCard("총 평가자산", Formatters.won(snapshot.totalAssets()),
-                        assetsSource(snapshot), "neutral"),
-                summaryCard("평가손익", signedWon(snapshot.totalProfitLoss()),
-                        "평가금액 " + Formatters.won(snapshot.totalMarketValue())
-                                + " · " + assetsSource(snapshot),
-                        snapshot.totalProfitLoss().signum() >= 0 ? "positive" : "negative"),
-                summaryCard("예수금", Formatters.won(snapshot.deposits().cash()),
-                        "주문 가능 " + Formatters.won(snapshot.deposits().orderable()), "neutral"));
-
-        TableView<ObservableList<String>> holdings = textTable("보유종목 표",
-                snapshot.positions().stream().map(position -> row(
-                        position.name(),
-                        position.quantity() + "",
-                        Formatters.won(position.averagePrice()),
-                        Formatters.won(position.currentPrice()),
-                        Formatters.won(position.marketValue()),
-                        signedWon(position.profitLoss()),
-                        position.profitLossRate().toPlainString() + "%")).toList(),
-                "종목", "수량", "평균단가", "현재가", "평가금액", "손익", "수익률");
-        holdings.setPrefHeight(300);
-        holdings.setOnMouseClicked(event -> { if (event.getClickCount() == 2) openSelectedStock(holdings, 0); });
-        holdings.setOnKeyPressed(event -> { if (event.getCode() == KeyCode.ENTER) openSelectedStock(holdings, 0); });
-        Button holdingDetail = new Button("선택 종목 상세"); holdingDetail.setOnAction(event -> openSelectedStock(holdings, 0));
-        Button holdingBuy = primaryButton("선택 종목 매수", () -> navigateForSelectedStock(holdings, 0, OrderSide.BUY));
-        Button holdingSell = new Button("선택 종목 매도"); holdingSell.setOnAction(event -> navigateForSelectedStock(holdings, 0, OrderSide.SELL));
-        VBox holdingsPanel = new VBox(10, holdings, wrappingRow(8, holdingDetail, holdingBuy, holdingSell));
-        holdingsPanel.setPadding(new Insets(10));
-
-        // 실제 증권사 화면처럼 예수금을 단계별로 나눠 보여 준다. "지금 얼마 주문할 수 있나",
-        // "지금 얼마 뽑을 수 있나", "결제가 끝나면 얼마 남나" 는 서로 다른 질문이다.
-        Deposits deposits = snapshot.deposits();
-        VBox cash = new VBox(12,
-                informationRow("예수금", Formatters.won(deposits.cash())),
-                informationRow("D+2 추정예수금", signedWon(deposits.settledCash())),
-                informationRow("주문 대기 금액", Formatters.won(snapshot.balance().locked())),
-                informationRow("주문 가능 금액", Formatters.won(deposits.orderable())),
-                informationRow("출금 가능 금액", Formatters.won(deposits.withdrawable())));
-        if (deposits.hasShortfall()) {
-            cash.getChildren().add(shortfallWarning(deposits));
-        }
-        cash.setPadding(new Insets(20));
-
-        TableView<ObservableList<String>> open = orderStatusTable(true, data.orders());
-        TableView<ObservableList<String>> fills = orderStatusTable(false, data.orders());
-        TableView<ObservableList<String>> history = textTable("주문내역",
-                data.orders().stream().map(order -> row(
-                        orderTime(order), order.name(), order.side().displayName(),
-                        order.limitPrice() == null ? "시장가" : Formatters.won(order.limitPrice()),
-                        Long.toString(order.quantity()), order.status().displayName())).toList(),
-                "시간", "종목", "구분", "주문가", "수량", "상태");
-        history.setPlaceholder(new Label("주문 내역이 없습니다."));
-        TableView<JournalEntry> journal = typedTable("매매일지", session.journalEntries(),
-                textColumn("날짜", JournalEntry::date),
-                textColumn("종목", JournalEntry::securityName),
-                textColumn("매수금액", JournalEntry::buyAmount),
-                textColumn("매도금액", JournalEntry::sellAmount),
-                textColumn("손익", JournalEntry::profitLoss),
-                textColumn("전략·메모", JournalEntry::memo),
-                textColumn("태그", JournalEntry::tags));
-        Button addJournal = new Button("일지 작성"); addJournal.setOnAction(event -> showJournalDialog(null));
-        Button editJournal = new Button("선택 수정"); editJournal.setOnAction(event -> {
-            JournalEntry selected = journal.getSelectionModel().getSelectedItem();
-            if (selected == null) {
-                status.setText("수정할 매매일지를 선택해주세요.");
-                journal.requestFocus();
-                return;
-            }
-            showJournalDialog(selected);
-        });
-        Button deleteJournal = new Button("선택 삭제");
-        deleteJournal.setOnAction(event -> deleteSelectedJournal(journal));
-        Button attach = new Button("차트 화면 첨부"); attach.setOnAction(event -> status.setText("현재 차트 화면을 매매일지 첨부 대상으로 선택했습니다."));
-        VBox journalPanel = new VBox(10, journal, wrappingRow(8, addJournal, editJournal, deleteJournal, attach));
-        journalPanel.setPadding(new Insets(10));
-
-        TabPane tabs = new TabPane(
-                tab("보유종목", holdingsPanel), tab("예수금", cash), tab("미체결", open),
-                tab("체결", fills), tab("주문내역", history), tab("매매일지", journalPanel));
-        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
-        tabs.setPrefHeight(390);
-        VBox body = new VBox(20, header, metrics, tabs);
-        return scrollPage("계좌 대시보드", body);
     }
 
     private VBox createTradingScreenContent(List<Order> orders) {
@@ -2522,34 +2426,7 @@ public final class DesktopApplication extends Application {
      * <p>모의주문 엔진이 들고 있는 실제 주문에서 만든다. 예전에는 예시 주문을 적어 두어,
      * 사용자가 낸 주문과 앱이 넣어 둔 예시를 구분할 수 없었다.
      */
-    private TableView<ObservableList<String>> orderStatusTable(boolean open, List<Order> allOrders) {
-        List<Order> orders = allOrders.stream()
-                .filter(order -> open ? !order.status().isTerminal() : order.status().isTerminal())
-                .toList();
-        // 주문번호를 함께 보여 준다. 취소·정정은 이 번호로 원주문을 지정하고, 사용자도
-        // 증권사 화면과 대조할 수 있어야 한다.
-        List<String[]> rows = orders.stream().map(order -> row(
-                order.orderId(),
-                orderTime(order),
-                order.name(),
-                order.side().displayName(),
-                order.limitPrice() == null ? "시장가" : Formatters.won(order.limitPrice()),
-                Long.toString(order.quantity()),
-                Long.toString(order.filledQuantity()),
-                Long.toString(order.remainingQuantity()),
-                order.status().displayName())).toList();
-        TableView<ObservableList<String>> table = textTable(open ? "미체결 주문" : "체결·종료 주문", rows,
-                "주문번호", "시간", "종목", "구분", "주문가", "수량", "체결", "잔여", "상태");
-        table.setPlaceholder(new Label(open
-                ? "미체결 주문이 없습니다." : "체결되었거나 종료된 주문이 없습니다."));
-        return table;
-    }
-
     /** 주문 접수 시각을 화면 표기로 바꾼다. */
-    private static String orderTime(Order order) {
-        return java.time.LocalDateTime.ofInstant(order.createdAt(), java.time.ZoneId.of("Asia/Seoul"))
-                .format(java.time.format.DateTimeFormatter.ofPattern("MM/dd HH:mm"));
-    }
 
     private VBox createUiStatePanel() {
         ComboBox<String> state = new ComboBox<>(FXCollections.observableArrayList(
@@ -2804,16 +2681,6 @@ public final class DesktopApplication extends Application {
     }
 
     /** 손익 금액을 부호와 함께 표기한다. */
-    private static String signedWon(BigDecimal value) {
-        return (value.signum() >= 0 ? "+" : "-") + Formatters.won(value.abs());
-    }
-
-    /** 조회 결과의 등락률을 부호와 함께 표기한다. 값을 새로 만들지 않는다. */
-    private static String signedChangeRate(StockDetail detail) {
-        BigDecimal rate = detail.changeRate().setScale(2, java.math.RoundingMode.HALF_UP);
-        String sign = detail.direction() == PriceDirection.DOWN ? "-" : rate.signum() > 0 ? "+" : "";
-        return sign + rate.abs().toPlainString() + "%";
-    }
 
     private void previewOrder(TextField symbol, TextField name, ComboBox<OrderSide> side,
                               ComboBox<OrderType> orderType, Spinner<Integer> quantity, TextField price) {

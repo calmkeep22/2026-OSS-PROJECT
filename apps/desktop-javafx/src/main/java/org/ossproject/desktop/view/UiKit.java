@@ -14,6 +14,12 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 /** 모든 화면이 공유하는 접근 가능한 JavaFX 컴포넌트 팩토리. */
+import org.ossproject.finance.model.Order;
+
+import static org.ossproject.desktop.presentation.Formatters.orderTime;
+
+import org.ossproject.desktop.presentation.Formatters;
+
 public final class UiKit {
     private UiKit() {}
 
@@ -191,6 +197,35 @@ public final class UiKit {
                 + "실제 값을 받아오기 전까지 임의의 숫자를 표시하지 않습니다.");
         return panel;
     }
+
+    /**
+     * 주문 상태 표.
+     *
+     * <p>미체결과 체결을 같은 열 구성으로 보여 준다. 계좌 화면과 주문 화면이 함께 쓴다.
+     */
+    public static TableView<ObservableList<String>> orderStatusTable(boolean open, List<Order> allOrders) {
+        List<Order> orders = allOrders.stream()
+                .filter(order -> open ? !order.status().isTerminal() : order.status().isTerminal())
+                .toList();
+        // 주문번호를 함께 보여 준다. 취소·정정은 이 번호로 원주문을 지정하고, 사용자도
+        // 증권사 화면과 대조할 수 있어야 한다.
+        List<String[]> rows = orders.stream().map(order -> row(
+                order.orderId(),
+                orderTime(order),
+                order.name(),
+                order.side().displayName(),
+                order.limitPrice() == null ? "시장가" : Formatters.won(order.limitPrice()),
+                Long.toString(order.quantity()),
+                Long.toString(order.filledQuantity()),
+                Long.toString(order.remainingQuantity()),
+                order.status().displayName())).toList();
+        TableView<ObservableList<String>> table = textTable(open ? "미체결 주문" : "체결·종료 주문", rows,
+                "주문번호", "시간", "종목", "구분", "주문가", "수량", "체결", "잔여", "상태");
+        table.setPlaceholder(new Label(open
+                ? "미체결 주문이 없습니다." : "체결되었거나 종료된 주문이 없습니다."));
+        return table;
+    }
+
 
     public static Label heading(String text) {
         Label label = new Label(text); label.getStyleClass().add("title"); return label;
