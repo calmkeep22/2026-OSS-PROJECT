@@ -1784,14 +1784,29 @@ public final class DesktopApplication extends Application {
      */
     private javafx.scene.Node createAiInsightPanel() {
         AiInsightCard card = new AiInsightCard(text -> requestSpeech(text, "ai-insight"));
-        var selected = session.selectedStock();
+        loadAiInsight(card);
+        return card.root();
+    }
+
+    /**
+     * 분석을 한 번 받아 본다.
+     *
+     * <p>서버는 모델을 읽고 지수를 받은 뒤에야 포트를 연다. 그 사이의 연결 거부를 실패로
+     * 적으면 사용자는 고칠 수 없는 문제로 읽고 포기한다. 앱이 서버를 띄웠고 아직 살아
+     * 있으면 준비 중이라고 적고 다시 시도할 길을 준다.
+     */
+    private void loadAiInsight(AiInsightCard card) {
         if (!aiInsightViewModel.available()) {
-            card.unavailable(aiInsightViewModel.unavailableReason());
-            return card.root();
+            if (aiServiceProcess != null && aiServiceProcess.running()) {
+                card.starting(() -> loadAiInsight(card));
+            } else {
+                card.unavailable(aiInsightViewModel.unavailableReason(), () -> loadAiInsight(card));
+            }
+            return;
         }
         card.waiting();
-        aiInsightViewModel.analyze(selected.securityId(), true, card::show, card::unavailable);
-        return card.root();
+        aiInsightViewModel.analyze(session.selectedStock().securityId(), true,
+                card::show, reason -> card.unavailable(reason, () -> loadAiInsight(card)));
     }
 
     private ListView<String> anomalySignalList(FilteredList<String> items, String emptyText) {

@@ -22,6 +22,7 @@ public final class AiInsightCard {
     private final Label narration = new Label();
     private final Label caveats = new Label();
     private final Button listen;
+    private final Button retry;
     private final VBox root;
 
     public AiInsightCard(Consumer<String> onListen) {
@@ -37,9 +38,13 @@ public final class AiInsightCard {
         listen.setDisable(true);
         listen.setOnAction(event -> onListen.accept(spoken));
 
+        retry = new Button("다시 시도");
+        retry.setVisible(false);
+        retry.setManaged(false);
+
         Label title = new Label("AI 분석");
         title.getStyleClass().add("card-title");
-        root = new VBox(10, title, narration, caveats, listen);
+        root = new VBox(10, title, narration, caveats, new javafx.scene.layout.HBox(8, listen, retry));
         root.getStyleClass().add("panel-card");
         root.setPadding(new Insets(16));
         // 부모가 폭을 잡아 주지 않으면 wrapText 만으로는 줄이 바뀌지 않는다. 라벨이 한 줄로
@@ -64,6 +69,19 @@ public final class AiInsightCard {
     public void waiting() {
         show("AI 분석을 기다리고 있습니다.", "");
         listen.setDisable(true);
+        hideRetry();
+    }
+
+    /**
+     * 서버가 아직 준비 중이다.
+     *
+     * <p>분석 서버는 모델을 읽고 지수를 받은 뒤에야 포트를 연다. 그동안은 연결이 거부되는데
+     * 그것을 실패로 적으면 사용자는 고칠 수 없는 문제로 읽고 포기한다.
+     */
+    public void starting(Runnable onRetry) {
+        show("AI 서버를 준비하고 있습니다. 10초쯤 걸립니다.", "");
+        listen.setDisable(true);
+        showRetry(onRetry);
     }
 
     /**
@@ -73,6 +91,7 @@ public final class AiInsightCard {
      * 다르면 스크린리더 사용자가 다른 내용을 듣는다.
      */
     public void show(AiInsight insight) {
+        hideRetry();
         String caveatText = String.join(" ", insight.requiredCaveats());
         String failureText = insight.partialFailureText().orElse("");
         show(insight.narration(), (caveatText + " " + failureText).trim());
@@ -89,6 +108,24 @@ public final class AiInsightCard {
     public void unavailable(String reason) {
         show(reason == null || reason.isBlank() ? "AI 분석을 사용할 수 없습니다." : reason, "");
         listen.setDisable(true);
+        hideRetry();
+    }
+
+    /** 다시 시도할 수단을 함께 준다. 실패만 알리고 길을 주지 않으면 막다른 길이 된다. */
+    public void unavailable(String reason, Runnable onRetry) {
+        unavailable(reason);
+        showRetry(onRetry);
+    }
+
+    private void showRetry(Runnable onRetry) {
+        retry.setOnAction(event -> onRetry.run());
+        retry.setVisible(true);
+        retry.setManaged(true);
+    }
+
+    private void hideRetry() {
+        retry.setVisible(false);
+        retry.setManaged(false);
     }
 
     private void show(String main, String extra) {

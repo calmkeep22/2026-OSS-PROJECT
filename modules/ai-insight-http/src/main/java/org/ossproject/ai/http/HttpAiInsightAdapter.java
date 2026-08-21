@@ -76,7 +76,8 @@ public final class HttpAiInsightAdapter implements AiInsightPort {
             unavailableReason = "";
             return true;
         } catch (RuntimeException error) {
-            unavailableReason = "AI 서비스에 연결하지 못했습니다. " + error.getMessage();
+            // 예외가 이미 사람이 읽을 문장을 담고 있다. 앞에 또 붙이면 같은 말이 두 번 나온다.
+            unavailableReason = reasonOf(error);
             return false;
         }
     }
@@ -140,11 +141,26 @@ public final class HttpAiInsightAdapter implements AiInsightPort {
             }
             return body;
         } catch (IOException error) {
-            throw new AiUnavailableException("AI 서비스에 연결하지 못했습니다. " + error.getMessage(), error);
+            // 연결 거부는 메시지가 비어 있는 경우가 많다. null 을 그대로 붙이지 않는다.
+            throw new AiUnavailableException(
+                    "AI 서비스에 연결하지 못했습니다." + detailOf(error), error);
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
             throw new AiUnavailableException("AI 분석을 기다리다 중단되었습니다.", error);
         }
+    }
+
+    /** 예외에서 사용자에게 보여 줄 문장을 뽑는다. */
+    private static String reasonOf(RuntimeException error) {
+        String message = error.getMessage();
+        return message == null || message.isBlank()
+                ? "AI 서비스에 연결하지 못했습니다." : message;
+    }
+
+    /** 메시지가 없으면 아무것도 붙이지 않는다. "null" 이 화면에 나가면 안 된다. */
+    private static String detailOf(Throwable error) {
+        String message = error.getMessage();
+        return message == null || message.isBlank() ? "" : " " + message;
     }
 
     private JsonNode parse(String body) {
