@@ -72,6 +72,7 @@ import org.ossproject.desktop.viewmodel.ScannerViewModel;
 import org.ossproject.desktop.view.screen.SearchScreenView;
 import org.ossproject.desktop.view.screen.ConnectionScreenView;
 import org.ossproject.desktop.view.screen.AccountScreenView;
+import org.ossproject.desktop.view.screen.NotificationsScreenView;
 import org.ossproject.desktop.view.screen.UsMarketScreenView;
 import org.ossproject.desktop.view.screen.WatchlistScreenView;
 import org.ossproject.desktop.view.screen.ScannerScreenView;
@@ -1242,7 +1243,9 @@ public final class DesktopApplication extends Application {
         screenController.register(Screen.US_MARKET,
                 () -> new UsMarketScreenView(this::createUsWatchlistPanel).create());
         screenController.registerPreservingState(Screen.ANOMALY, this::createAnomalyScreen);
-        screenController.registerPreservingState(Screen.NOTIFICATIONS, this::createNotificationsScreen);
+        screenController.registerPreservingState(Screen.NOTIFICATIONS,
+                () -> new NotificationsScreenView(session.notifications(), status::setText,
+                        this::scheduleStateSave, this::requestSpeech).create());
         screenController.register(Screen.RADIO, this::createAccessibleChartScreen);
         screenController.registerPreservingState(Screen.SETTINGS, this::createSettingsScreen);
     }
@@ -1864,80 +1867,6 @@ public final class DesktopApplication extends Application {
         String plain = content.replaceFirst("^(높음|주의) · ", "");
         int recent = plain.indexOf(" 최근 ");
         return recent > 0 ? plain.substring(0, recent) : "이상 신호";
-    }
-
-    private ScrollPane createNotificationsScreen() {
-        Label title = heading("알림");
-        ComboBox<String> filter = new ComboBox<>(FXCollections.observableArrayList("전체", "주문", "가격", "이상 감지", "연결"));
-        filter.setValue("전체");
-        Button allRead = new Button("모두 읽음");
-        Button clearAll = new Button("전체 지우기");
-        clearAll.getStyleClass().add("danger-outline-button");
-        Region spacer = new Region(); HBox.setHgrow(spacer, Priority.ALWAYS);
-        HBox header = new HBox(10, title, spacer, filter, allRead, clearAll); header.setAlignment(Pos.CENTER_LEFT);
-        FilteredList<String> filtered = new FilteredList<>(session.notifications(), value -> true);
-        filter.valueProperty().addListener((obs, old, selected) -> filtered.setPredicate(
-                value -> selected == null || selected.equals("전체") || value.contains("· " + selected + " ·")));
-        ListView<String> notifications = new ListView<>(filtered);
-        notifications.setAccessibleText("알림 목록"); notifications.setPrefHeight(430);
-        allRead.setOnAction(event -> {
-            for (int i = 0; i < session.notifications().size(); i++) session.notifications().set(i, session.notifications().get(i).replace("새 알림 · ", ""));
-            status.setText("모든 알림을 읽음 처리했습니다.");
-            scheduleStateSave();
-        });
-        clearAll.setAccessibleText("저장된 알림 기록 전체 지우기");
-        clearAll.setOnAction(event -> {
-            if (session.notifications().isEmpty()) {
-                status.setText("지울 알림이 없습니다.");
-                return;
-            }
-            Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION,
-                    "저장된 알림 " + session.notifications().size() + "건을 모두 지우시겠습니까?",
-                    ButtonType.OK, ButtonType.CANCEL);
-            confirmation.setHeaderText("알림 기록 전체 지우기");
-            confirmation.showAndWait().filter(ButtonType.OK::equals).ifPresent(result -> {
-                session.notifications().clear();
-                scheduleStateSave();
-                status.setText("모든 알림 기록을 지웠습니다.");
-            });
-        });
-        Button listen = new Button("선택 알림 듣기");
-        listen.setOnAction(event -> {
-            String selected = notifications.getSelectionModel().getSelectedItem();
-            if (selected == null) {
-                status.setText("들을 알림을 먼저 선택해주세요.");
-                notifications.requestFocus();
-                return;
-            }
-            requestSpeech(selected, "notification-selected");
-        });
-        Button markRead = new Button("선택 읽음"); markRead.setOnAction(event -> {
-            String selected = notifications.getSelectionModel().getSelectedItem();
-            if (selected == null) {
-                status.setText("읽음 처리할 알림을 선택해주세요.");
-                notifications.requestFocus();
-                return;
-            }
-            int index = session.notifications().indexOf(selected);
-            if (index >= 0) session.notifications().set(index, selected.replace("새 알림 · ", ""));
-            status.setText("선택한 알림을 읽음 처리했습니다.");
-            scheduleStateSave();
-        });
-        Button delete = new Button("선택 삭제"); delete.setOnAction(event -> {
-            String selected = notifications.getSelectionModel().getSelectedItem();
-            if (selected == null) {
-                status.setText("삭제할 알림을 선택해주세요.");
-                notifications.requestFocus();
-                return;
-            }
-            session.notifications().remove(selected);
-            status.setText("선택한 알림을 삭제했습니다.");
-            scheduleStateSave();
-        });
-        VBox history = new VBox(10, notifications, wrappingRow(8, listen, markRead, delete));
-        history.getStyleClass().add("settings-card");
-        history.setPadding(new Insets(12));
-        return scrollPage("알림", new VBox(12, header, history));
     }
 
     private TableColumn<PricePoint, String> priceColumn(String title, java.util.function.Function<PricePoint, String> mapper) {
