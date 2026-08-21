@@ -1,0 +1,20 @@
+{
+  "n_train": 78400,
+  "n_test": 25900,
+  "features": [
+    "news_n",
+    "news_pol_mean",
+    "news_pol_max",
+    "news_pol_min",
+    "news_pol_std",
+    "news_pos_ratio",
+    "news_neg_ratio",
+    "news_n_z",
+    "news_pol_z"
+  ],
+  "적중률": 0.4956,
+  "균형정확도": 0.504,
+  "ROC-AUC": 0.5047,
+  "무지성기준선": 0.5277,
+  "쓸만한가": false
+}

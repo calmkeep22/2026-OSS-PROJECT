@@ -1,0 +1,15 @@
+{
+  "n_feat": 6,
+  "window": 36,
+  "features": [
+    "excess_n",
+    "vol_n",
+    "rvol_n",
+    "vwap_n",
+    "thrust_n",
+    "hilo"
+  ],
+  "n_windows": 81900,
+  "epochs": 6,
+  "trained_at": "2026-08-07T15:39:41.557594"
+}
