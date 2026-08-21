@@ -229,9 +229,12 @@ public final class HttpAiInsightAdapter implements AiInsightPort {
             if (symbol.isBlank()) {
                 continue;
             }
+            // 유사도는 0~1 비율로 온다. 화면은 퍼센트로 읽으므로 여기서 옮긴다.
             BigDecimal score = decimal(entry, "유사도");
             stocks.add(new SimilarStock(symbol, text(entry, "종목명", symbol),
-                    score == null ? BigDecimal.ZERO : score));
+                    score == null ? BigDecimal.ZERO
+                            : score.multiply(BigDecimal.valueOf(100))
+                                    .setScale(0, java.math.RoundingMode.HALF_UP)));
         }
         return List.copyOf(stocks);
     }
