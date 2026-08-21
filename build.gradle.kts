@@ -122,6 +122,16 @@ val verifyModuleBoundaries by tasks.registering {
             "org.ossproject.mocktrading", "org.sqlite"
         ),
 
+        // AI 계약은 도메인만 본다. 어떤 엔진이 어디서 도는지 알지 못한다.
+        "modules/ai-insight-api" to listOf(
+            "javafx.", "java.net.http", "org.ossproject.application", "org.ossproject.desktop",
+            "org.ossproject.kiwoom", "com.fasterxml.jackson"
+        ),
+        "modules/ai-insight-http" to listOf(
+            "javafx.", "org.ossproject.desktop", "org.ossproject.kiwoom",
+            "org.ossproject.mocktrading", "org.sqlite"
+        ),
+
         // 앱은 조립 루트다. 어댑터를 고르는 것은 맞지만 저수준 라이브러리를 직접 쓰면
         // 그 결정이 모듈 밖으로 새어 나온다.
         "apps/desktop-javafx" to listOf("org.sqlite", "com.sun.jna", "java.net.http")
