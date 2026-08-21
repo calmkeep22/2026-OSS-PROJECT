@@ -42,7 +42,17 @@ public final class AiInsightCard {
         root = new VBox(10, title, narration, caveats, listen);
         root.getStyleClass().add("panel-card");
         root.setPadding(new Insets(16));
+        // 부모가 폭을 잡아 주지 않으면 wrapText 만으로는 줄이 바뀌지 않는다. 라벨이 한 줄로
+        // 늘어나 문장 뒤쪽이 잘린다. 잘린 문장은 신뢰도와 면책이 사라진 문장이다.
+        bindWrapWidth(narration);
+        bindWrapWidth(caveats);
         waiting();
+    }
+
+    /** 카드 폭에 맞춰 줄을 바꾼다. 좌우 여백 16 씩을 뺀다. */
+    private void bindWrapWidth(Label label) {
+        label.setMinWidth(0);
+        label.maxWidthProperty().bind(root.widthProperty().subtract(32));
     }
 
     private String spoken = "";
