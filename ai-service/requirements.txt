@@ -43,3 +43,7 @@ requests>=2.32
 # 자바 앱이 부르는 창구. 라이브러리만 쓸 때는 필요 없다.
 fastapi>=0.115
 uvicorn>=0.32
+
+# --- 테스트 ---
+# tests/ 가 이미 있는데 빠져 있었다. 없으면 `python -m pytest` 가 바로 죽는다.
+pytest>=8.0

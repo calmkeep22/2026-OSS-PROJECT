@@ -40,6 +40,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from accessible_investor import serving as SV
+import chat as CHAT
+from news_cache import CACHE as NEWS_CACHE
 
 LOG = logging.getLogger("ai-service")
 
@@ -55,6 +57,37 @@ class Bar(BaseModel):
     low: float
     close: float
     volume: int = 0
+
+
+class NewsRequest(BaseModel):
+    """뉴스는 종목명으로 찾는다. 코드로는 기사가 안 잡힌다."""
+
+    code: str
+    days: int = 7
+
+
+class TrackRequest(BaseModel):
+    """미리 받아 둘 종목. 앱이 보유·관심 목록을 알려 준다."""
+
+    codes: list[str] = Field(default_factory=list)
+
+
+class ChatRequest(BaseModel):
+    """
+    질문과, 앱이 이미 화면에 띄워 둔 분석.
+
+    앱이 근거를 함께 보내는 이유는 화면 글자와 답이 어긋나지 않게 하기 위해서다.
+    서버가 다시 계산하면 그새 값이 바뀌어 사용자가 보고 있는 것과 다른 답을 듣는다.
+    """
+
+    code: str
+    question: str
+    narration: str = ""
+    forecast: str = ""
+    direction: str = ""
+    direction_meaningful: bool = False
+    risk: str = ""
+    anomaly: str = ""
 
 
 class BriefRequest(BaseModel):
@@ -177,6 +210,119 @@ def similar(request: BriefRequest) -> dict:
         raise HTTPException(422, f"자료가 부족합니다 ({error})")
     except SV.ServiceError as error:
         raise HTTPException(400, str(error))
+
+
+@app.post("/news")
+def news(request: NewsRequest) -> dict:
+    """
+    한 종목의 최근 뉴스와 감성 지수.
+
+    기사 목록·사건 요약·지수를 함께 준다. 화면은 목록을 보여 주고 `브리핑` 을 읽어
+    주기만 하면 된다. 문장을 화면이 새로 지으면 지수가 무엇을 뜻하는지가 빠진다.
+
+    감성 지수는 **여론의 방향을 요약한 것이지 주가 예측이 아니다.** 그 사실이
+    `브리핑` 마지막 줄에 들어 있다. 잘라 내면 안 된다.
+    """
+    from accessible_investor import news as N
+
+    try:
+        meta = SV.resolve(request.code)
+    except SV.UnknownSymbol:
+        raise HTTPException(404, "그런 종목이 없습니다")
+
+    # 이 종목을 미리받기 목록에 넣는다. 사용자가 실제로 보는 종목이 곧 쌓아야 할 종목이다.
+    NEWS_CACHE.track([meta["label"]])
+
+    result = N.analyze(meta["label"], days=request.days)
+    if not result:
+        # 기사가 없는 것과 조회 실패는 다르다. 빈 목록으로 뭉개면 구별되지 않는다.
+        return {"종목코드": meta["code"], "종목명": meta["label"],
+                "기사": [], "사건": [], "지수": None,
+                "브리핑": "관련 뉴스를 찾지 못했습니다."}
+
+    return {
+        "종목코드": meta["code"],
+        "종목명": meta["label"],
+        "지수": result["score"],
+        "지수해석": result["label"],
+        "기사수": result["n_articles"],
+        "사건수": result["n_events"],
+        "긍정": result["n_pos"], "중립": result["n_neu"], "부정": result["n_neg"],
+        "사건": result["summaries"],
+        "시황": result.get("market_line"),
+        "기사": [
+            {"제목": a["title"], "출처": a["source"],
+             "시각": str(a["ts"]), "주소": a["url"], "감성": a["polarity"]}
+            for a in result["articles"][:20]
+        ],
+        "브리핑": N.briefing_text(result),
+    }
+
+
+@app.post("/news/track")
+def news_track(request: TrackRequest) -> dict:
+    """
+    미리 받아 둘 종목을 알려 준다.
+
+    구글 뉴스 RSS 는 최근 7일까지만 준다. 오늘 안 받으면 그날치는 영영 없다. 앱이
+    보유·관심 목록을 넘겨 주면 하루 한 번 훑어 아카이브에 쌓는다.
+    """
+    names = []
+    unknown = []
+    for code in request.codes:
+        try:
+            names.append(SV.resolve(code)["label"])
+        except Exception:
+            unknown.append(code)
+    result = NEWS_CACHE.track(names)
+    result["모르는종목"] = unknown
+    return result
+
+
+@app.get("/news/status")
+def news_status() -> dict:
+    """적립이 실제로 돌고 있는지. 조용히 멈추면 예측만 서서히 무뎌진다."""
+    return NEWS_CACHE.status()
+
+
+@app.post("/chat")
+def chat(request: ChatRequest) -> dict:
+    """
+    근거 있는 답만 한다.
+
+    사고팔라는 말과 미래 가격은 답하지 않는다. 우리가 가진 값으로 뒷받침되지 않고,
+    법적으로도 투자자문이다. 거절할 때는 대신 무엇을 알려 줄 수 있는지 함께 말한다.
+    막다른 길로 두면 사용자는 다른 곳에서 더 나쁜 답을 찾는다.
+    """
+    from accessible_investor import news as N
+
+    try:
+        meta = SV.resolve(request.code)
+    except SV.UnknownSymbol:
+        raise HTTPException(404, "그런 종목이 없습니다")
+
+    facts = CHAT.Facts(
+        name=meta["label"],
+        narration=request.narration,
+        forecast=request.forecast,
+        direction=request.direction,
+        direction_meaningful=request.direction_meaningful,
+        risk=request.risk,
+        anomaly=request.anomaly,
+    )
+    # 뉴스는 앱이 안 보낸다. 이미 받아 둔 것이 있으면 쓰고, 없으면 없는 대로 답한다.
+    try:
+        result = N.analyze(meta["label"], days=7)
+        if result:
+            facts.news_score = result["score"]
+            facts.news_events = list(result["summaries"])
+            facts.news_brief = N.briefing_text(result)
+    except Exception:
+        pass
+
+    answer = CHAT.answer(request.question, facts)
+    answer["추천질문"] = CHAT.suggestions(facts)
+    return answer
 
 
 def _to_frame(bars: list[Bar]):

@@ -146,6 +146,16 @@ public final class DesktopApplication extends Application {
     private final DesktopStateRepository stateRepository;
     private final AccessibilityPreferencesRepository accessibilityPreferencesRepository;
     private final SonificationPreferencesRepository sonificationPreferencesRepository;
+    /**
+     * 고른 종목에 매인 화면.
+     *
+     * <p>상태를 보존하는 화면 중 종목별 내용을 담는 것만 적는다. 매번 새로 만드는 화면은
+     * 여기 넣을 필요가 없고, 관심종목처럼 종목과 무관한 화면은 넣으면 사용자가 맞춰 둔
+     * 스크롤과 선택이 이유 없이 사라진다.
+     */
+    private static final java.util.List<Screen> STOCK_BOUND_SCREENS =
+            java.util.List.of(Screen.ANOMALY);
+
     private DesktopScreenController screenController;
     private PauseTransition persistenceDelay;
     private final TextField globalSearch = new TextField();
@@ -1260,6 +1270,27 @@ public final class DesktopApplication extends Application {
                         this::scheduleStateSave, this::requestSpeech).create());
         screenController.register(Screen.RADIO, this::createAccessibleChartScreen);
         screenController.registerPreservingState(Screen.SETTINGS, this::createSettingsScreen);
+        invalidateStockBoundScreensOnSelectionChange();
+    }
+
+    /**
+     * 종목이 바뀌면 그 종목에 매인 화면을 다시 만들게 한다.
+     *
+     * <p>상태를 보존하는 화면은 노드를 캐시한다. 그래서 종목을 바꾸고 다시 들어가면 이전
+     * 종목의 내용이 그대로 남는다. 화면을 볼 수 있으면 종목명이 눈에 들어와 금방 알아채지만
+     * 스크린리더로는 문장을 끝까지 들어야 알 수 있다. 카카오를 보러 들어와서 삼성전자
+     * 분석을 듣게 된다.
+     */
+    private void invalidateStockBoundScreensOnSelectionChange() {
+        session.selectedStockProperty().addListener((observable, previous, selected) -> {
+            if (selected == null || previous == null
+                    || previous.securityId().equals(selected.securityId())) {
+                return;
+            }
+            for (Screen screen : STOCK_BOUND_SCREENS) {
+                screenController.invalidate(screen);
+            }
+        });
     }
 
     private VBox createDashboard() {
