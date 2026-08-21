@@ -160,13 +160,13 @@ public final class DesktopApplication extends Application {
     private BorderPane root;
     private VBox autoHideSidebar;
     private final PauseTransition sidebarHideDelay = new PauseTransition(Duration.millis(70));
-    private boolean speechEnabled;
-    private boolean soundEnabled = true;
-    private boolean keyboardGuidanceEnabled = true;
-    private boolean reducedMotionEnabled = true;
-    private boolean largeTextEnabled = true;
-    private boolean highContrastEnabled;
-    private String informationDensity = "표준";
+    /**
+     * 접근성 설정.
+     *
+     * <p>값을 따로 들고 있으면 저장할 때마다 다시 묶어야 하고, 한 곳만 빠뜨려도 설정이
+     * 조용히 사라진다. 통째로 들고 하나씩 바꿔 나간다.
+     */
+    private AccessibilityPreferences accessibility = AccessibilityPreferences.DEFAULT;
     private boolean preventDuplicateOrders = true;
     private SonificationPreferences sonificationPreferences = SonificationPreferences.DEFAULT;
     private String pendingOrderPrice = "";
@@ -211,15 +211,15 @@ public final class DesktopApplication extends Application {
                 (javafx.collections.ListChangeListener<WatchlistItem>) change -> refreshAnomalyMonitoring());
         root = new BorderPane();
         root.getStyleClass().add("app-root");
-        if (largeTextEnabled) root.getStyleClass().add("large-text");
-        if (highContrastEnabled) root.getStyleClass().add("high-contrast");
-        if (reducedMotionEnabled) root.getStyleClass().add("reduced-motion");
+        if (accessibility.largeTextEnabled()) root.getStyleClass().add("large-text");
+        if (accessibility.highContrastEnabled()) root.getStyleClass().add("high-contrast");
+        if (accessibility.reducedMotionEnabled()) root.getStyleClass().add("reduced-motion");
         root.setMinSize(0, 0);
         screenHost.setMinSize(0, 0);
         root.setTop(createTopBar());
         root.setCenter(createWorkspace());
-        applyKeyboardGuidance(keyboardGuidanceEnabled);
-        applyInformationDensity(informationDensity);
+        applyKeyboardGuidance(accessibility.keyboardGuidanceEnabled());
+        applyInformationDensity(accessibility.informationDensity());
         watchRealtimeConnection();
         status.setAccessibleText("앱 상태. " + status.getText());
         status.textProperty().addListener((obs, old, message) -> Platform.runLater(() -> {
@@ -565,8 +565,8 @@ public final class DesktopApplication extends Application {
 
         globalSearchKeyboardHelp = new Label("↑↓ 선택  ·  Enter 열기  ·  Esc 닫기");
         globalSearchKeyboardHelp.getStyleClass().add("search-popup-help");
-        globalSearchKeyboardHelp.setVisible(keyboardGuidanceEnabled);
-        globalSearchKeyboardHelp.setManaged(keyboardGuidanceEnabled);
+        globalSearchKeyboardHelp.setVisible(accessibility.keyboardGuidanceEnabled());
+        globalSearchKeyboardHelp.setManaged(accessibility.keyboardGuidanceEnabled());
         globalSearchPanel = new VBox(10, globalRecentSection, globalSuggestionSection, globalSearchKeyboardHelp);
         globalSearchPanel.getStyleClass().add("search-suggestion-panel");
         globalSearchPanel.setAccessibleText("종목 검색 추천 패널");
@@ -1228,7 +1228,7 @@ public final class DesktopApplication extends Application {
             };
             currentLocation.setText(location);
             currentLocation.setAccessibleText("현재 화면 " + location);
-            Platform.runLater(() -> applyKeyboardGuidance(keyboardGuidanceEnabled));
+            Platform.runLater(() -> applyKeyboardGuidance(accessibility.keyboardGuidanceEnabled()));
         });
         screenController.register(Screen.DASHBOARD, this::createDashboard);
         screenController.register(Screen.CONNECTION, this::createConnectionScreen);
@@ -2050,24 +2050,24 @@ public final class DesktopApplication extends Application {
     }
 
     private VBox createSettingsScreen() {
-        CheckBox tts = setting("화면 읽기(TTS)", speechEnabled, selected -> {
-            speechEnabled = selected;
+        CheckBox tts = setting("화면 읽기(TTS)", accessibility.speechEnabled(), selected -> {
+            accessibility = accessibility.withSpeechEnabled(selected);
             if (selected) announce("음성 안내를 시작합니다.", SpeechPriority.USER_REQUEST, "speech-enabled");
             else speechQueue.clear();
             scheduleStateSave();
         });
-        CheckBox keyboard = setting("키보드 탐색 안내", keyboardGuidanceEnabled,
-                selected -> { keyboardGuidanceEnabled = selected; applyKeyboardGuidance(selected); scheduleStateSave(); });
-        CheckBox reducedMotion = setting("그림자·시각 효과 줄이기", reducedMotionEnabled,
-                selected -> { reducedMotionEnabled = selected; toggleClass("reduced-motion", selected); scheduleStateSave(); });
-        CheckBox anomalySound = setting("앱 효과음", soundEnabled, selected -> { soundEnabled = selected; scheduleStateSave(); });
-        CheckBox largeText = setting("큰 글자", largeTextEnabled, selected -> {
-            largeTextEnabled = selected;
+        CheckBox keyboard = setting("키보드 탐색 안내", accessibility.keyboardGuidanceEnabled(),
+                selected -> { accessibility = accessibility.withKeyboardGuidanceEnabled(selected); applyKeyboardGuidance(selected); scheduleStateSave(); });
+        CheckBox reducedMotion = setting("그림자·시각 효과 줄이기", accessibility.reducedMotionEnabled(),
+                selected -> { accessibility = accessibility.withReducedMotionEnabled(selected); toggleClass("reduced-motion", selected); scheduleStateSave(); });
+        CheckBox anomalySound = setting("앱 효과음", accessibility.soundEnabled(), selected -> { accessibility = accessibility.withSoundEnabled(selected); scheduleStateSave(); });
+        CheckBox largeText = setting("큰 글자", accessibility.largeTextEnabled(), selected -> {
+            accessibility = accessibility.withLargeTextEnabled(selected);
             toggleClass("large-text", selected);
             scheduleStateSave();
         });
-        CheckBox contrast = setting("고대비", highContrastEnabled, selected -> {
-            highContrastEnabled = selected;
+        CheckBox contrast = setting("고대비", accessibility.highContrastEnabled(), selected -> {
+            accessibility = accessibility.withHighContrastEnabled(selected);
             toggleClass("high-contrast", selected);
             scheduleStateSave();
         });
@@ -2106,9 +2106,9 @@ public final class DesktopApplication extends Application {
             }
         });
         ComboBox<String> density = new ComboBox<>(FXCollections.observableArrayList("좁게", "표준", "넓게"));
-        density.setValue(informationDensity);
+        density.setValue(accessibility.informationDensity());
         density.valueProperty().addListener((obs, old, selected) -> {
-            if (selected != null) { informationDensity = selected; applyInformationDensity(selected); scheduleStateSave(); }
+            if (selected != null) { accessibility = accessibility.withInformationDensity(selected); applyInformationDensity(selected); scheduleStateSave(); }
         });
         GridPane voiceSettings = new GridPane(); voiceSettings.setHgap(16); voiceSettings.setVgap(10);
         addField(voiceSettings, 0, "음성", voice);
@@ -2116,9 +2116,9 @@ public final class DesktopApplication extends Application {
         voiceSettings.getColumnConstraints().addAll(equalSettingsColumn(), equalSettingsColumn());
         Button preview = new Button("설정 미리 듣기");
         preview.setOnAction(event -> {
-            boolean before = speechEnabled; speechEnabled = true;
+            boolean before = accessibility.speechEnabled(); accessibility = accessibility.withSpeechEnabled(true);
             announce("음성 설정 미리 듣기입니다. 현재 속도는 " + speed.getValue() + "이고 정보량은 " + density.getValue() + "입니다.",
-                    SpeechPriority.USER_REQUEST, "settings-preview"); speechEnabled = before || tts.isSelected();
+                    SpeechPriority.USER_REQUEST, "settings-preview"); accessibility = accessibility.withSpeechEnabled(before || tts.isSelected());
         });
         Button auditAccessibility = new Button("현재 화면 접근성 검사");
         auditAccessibility.setOnAction(event -> {
@@ -2718,14 +2718,7 @@ public final class DesktopApplication extends Application {
             stockSearchViewModel.recentSearches().setAll(snapshot.recentSearches());
             preventDuplicateOrders = snapshot.preventDuplicateOrders();
         });
-        AccessibilityPreferences accessibility = accessibilityPreferencesRepository.load();
-        speechEnabled = accessibility.speechEnabled();
-        soundEnabled = accessibility.soundEnabled();
-        keyboardGuidanceEnabled = accessibility.keyboardGuidanceEnabled();
-        reducedMotionEnabled = accessibility.reducedMotionEnabled();
-        largeTextEnabled = accessibility.largeTextEnabled();
-        highContrastEnabled = accessibility.highContrastEnabled();
-        informationDensity = accessibility.informationDensity();
+        accessibility = accessibilityPreferencesRepository.load();
         String voice = accessibility.voiceName().isBlank() ? null : accessibility.voiceName();
         speechQueue.setOptions(new SpeechOptions(accessibility.speechRate(), accessibility.speechVolume(), voice));
         sonificationPreferences = sonificationPreferencesRepository.load();
@@ -2748,10 +2741,10 @@ public final class DesktopApplication extends Application {
                     List.copyOf(stockSearchViewModel.recentSearches()), List.copyOf(session.notifications()),
                     List.copyOf(session.journalEntries()), session.selectedStock(),
                     preventDuplicateOrders));
-            accessibilityPreferencesRepository.save(new AccessibilityPreferences(
-                    speechEnabled, soundEnabled, keyboardGuidanceEnabled, reducedMotionEnabled,
-                    largeTextEnabled, highContrastEnabled, informationDensity,
-                    speech.voiceName() == null ? "" : speech.voiceName(), speech.rate(), speech.volume()));
+            // 음성 설정만 합성기에서 읽어 채운다. 나머지는 이미 들고 있는 값 그대로다.
+            accessibilityPreferencesRepository.save(accessibility.withVoice(
+                    speech.voiceName() == null ? "" : speech.voiceName(),
+                    speech.rate(), speech.volume()));
             sonificationPreferencesRepository.save(accessibleChartController == null
                     ? sonificationPreferences : accessibleChartController.preferences());
         } catch (RuntimeException error) {
@@ -2765,7 +2758,7 @@ public final class DesktopApplication extends Application {
 
     /** 사용자가 직접 누른 듣기 동작은 TTS가 꺼져 있어도 이유를 알려 준다. */
     private void requestSpeech(String text, String key) {
-        if (!speechEnabled || speechQueue.isClosed()) {
+        if (!accessibility.speechEnabled() || speechQueue.isClosed()) {
             status.setText("음성 안내가 꺼져 있습니다. 설정에서 화면 읽기(TTS)를 켜주세요.");
             play(SoundCue.WARNING);
             return;
@@ -2774,11 +2767,11 @@ public final class DesktopApplication extends Application {
     }
 
     private void announce(String text, SpeechPriority priority, String key, SpeechMergePolicy mergePolicy) {
-        if (speechEnabled && !speechQueue.isClosed()) {
+        if (accessibility.speechEnabled() && !speechQueue.isClosed()) {
             speechQueue.announce(new SpeechRequest(text, priority, key, mergePolicy));
         }
     }
-    private void play(SoundCue cue) { if (soundEnabled) soundPort.play(cue); }
+    private void play(SoundCue cue) { if (accessibility.soundEnabled()) soundPort.play(cue); }
     private void applyKeyboardGuidance(boolean enabled) {
         toggleClass("keyboard-guidance-off", !enabled);
         if (root != null) {
