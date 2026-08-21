@@ -3,6 +3,7 @@ package org.ossproject.desktop.ai;
 import javafx.geometry.Insets;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import org.ossproject.ai.AiInsight;
 
@@ -67,6 +68,9 @@ public final class AiInsightCard {
         label.setMinWidth(0);
         label.maxWidthProperty().bind(javafx.beans.binding.Bindings.min(
                 root.widthProperty().subtract(32), MAX_READING_WIDTH));
+        // 세로 공간이 모자라면 부모가 라벨을 최소 높이로 누른다. 접힌 줄이 있어도 한 줄만
+        // 남고 나머지가 잘린다. 접은 높이를 최소로 삼아 눌리지 않게 한다.
+        label.setMinHeight(Region.USE_PREF_SIZE);
     }
 
     private String spoken = "";

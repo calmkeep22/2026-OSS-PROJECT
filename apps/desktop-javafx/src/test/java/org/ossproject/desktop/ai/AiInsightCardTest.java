@@ -73,4 +73,29 @@ class AiInsightCardTest {
                     "여러 줄로 접혀야 합니다. 높이 " + narration.getHeight());
         });
     }
+
+    /**
+     * 세로 공간이 모자라면 부모가 라벨을 최소 높이로 누른다. 접힌 줄이 있어도 한 줄만 남고
+     * 나머지가 잘린다. 실제 화면에서 이렇게 잘리고 있었다.
+     */
+    @Test
+    @DisplayName("세로가 좁아도 접힌 줄이 눌리지 않는다")
+    void keepsWrappedLinesWhenVerticalSpaceIsTight() {
+        JavaFxToolkit.onFxThread(() -> {
+            AiInsightCard card = new AiInsightCard(text -> { });
+            card.show(AiInsight.of("000810", "삼성화재", LONG_NARRATION, Confidence.HIGH, true));
+
+            // 카드가 요구하는 높이보다 훨씬 낮은 자리에 넣는다.
+            javafx.scene.layout.VBox column = new javafx.scene.layout.VBox(card.root());
+            javafx.scene.layout.VBox.setVgrow(card.root(), javafx.scene.layout.Priority.ALWAYS);
+            StackPane host = new StackPane(column);
+            new Scene(host, 1200, 120);
+            host.applyCss();
+            host.layout();
+
+            Label narration = findNarration(card);
+            assertTrue(narration.getHeight() > 30,
+                    "눌려서 한 줄만 남으면 안 됩니다. 높이 " + narration.getHeight());
+        });
+    }
 }
