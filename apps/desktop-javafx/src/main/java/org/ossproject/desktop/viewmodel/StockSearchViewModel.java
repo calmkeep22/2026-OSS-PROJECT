@@ -70,7 +70,7 @@ public final class StockSearchViewModel {
 
     /** 화면을 열기 전에 검색어와 시장 선택만 준비한다. 실제 조회는 화면 생성 후 실행한다. */
     public void prepare(String query, String marketFilter) {
-        currentQuery = query == null ? "" : query;
+        currentQuery = query == null ? "" : query.strip();
         currentMarket = marketFilter == null || marketFilter.isBlank() ? "전체" : marketFilter;
     }
 
@@ -80,12 +80,26 @@ public final class StockSearchViewModel {
      * @return 최신 요청이 화면 상태에 반영된 뒤 완료되는 검색 결과
      */
     public CompletionStage<SearchResult> filter(String query, String marketFilter) {
-        currentQuery = query == null ? "" : query;
+        currentQuery = query == null ? "" : query.strip();
         currentMarket = marketFilter == null || marketFilter.isBlank() ? "전체" : marketFilter;
         String requestedQuery = currentQuery;
         String requestedMarket = currentMarket;
         long requestId = requestSequence.incrementAndGet();
         CompletableFuture<SearchResult> applied = new CompletableFuture<>();
+
+        if (requestedQuery.isBlank()) {
+            executeStateChange(applied, () -> {
+                if (requestId != requestSequence.get()) {
+                    applied.complete(new SearchResult(items.size(), "", false));
+                    return;
+                }
+                items.clear();
+                preferredSymbol = null;
+                lastError = "";
+                applied.complete(new SearchResult(0, "검색어를 입력해주세요.", true));
+            });
+            return applied;
+        }
 
         market.search(requestedQuery, RESULT_LIMIT).whenComplete((summaries, failure) ->
                 executeStateChange(applied, () -> {
@@ -178,7 +192,16 @@ public final class StockSearchViewModel {
     public void select(StockSearchItem item) {
         Objects.requireNonNull(item, "item");
         session.selectStock(item.toSelection());
-        String recent = item.name() + " · " + item.symbol();
+        addRecent(item.name() + " · " + item.symbol());
+    }
+
+    /** 사용자가 실제로 제출한 검색어를 최근 검색에 기록한다. */
+    public void recordRecentQuery(String query) {
+        if (query == null || query.isBlank()) return;
+        addRecent(query.strip());
+    }
+
+    private void addRecent(String recent) {
         recentSearches.remove(recent);
         recentSearches.add(0, recent);
         if (recentSearches.size() > RECENT_LIMIT) {

@@ -66,7 +66,7 @@ public final class DepthChartCanvas extends Region {
         double width = canvas.getWidth();
         double height = canvas.getHeight();
         gc.clearRect(0, 0, width, height);
-        gc.setFont(Font.font(11));
+        gc.setFont(Font.font("Noto Sans KR", 11));
 
         if (view == null || view.isEmpty()) {
             gc.setFill(TEXT);

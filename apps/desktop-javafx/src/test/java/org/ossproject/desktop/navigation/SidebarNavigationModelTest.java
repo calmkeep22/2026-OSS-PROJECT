@@ -39,12 +39,8 @@ class SidebarNavigationModelTest {
         SidebarNavigationModel model = new SidebarNavigationModel();
 
         assertEquals(List.of(
-                Screen.MARKET,
                 Screen.SEARCH,
-                Screen.WATCHLIST,
-                Screen.SCANNER,
-                Screen.CONDITION,
-                Screen.SUPPLY
+                Screen.WATCHLIST
         ), model.children(Screen.NavigationGroup.MARKET_EXPLORATION));
         assertFalse(model.children(Screen.NavigationGroup.MARKET_EXPLORATION)
                 .contains(Screen.STOCK_DETAIL));

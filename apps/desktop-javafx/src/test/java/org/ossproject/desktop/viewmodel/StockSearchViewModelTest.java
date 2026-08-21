@@ -94,4 +94,25 @@ class StockSearchViewModelTest {
         viewModel.removeRecent(recent);
         assertFalse(viewModel.recentSearches().contains(recent));
     }
+
+    @Test void blankQueryClearsPreviousResultsInsteadOfRepeatingTheLastSearch() {
+        StockSearchViewModel viewModel = viewModel(new DesktopSession());
+        viewModel.filter("삼성", "전체").toCompletableFuture().join();
+        assertFalse(viewModel.items().isEmpty());
+
+        StockSearchViewModel.SearchResult blank = viewModel.filter("  ", "전체").toCompletableFuture().join();
+
+        assertEquals(0, blank.count());
+        assertTrue(viewModel.items().isEmpty());
+        assertEquals("", viewModel.currentQuery());
+    }
+
+    @Test void submittedTextQueryIsRecordedWithoutOpeningAStock() {
+        StockSearchViewModel viewModel = viewModel(new DesktopSession());
+
+        viewModel.recordRecentQuery("한화");
+        viewModel.filter("한화", "전체").toCompletableFuture().join();
+
+        assertEquals("한화", viewModel.recentSearches().get(0));
+    }
 }

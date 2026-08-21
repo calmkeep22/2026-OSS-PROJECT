@@ -25,13 +25,12 @@ import org.ossproject.desktop.persistence.PropertiesAccessibilityPreferencesRepo
 import org.ossproject.desktop.persistence.PropertiesDesktopStateRepository;
 import org.ossproject.desktop.persistence.PropertiesSonificationPreferencesRepository;
 import org.ossproject.desktop.persistence.SonificationPreferencesRepository;
-import org.ossproject.fake.FakeStockQueryAdapter;
-import org.ossproject.fake.FakeCandleQueryAdapter;
 import org.ossproject.kiwoom.KiwoomMarketAdapters;
 import org.ossproject.sonification.javasound.PcmGraphSonificationAdapter;
 import org.ossproject.sonification.port.SonificationPort;
 import org.ossproject.secret.SecretStore;
 import org.ossproject.secret.SecretStoreException;
+import org.ossproject.secret.SecretBytes;
 import org.ossproject.secret.windows.SecretStoreFactory;
 
 import java.nio.file.Path;
@@ -63,7 +62,7 @@ public record DesktopServices(
         Path stateDirectory = stateDirectory();
         Path legacyState = stateDirectory.resolve("ui-state.properties");
         SecretStore secrets = createSecretStore(stateDirectory.resolve("secrets"));
-        MarketDataSource source = createMarketDataSource();
+        MarketDataSource source = createMarketDataSource(secrets);
         MarketApplicationPort market = new MarketApplicationService(
                 source.stocks(), source.candles(), source.orderBooks(), source.trades(),
                 source.stream(), ForkJoinPool.commonPool(), ForkJoinPool.commonPool(),
@@ -119,12 +118,23 @@ public record DesktopServices(
      * <p>자격증명이 없으면 값을 지어내지 않고 조회가 실패하도록 둔다. 연결에 실패해도 앱을
      * 띄우지 못하게 하지는 않는다. 접근성 기능은 시세 없이도 동작해야 한다.
      */
-    private static MarketDataSource createMarketDataSource() {
+    private static MarketDataSource createMarketDataSource(SecretStore secrets) {
         String appKey = System.getenv("KIWOOM_APP_KEY");
         String appSecret = System.getenv("KIWOOM_APP_SECRET");
+        char[] stored = null;
+        if ((appKey == null || appKey.isBlank()) && (appSecret == null || appSecret.isBlank())
+                && secrets.isAvailable()) {
+            stored = secrets.load("kiwoom.mock.credentials").orElse(null);
+            int separator = credentialSeparator(stored);
+            if (separator > 0 && separator < stored.length - 1) {
+                appKey = new String(stored, 0, separator);
+                appSecret = new String(stored, separator + 1, stored.length - separator - 1);
+            }
+        }
+        SecretBytes.wipe(stored);
         if (appKey == null || appKey.isBlank() || appSecret == null || appSecret.isBlank()) {
             return unavailable("키움 API 연결이 필요합니다."
-                    + " 환경변수 KIWOOM_APP_KEY 와 KIWOOM_APP_SECRET 을 설정한 뒤 다시 실행해주세요.");
+                    + " 환경변수를 설정하거나 연결 화면에서 보호 저장한 뒤 다시 실행해주세요.");
         }
         try {
             KiwoomMarketAdapters kiwoom = KiwoomMarketAdapters.mockTrading(appKey, appSecret);
@@ -135,6 +145,27 @@ public record DesktopServices(
             LOGGER.log(System.Logger.Level.WARNING, "키움 연결을 준비하지 못했습니다.", failure);
             return unavailable("키움 연결을 준비하지 못했습니다. 자격증명과 네트워크를 확인해주세요.");
         }
+    }
+
+    /** 입력한 키로 토큰과 모의계좌 조회까지 수행해 연결 가능 여부를 확인한다. */
+    public static String verifyMockCredentials(String appKey, char[] appSecret) {
+        if (appSecret == null || appSecret.length == 0) {
+            throw new IllegalArgumentException("App Secret은 필수입니다.");
+        }
+        KiwoomMarketAdapters adapters = KiwoomMarketAdapters.mockTrading(appKey, new String(appSecret));
+        try {
+            return "계좌 " + adapters.account().getAccount().maskedAccountNo();
+        } finally {
+            adapters.stream().close();
+        }
+    }
+
+    private static int credentialSeparator(char[] credentials) {
+        if (credentials == null) return -1;
+        for (int index = 0; index < credentials.length; index++) {
+            if (credentials[index] == '\n') return index;
+        }
+        return -1;
     }
 
     private static MarketDataSource unavailable(String reason) {

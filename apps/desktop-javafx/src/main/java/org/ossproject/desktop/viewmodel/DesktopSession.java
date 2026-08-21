@@ -6,7 +6,6 @@ import javafx.collections.FXCollections;
 import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
 import org.ossproject.desktop.persistence.DesktopStateSnapshot;
-import org.ossproject.desktop.state.AlertRule;
 import org.ossproject.desktop.state.JournalEntry;
 import org.ossproject.desktop.state.WatchlistItem;
 
@@ -18,13 +17,12 @@ public final class DesktopSession {
 
     private final ObjectProperty<StockSelection> selectedStock =
             new SimpleObjectProperty<>(StockSelection.samsungElectronics());
-    // 관심종목·알림 규칙·알림 목록·매매일지는 모두 사용자가 만드는 기록이다. 예전에는
+    // 관심종목·알림 목록·매매일지는 모두 사용자가 만드는 기록이다. 예전에는
     // 화면이 비어 보이지 않도록 삼성전자와 체결 알림 같은 표본을 미리 넣어 두었는데,
     // 화면을 볼 수 없는 사용자는 그것이 자기 기록인지 앱이 넣어 둔 예시인지 구분할 수 없다.
     // 빈 상태로 시작하고 저장된 기록이 있으면 restore 가 채운다.
     private final ObservableList<String> watchlistGroups = FXCollections.observableArrayList(ALL_GROUP);
     private final ObservableList<WatchlistItem> watchlistItems = FXCollections.observableArrayList();
-    private final ObservableList<AlertRule> alertRules = FXCollections.observableArrayList();
     private final ObservableList<String> notifications = FXCollections.observableArrayList();
     private final ObservableList<JournalEntry> journalEntries = FXCollections.observableArrayList();
 
@@ -33,7 +31,6 @@ public final class DesktopSession {
     public void selectStock(StockSelection stock) { selectedStock.set(Objects.requireNonNull(stock, "stock")); }
     public ObservableList<String> watchlistGroups() { return watchlistGroups; }
     public ObservableList<WatchlistItem> watchlistItems() { return watchlistItems; }
-    public ObservableList<AlertRule> alertRules() { return alertRules; }
     public ObservableList<String> notifications() { return notifications; }
     public ObservableList<JournalEntry> journalEntries() { return journalEntries; }
 
@@ -43,7 +40,6 @@ public final class DesktopSession {
         watchlistGroups.setAll(snapshot.watchlistGroups());
         if (!watchlistGroups.contains(ALL_GROUP)) watchlistGroups.add(0, ALL_GROUP);
         watchlistItems.setAll(snapshot.watchlistItems());
-        alertRules.setAll(snapshot.alertRules());
         notifications.setAll(snapshot.notifications());
         journalEntries.setAll(snapshot.journalEntries());
     }
@@ -52,7 +48,6 @@ public final class DesktopSession {
         Objects.requireNonNull(listener, "listener");
         watchlistGroups.addListener((ListChangeListener<String>) change -> listener.run());
         watchlistItems.addListener((ListChangeListener<WatchlistItem>) change -> listener.run());
-        alertRules.addListener((ListChangeListener<AlertRule>) change -> listener.run());
         notifications.addListener((ListChangeListener<String>) change -> listener.run());
         journalEntries.addListener((ListChangeListener<JournalEntry>) change -> listener.run());
         selectedStock.addListener((obs, old, value) -> listener.run());

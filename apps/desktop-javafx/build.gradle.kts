@@ -3,12 +3,6 @@ plugins {
     id("org.openjfx.javafxplugin") version "0.1.0"
 }
 
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(17)
-    }
-}
-
 javafx {
     version = "17.0.12"
     modules = listOf("javafx.controls")
@@ -89,16 +83,13 @@ dependencies {
     implementation(project(":modules:accessibility"))
     implementation(project(":modules:sonification"))
     implementation(project(":modules:sonification-java-sound"))
-    implementation(project(":modules:fake-adapters"))
     implementation(project(":modules:kiwoom-adapter"))
     implementation(project(":modules:secret-store-api"))
     implementation(project(":modules:windows-secret-store"))
 
     testImplementation(testFixtures(project(":modules:application")))
+    testImplementation(project(":modules:fake-adapters"))
     // 헤드리스로 JavaFX 툴킷을 띄운다. CI 는 ubuntu 와 windows 를 모두 돌리는데
     // xvfb 는 windows 러너에서 쓸 수 없다.
     testRuntimeOnly("org.testfx:openjfx-monocle:jdk-12.0.1+2")
-    testImplementation(platform("org.junit:junit-bom:5.11.4"))
-    testImplementation("org.junit.jupiter:junit-jupiter")
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

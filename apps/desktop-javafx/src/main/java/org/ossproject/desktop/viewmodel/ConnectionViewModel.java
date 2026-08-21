@@ -1,5 +1,6 @@
 package org.ossproject.desktop.viewmodel;
 
+import javafx.application.Platform;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ReadOnlyBooleanProperty;
@@ -14,6 +15,11 @@ import java.util.Objects;
 
 /** 키움 연결 화면의 입력 검증과 보호된 로컬 자격증명 상태. */
 public final class ConnectionViewModel {
+    @FunctionalInterface
+    public interface CredentialProbe {
+        String verify(String appKey, char[] appSecret);
+    }
+
     public enum Environment { MOCK("모의투자"), LIVE("실전투자");
         private final String label;
         Environment(String label) { this.label = label; }
@@ -22,17 +28,21 @@ public final class ConnectionViewModel {
 
     private final ObjectProperty<Environment> environment = new SimpleObjectProperty<>(Environment.MOCK);
     private final StringProperty connectionMessage = new SimpleStringProperty(
-            "자격증명과 API 연결을 아직 확인하지 않았습니다. 현재 화면은 로컬 데모입니다.");
+            "키움 모의투자 자격증명과 API 연결을 아직 확인하지 않았습니다.");
     private final StringProperty connectionTone = new SimpleStringProperty("warning");
-    private final StringProperty tokenExpiry = new SimpleStringProperty("발급 전 · 실제 API 미연결");
-    private final StringProperty defaultAccount = new SimpleStringProperty("모의계좌");
     private final StringProperty credentialStorageDescription = new SimpleStringProperty();
     private final StringProperty credentialStorageStatus = new SimpleStringProperty();
     private final BooleanProperty storedCredentials = new SimpleBooleanProperty();
     private final SecretStore secretStore;
+    private final CredentialProbe credentialProbe;
 
     public ConnectionViewModel(SecretStore secretStore) {
+        this(secretStore, (appKey, appSecret) -> "모의투자 자격증명 형식을 확인했습니다.");
+    }
+
+    public ConnectionViewModel(SecretStore secretStore, CredentialProbe credentialProbe) {
         this.secretStore = Objects.requireNonNull(secretStore, "secretStore");
+        this.credentialProbe = Objects.requireNonNull(credentialProbe, "credentialProbe");
         environment.addListener((obs, old, selected) -> refreshCredentialStorageState());
         refreshCredentialStorageState();
     }
@@ -40,20 +50,21 @@ public final class ConnectionViewModel {
     public ObjectProperty<Environment> environmentProperty() { return environment; }
     public StringProperty connectionMessageProperty() { return connectionMessage; }
     public StringProperty connectionToneProperty() { return connectionTone; }
-    public StringProperty tokenExpiryProperty() { return tokenExpiry; }
-    public StringProperty defaultAccountProperty() { return defaultAccount; }
     public StringProperty credentialStorageDescriptionProperty() { return credentialStorageDescription; }
     public StringProperty credentialStorageStatusProperty() { return credentialStorageStatus; }
     public ReadOnlyBooleanProperty storedCredentialsProperty() { return storedCredentials; }
     public boolean isCredentialStorageAvailable() { return secretStore.isAvailable(); }
 
     /**
-     * Validates typed credentials or, when both fields are blank, protected stored credentials.
-     * No broker request is sent yet.
+     * 입력 자격증명 또는 보호 저장된 자격증명으로 키움 모의투자 API를 실제 확인한다.
      */
     public boolean testConnection(String appKey, char[] appSecret, boolean rememberCredentials) {
         char[] stored = null;
+        char[] secretForProbe = null;
         try {
+            if (environment.get() == Environment.LIVE) {
+                return fail("실전투자는 현재 지원하지 않습니다. 키움 모의투자를 선택해주세요.");
+            }
             boolean typedKey = appKey != null && !appKey.isBlank();
             boolean typedSecret = !isBlank(appSecret);
             if (typedKey != typedSecret) {
@@ -61,6 +72,7 @@ public final class ConnectionViewModel {
             }
 
             boolean usingStored = !typedKey;
+            String keyForProbe;
             if (usingStored) {
                 if (!secretStore.isAvailable() || !storedCredentials.get()) {
                     return fail("저장된 자격증명이 없습니다. App Key와 App Secret을 입력해주세요.");
@@ -70,7 +82,16 @@ public final class ConnectionViewModel {
                 if (separator < 1 || separator >= stored.length - 1) {
                     return fail("저장된 자격증명을 읽지 못했습니다. 다시 입력해주세요.");
                 }
-            } else if (rememberCredentials) {
+                keyForProbe = new String(stored, 0, separator);
+                secretForProbe = java.util.Arrays.copyOfRange(stored, separator + 1, stored.length);
+            } else {
+                keyForProbe = appKey.trim();
+                secretForProbe = java.util.Arrays.copyOf(appSecret, appSecret.length);
+            }
+
+            String verifiedAccount = credentialProbe.verify(keyForProbe, secretForProbe);
+
+            if (!usingStored && rememberCredentials) {
                 if (!secretStore.isAvailable()) {
                     return fail("보호된 비밀 저장소를 사용할 수 없어 자격증명을 저장하지 않았습니다.");
                 }
@@ -86,14 +107,18 @@ public final class ConnectionViewModel {
             String storageResult = usingStored
                     ? "저장된 자격증명을 사용했습니다. "
                     : rememberCredentials ? "보호된 저장소에 저장했습니다. " : "저장하지 않았습니다. ";
-            connectionMessage.set(environment.get().label() + " 자격증명을 확인했습니다. "
-                    + storageResult + "실제 API는 호출하지 않았습니다.");
-            connectionTone.set("success");
+            updateProperties(() -> {
+                connectionMessage.set("키움 모의투자 API 연결을 확인했습니다. "
+                        + (verifiedAccount == null || verifiedAccount.isBlank() ? "" : verifiedAccount + " · ")
+                        + storageResult + "현재 실행 중인 데이터 공급원 변경은 앱을 다시 시작하면 적용됩니다.");
+                connectionTone.set("success");
+            });
             return true;
         } catch (RuntimeException error) {
             return fail("자격증명 저장소 오류: " + safeMessage(error));
         } finally {
             SecretBytes.wipe(stored);
+            SecretBytes.wipe(secretForProbe);
         }
     }
 
@@ -102,38 +127,26 @@ public final class ConnectionViewModel {
         try {
             secretStore.delete(alias());
             refreshCredentialStorageState();
-            connectionMessage.set(environment.get().label() + " 자격증명을 보호된 저장소에서 삭제했습니다.");
-            connectionTone.set("success");
+            updateProperties(() -> {
+                connectionMessage.set(environment.get().label() + " 자격증명을 보호된 저장소에서 삭제했습니다.");
+                connectionTone.set("success");
+            });
             return true;
         } catch (RuntimeException error) {
             return fail("저장된 자격증명을 삭제하지 못했습니다: " + safeMessage(error));
         }
     }
 
-    public void reissueDemoToken() {
-        tokenExpiry.set("데모 발급됨 · 실제 토큰 아님");
-        connectionMessage.set("화면 확인용 데모 토큰 상태를 만들었습니다. 실제 API는 호출하지 않았습니다.");
-        connectionTone.set("warning");
-    }
-
-    public void revokeToken() {
-        tokenExpiry.set("폐기됨");
-        connectionMessage.set("토큰이 없어 연결되지 않았습니다.");
-        connectionTone.set("error");
-    }
-
-    public void selectDefaultAccount(String accountName) {
-        if (accountName != null && !accountName.isBlank()) defaultAccount.set(accountName);
-    }
-
     private void refreshCredentialStorageState() {
-        credentialStorageDescription.set(secretStore.protectionLevel().displayName()
-                + " · " + secretStore.description());
         boolean stored = secretStore.isAvailable() && secretStore.contains(alias());
-        storedCredentials.set(stored);
-        credentialStorageStatus.set(stored ? "현재 환경의 자격증명이 저장되어 있습니다."
-                : secretStore.isAvailable() ? "현재 환경에 저장된 자격증명이 없습니다."
-                : "보호된 비밀 저장소를 사용할 수 없습니다.");
+        updateProperties(() -> {
+            credentialStorageDescription.set(secretStore.protectionLevel().displayName()
+                    + " · " + secretStore.description());
+            storedCredentials.set(stored);
+            credentialStorageStatus.set(stored ? "현재 환경의 자격증명이 저장되어 있습니다."
+                    : secretStore.isAvailable() ? "현재 환경에 저장된 자격증명이 없습니다."
+                    : "보호된 비밀 저장소를 사용할 수 없습니다.");
+        });
     }
 
     private String alias() {
@@ -141,9 +154,34 @@ public final class ConnectionViewModel {
     }
 
     private boolean fail(String message) {
-        connectionMessage.set(message);
-        connectionTone.set("warning");
+        updateProperties(() -> {
+            connectionMessage.set(message);
+            connectionTone.set("warning");
+        });
         return false;
+    }
+
+    private static void updateProperties(Runnable update) {
+        if (Platform.isFxApplicationThread()) {
+            update.run();
+            return;
+        }
+        try {
+            java.util.concurrent.CountDownLatch applied = new java.util.concurrent.CountDownLatch(1);
+            Platform.runLater(() -> {
+                try {
+                    update.run();
+                } finally {
+                    applied.countDown();
+                }
+            });
+            applied.await(5, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("연결 상태 반영이 중단되었습니다.", interrupted);
+        } catch (IllegalStateException toolkitNotStarted) {
+            update.run();
+        }
     }
 
     private static char[] pack(String appKey, char[] appSecret) {

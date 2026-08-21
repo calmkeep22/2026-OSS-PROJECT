@@ -1,6 +1,5 @@
 package org.ossproject.desktop.persistence;
 
-import org.ossproject.desktop.state.AlertRule;
 import org.ossproject.desktop.state.JournalEntry;
 import org.ossproject.desktop.state.WatchlistItem;
 import org.ossproject.desktop.viewmodel.StockSelection;
@@ -18,7 +17,7 @@ import java.util.function.Function;
 
 /** 데스크톱 화면 상태를 사용자 로컬 properties 파일에 원자적으로 저장한다. */
 public final class PropertiesDesktopStateRepository implements DesktopStateRepository {
-    private static final String FORMAT_VERSION = "4";
+    private static final String FORMAT_VERSION = "5";
     private final Path file;
 
     public PropertiesDesktopStateRepository(Path file) {
@@ -37,8 +36,7 @@ public final class PropertiesDesktopStateRepository implements DesktopStateRepos
         properties.setProperty("watchlist.rows", encodeRows(snapshot.watchlistItems(), item -> List.of(
                 item.group(), item.market(), item.symbol(), item.securityName(), item.exchange(),
                 item.currency(), item.alertText())));
-        properties.setProperty("alert.rules", encodeRows(snapshot.alertRules(), rule -> List.of(
-                rule.securityName(), rule.condition(), rule.threshold(), Boolean.toString(rule.enabled()))));
+        properties.setProperty("search.recent", encodeList(snapshot.recentSearches()));
         properties.setProperty("notifications", encodeList(snapshot.notifications()));
         properties.setProperty("journal.rows", encodeRows(snapshot.journalEntries(), entry -> List.of(
                 entry.date(), entry.securityName(), entry.buyAmount(), entry.sellAmount(), entry.profitLoss(),
@@ -47,7 +45,6 @@ public final class PropertiesDesktopStateRepository implements DesktopStateRepos
                 snapshot.selectedStock().market(), snapshot.selectedStock().symbol(), snapshot.selectedStock().name(),
                 snapshot.selectedStock().exchange(), snapshot.selectedStock().currency())));
         properties.setProperty("setting.preventDuplicateOrders", Boolean.toString(snapshot.preventDuplicateOrders()));
-        properties.setProperty("setting.maxSubscriptions", Integer.toString(snapshot.maxSubscriptions()));
         AtomicPropertiesFile.save(file, properties, "OpenStock Access UI state - no credentials");
     }
 
@@ -56,12 +53,11 @@ public final class PropertiesDesktopStateRepository implements DesktopStateRepos
             return Optional.of(new DesktopStateSnapshot(
                     decodeList(properties.getProperty("watchlist.groups")),
                     decodeRows(properties.getProperty("watchlist.rows"), this::watchlistItem),
-                    decodeRows(properties.getProperty("alert.rules"), this::alertRule),
+                    decodeList(properties.getProperty("search.recent")),
                     decodeList(properties.getProperty("notifications")),
                     decodeRows(properties.getProperty("journal.rows"), this::journalEntry),
                     decodeSelection(properties.getProperty("selected.stock")),
-                    bool(properties, "setting.preventDuplicateOrders", true),
-                    integer(properties, "setting.maxSubscriptions", 160)));
+                    bool(properties, "setting.preventDuplicateOrders", true)));
         } catch (RuntimeException invalid) {
             return Optional.empty();
         }
@@ -76,12 +72,6 @@ public final class PropertiesDesktopStateRepository implements DesktopStateRepos
             return safe(() -> WatchlistItem.legacy(fields.get(0), fields.get(1), fields.get(2), fields.get(5)));
         }
         return Optional.empty();
-    }
-
-    private Optional<AlertRule> alertRule(List<String> fields) {
-        if (fields.size() != 4) return Optional.empty();
-        boolean enabled = "true".equalsIgnoreCase(fields.get(3)) || "활성".equals(fields.get(3));
-        return safe(() -> new AlertRule(fields.get(0), fields.get(1), fields.get(2), enabled));
     }
 
     private Optional<JournalEntry> journalEntry(List<String> fields) {
@@ -99,11 +89,6 @@ public final class PropertiesDesktopStateRepository implements DesktopStateRepos
         String value = properties.getProperty(key);
         return "true".equalsIgnoreCase(value) || "false".equalsIgnoreCase(value)
                 ? Boolean.parseBoolean(value) : fallback;
-    }
-
-    private int integer(Properties properties, String key, int fallback) {
-        try { return Integer.parseInt(properties.getProperty(key, Integer.toString(fallback))); }
-        catch (NumberFormatException ignored) { return fallback; }
     }
 
     private <T> String encodeRows(List<T> rows, Function<T, List<String>> mapper) {

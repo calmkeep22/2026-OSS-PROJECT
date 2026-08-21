@@ -2,7 +2,6 @@ package org.ossproject.desktop.persistence;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.ossproject.desktop.state.AlertRule;
 import org.ossproject.desktop.state.JournalEntry;
 import org.ossproject.desktop.state.WatchlistItem;
 import org.ossproject.desktop.viewmodel.StockSelection;
@@ -24,16 +23,17 @@ class PropertiesDesktopStateRepositoryTest {
         var snapshot = new DesktopStateSnapshot(
                 List.of("전체", "반도체"),
                 List.of(new WatchlistItem("반도체", "국내", "005930", "삼성전자", "KRX", "KRW", "없음")),
-                List.of(new AlertRule("삼성전자", "가격 이상", "75,000원", true)),
+                List.of("삼성전자", "한화"),
                 List.of("체결 알림"),
                 List.of(new JournalEntry("08/10", "삼성전자", "1", "2", "+1", "메모", "태그")),
-                StockSelection.samsungElectronics(), true, 160);
+                StockSelection.samsungElectronics(), true);
 
         repository.save(snapshot);
 
         assertEquals(snapshot, repository.load().orElseThrow());
+        assertEquals(List.of("삼성전자", "한화"), repository.load().orElseThrow().recentSearches());
         String stored = Files.readString(file);
-        assertTrue(stored.contains("format.version=4"));
+        assertTrue(stored.contains("format.version=5"));
         assertFalse(stored.contains("삼성전자"));
         assertFalse(stored.toLowerCase().contains("app secret"));
     }
@@ -54,7 +54,7 @@ class PropertiesDesktopStateRepositoryTest {
 
         assertEquals("삼성전자", restored.watchlistItems().get(0).securityName());
         assertTrue(restored.watchlistItems().get(0).needsIdentityRepair());
-        assertTrue(restored.alertRules().get(0).enabled());
+        assertTrue(restored.recentSearches().isEmpty());
         assertEquals("메모", restored.journalEntries().get(0).memo());
     }
 

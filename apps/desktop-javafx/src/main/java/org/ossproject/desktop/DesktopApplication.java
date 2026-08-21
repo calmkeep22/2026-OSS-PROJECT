@@ -9,9 +9,9 @@ import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.collections.transformation.FilteredList;
-import javafx.css.PseudoClass;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.geometry.Side;
 import javafx.scene.Node;
 import javafx.scene.AccessibleAttribute;
 import javafx.scene.Parent;
@@ -33,16 +33,25 @@ import org.ossproject.application.port.CandleQueryPort;
 import org.ossproject.application.port.ConnectionState;
 import org.ossproject.application.port.EventSubscription;
 import org.ossproject.application.port.MarketApplicationPort;
+import org.ossproject.application.port.MarketApplicationListener;
 import org.ossproject.application.usecase.TradingUseCase;
+import org.ossproject.anomaly.AnomalyAlert;
+import org.ossproject.anomaly.AnomalySeverity;
+import org.ossproject.anomaly.StreamingAnomalyConfig;
+import org.ossproject.anomaly.StreamingAnomalyDetector;
 import org.ossproject.desktop.composition.DesktopServices;
 import org.ossproject.finance.model.*;
 import org.ossproject.desktop.chart.AccessibleChartController;
 import org.ossproject.desktop.chart.AccessibleChartView;
 import org.ossproject.desktop.chart.CandlestickChartView;
 import org.ossproject.desktop.presentation.Formatters;
+
+import static org.ossproject.desktop.presentation.Formatters.assetsSource;
+import static org.ossproject.desktop.presentation.Formatters.orderTime;
+import static org.ossproject.desktop.presentation.Formatters.signedChangeRate;
+import static org.ossproject.desktop.presentation.Formatters.signedWon;
 import org.ossproject.desktop.navigation.OrderDraft;
 import org.ossproject.desktop.navigation.Screen;
-import org.ossproject.desktop.navigation.SidebarNavigationModel;
 import org.ossproject.desktop.controller.DesktopScreenController;
 import org.ossproject.sonification.port.SonificationPort;
 import org.ossproject.secret.SecretStore;
@@ -54,6 +63,7 @@ import org.ossproject.desktop.viewmodel.WatchlistViewModel;
 import org.ossproject.desktop.orderbook.DepthChartCanvas;
 import org.ossproject.desktop.orderbook.OrderBookLadderView;
 import org.ossproject.desktop.trades.TradeTapeView;
+import org.ossproject.desktop.viewmodel.AccountScreenData;
 import org.ossproject.desktop.viewmodel.OrderBookViewModel;
 import org.ossproject.desktop.viewmodel.TradeTapeViewModel;
 import org.ossproject.desktop.viewmodel.StockDetailViewModel;
@@ -61,6 +71,9 @@ import org.ossproject.desktop.viewmodel.StockSelection;
 import org.ossproject.desktop.viewmodel.ScannerViewModel;
 import org.ossproject.desktop.view.screen.SearchScreenView;
 import org.ossproject.desktop.view.screen.ConnectionScreenView;
+import org.ossproject.desktop.view.screen.AccountScreenView;
+import org.ossproject.desktop.view.screen.NotificationsScreenView;
+import org.ossproject.desktop.view.screen.UsMarketScreenView;
 import org.ossproject.desktop.view.screen.WatchlistScreenView;
 import org.ossproject.desktop.view.screen.ScannerScreenView;
 import org.ossproject.desktop.persistence.DesktopStateRepository;
@@ -68,7 +81,6 @@ import org.ossproject.desktop.persistence.DesktopStateSnapshot;
 import org.ossproject.desktop.persistence.AccessibilityPreferencesRepository;
 import org.ossproject.desktop.persistence.SonificationPreferencesRepository;
 import org.ossproject.desktop.state.AccessibilityPreferences;
-import org.ossproject.desktop.state.AlertRule;
 import org.ossproject.desktop.state.JournalEntry;
 import org.ossproject.desktop.state.SonificationPreferences;
 import org.ossproject.desktop.state.WatchlistItem;
@@ -83,9 +95,6 @@ import java.util.concurrent.CompletableFuture;
 import static org.ossproject.desktop.view.UiKit.*;
 
 public final class DesktopApplication extends Application {
-    private static final PseudoClass EXPANDED = PseudoClass.getPseudoClass("expanded");
-    private static final PseudoClass CURRENT_GROUP = PseudoClass.getPseudoClass("current-group");
-
     private final TradingUseCase tradingUseCase;
     private final MarketApplicationPort marketApplication;
     private final CandleQueryPort candleAdapter;
@@ -106,11 +115,6 @@ public final class DesktopApplication extends Application {
     private Timeline subscriptionTicker;
     private final StackPane screenHost = new StackPane();
     private final Map<Screen, Button> navigationButtons = new EnumMap<>(Screen.class);
-    private final Map<Screen.NavigationGroup, Button> navigationGroupButtons =
-            new EnumMap<>(Screen.NavigationGroup.class);
-    private final Map<Screen.NavigationGroup, VBox> navigationGroupContents =
-            new EnumMap<>(Screen.NavigationGroup.class);
-    private final SidebarNavigationModel sidebarNavigation = new SidebarNavigationModel();
     private final DesktopSession session = new DesktopSession();
     private final StockSearchViewModel stockSearchViewModel;
     private final ConnectionViewModel connectionViewModel;
@@ -118,6 +122,10 @@ public final class DesktopApplication extends Application {
     private final StockDetailViewModel stockDetailViewModel;
     private final OrderBookViewModel orderBookViewModel;
     private final TradeTapeViewModel tradeTapeViewModel;
+    private final StreamingAnomalyConfig anomalyConfig = StreamingAnomalyConfig.defaults();
+    private final StreamingAnomalyDetector anomalyDetector = new StreamingAnomalyDetector(anomalyConfig);
+    private final Map<String, EventSubscription> anomalySubscriptions = new java.util.concurrent.ConcurrentHashMap<>();
+    private long anomalyMonitoringGeneration;
     /** 지금 보고 있는 호가창. 실시간이 멈췄는지 주기적으로 다시 표시하려고 들고 있는다. */
     private OrderBookLadderView orderBookLadder;
 
@@ -135,22 +143,36 @@ public final class DesktopApplication extends Application {
     private DesktopScreenController screenController;
     private PauseTransition persistenceDelay;
     private final TextField globalSearch = new TextField();
-    private final Button backButton = new Button("← 뒤로");
+    private final ContextMenu globalSearchMenu = new ContextMenu();
+    private final PauseTransition globalSearchDelay = new PauseTransition(Duration.millis(220));
+    private ListView<StockSearchItem> globalSearchSuggestions;
+    private ListView<String> globalRecentSearches;
+    private Label globalSearchState;
+    private VBox globalSearchPanel;
+    private VBox globalRecentSection;
+    private VBox globalSuggestionSection;
+    private Label globalSearchKeyboardHelp;
+    private boolean globalSearchSelectionInProgress;
+    private boolean globalSearchPopupArmed;
+    private final Button backButton = new Button("←");
+    private final Button connectionButton = new Button("키움 실시간 · 확인 중");
     private final Label currentLocation = new Label("홈");
     private BorderPane root;
-    private VBox sidebarRoot;
-    private boolean speechEnabled;
-    private boolean soundEnabled = true;
-    private boolean keyboardGuidanceEnabled = true;
-    private boolean reducedMotionEnabled = true;
-    private boolean largeTextEnabled = true;
-    private boolean highContrastEnabled;
-    private String informationDensity = "표준";
+    private VBox autoHideSidebar;
+    private final PauseTransition sidebarHideDelay = new PauseTransition(Duration.millis(70));
+    /**
+     * 접근성 설정.
+     *
+     * <p>값을 따로 들고 있으면 저장할 때마다 다시 묶어야 하고, 한 곳만 빠뜨려도 설정이
+     * 조용히 사라진다. 통째로 들고 하나씩 바꿔 나간다.
+     */
+    private AccessibilityPreferences accessibility = AccessibilityPreferences.DEFAULT;
     private boolean preventDuplicateOrders = true;
-    private int maxSubscriptions = 160;
     private SonificationPreferences sonificationPreferences = SonificationPreferences.DEFAULT;
-    private String pendingOrderPrice = "73500";
+    private String pendingOrderPrice = "";
     private OrderDraft orderDraft;
+    private String lastSubmittedOrderFingerprint = "";
+    private long lastSubmittedOrderNanos;
     public DesktopApplication() {
         this(DesktopServices.createDefault());
     }
@@ -168,7 +190,8 @@ public final class DesktopApplication extends Application {
         this.stateRepository = services.stateRepository();
         this.accessibilityPreferencesRepository = services.accessibilityPreferences();
         this.sonificationPreferencesRepository = services.sonificationPreferences();
-        this.connectionViewModel = new ConnectionViewModel(secretStore);
+        this.connectionViewModel = new ConnectionViewModel(
+                secretStore, DesktopServices::verifyMockCredentials);
         this.stockSearchViewModel = new StockSearchViewModel(
                 session, marketApplication, Platform::runLater);
         this.watchlistViewModel = new WatchlistViewModel(
@@ -182,16 +205,21 @@ public final class DesktopApplication extends Application {
     @Override public void start(Stage stage) {
         restoreLocalState();
         session.onChange(this::scheduleStateSave);
+        stockSearchViewModel.recentSearches().addListener(
+                (javafx.collections.ListChangeListener<String>) change -> scheduleStateSave());
+        session.watchlistItems().addListener(
+                (javafx.collections.ListChangeListener<WatchlistItem>) change -> refreshAnomalyMonitoring());
         root = new BorderPane();
         root.getStyleClass().add("app-root");
-        if (largeTextEnabled) root.getStyleClass().add("large-text");
-        if (highContrastEnabled) root.getStyleClass().add("high-contrast");
+        if (accessibility.largeTextEnabled()) root.getStyleClass().add("large-text");
+        if (accessibility.highContrastEnabled()) root.getStyleClass().add("high-contrast");
+        if (accessibility.reducedMotionEnabled()) root.getStyleClass().add("reduced-motion");
         root.setMinSize(0, 0);
         screenHost.setMinSize(0, 0);
-        root.setLeft(createSidebar());
         root.setTop(createTopBar());
-        root.setCenter(screenHost);
-        root.setBottom(createStatusBar());
+        root.setCenter(createWorkspace());
+        applyKeyboardGuidance(accessibility.keyboardGuidanceEnabled());
+        applyInformationDensity(accessibility.informationDensity());
         watchRealtimeConnection();
         status.setAccessibleText("앱 상태. " + status.getText());
         status.textProperty().addListener((obs, old, message) -> Platform.runLater(() -> {
@@ -199,6 +227,7 @@ public final class DesktopApplication extends Application {
             status.notifyAccessibleAttributeChanged(AccessibleAttribute.TEXT);
         }));
         configureScreens();
+        refreshAnomalyMonitoring();
         speechQueue.addListener(new SpeechListener() {
             @Override public void onStarted(SpeechRequest request) {
                 setChartSpeechActive(true);
@@ -256,139 +285,161 @@ public final class DesktopApplication extends Application {
         stage.setMaxHeight(visualBounds.getHeight());
         stage.setX(visualBounds.getMinX() + (visualBounds.getWidth() - initialWidth) / 2);
         stage.setY(visualBounds.getMinY() + (visualBounds.getHeight() - initialHeight) / 2);
+        // 컨텍스트 메뉴는 별도 윈도로 표시된다. 최소화할 때 닫아야 복원 후 검색창을
+        // 누르지 않았는데 추천 패널이 다시 나타나는 현상을 막을 수 있다.
+        stage.iconifiedProperty().addListener((obs, old, iconified) -> {
+            if (iconified) {
+                globalSearchPopupArmed = false;
+                globalSearchDelay.stop();
+                globalSearchMenu.hide();
+            }
+        });
+        stage.focusedProperty().addListener((obs, old, focused) -> {
+            if (!focused) {
+                globalSearchPopupArmed = false;
+                globalSearchMenu.hide();
+            }
+        });
         stage.setScene(scene); stage.show();
     }
 
     private VBox createSidebar() {
-        Label product = new Label("OpenStock\nAccess");
-        product.getStyleClass().add("sidebar-title");
-        Label mode = new Label(marketDataSource.startsWith("키움") ? "키움 모의투자" : "미연결");
-        mode.getStyleClass().add("mode-badge");
-        mode.setAccessibleText("실행 모드. " + marketDataSource);
-        ComboBox<Screen> quickNavigation = new ComboBox<>(FXCollections.observableArrayList(
-                java.util.Arrays.stream(Screen.values()).filter(Screen::shownInSidebar).toList()));
-        quickNavigation.setPromptText("화면 바로 이동");
-        quickNavigation.setAccessibleText("화면 바로 이동");
-        quickNavigation.setMaxWidth(Double.MAX_VALUE);
-        quickNavigation.setConverter(new StringConverter<>() {
-            @Override public String toString(Screen screen) {
-                return screen == null ? "" : screen.navigationGroup().label() + " · " + screen.label();
-            }
-            @Override public Screen fromString(String value) { return null; }
-        });
-        quickNavigation.setOnAction(event -> {
-            Screen selected = quickNavigation.getValue();
-            if (selected != null) openNavigationScreen(selected);
-        });
+        Label product = new Label("OS");
+        product.getStyleClass().add("nav-rail-logo");
+        product.setAccessibleText("OpenStock Access");
+        Tooltip.install(product, new Tooltip("OpenStock Access · " + marketDataSource));
+
         navigationButtons.clear();
-        navigationGroupButtons.clear();
-        navigationGroupContents.clear();
-        VBox nav = new VBox(6);
-        for (Screen.NavigationGroup group : Screen.NavigationGroup.values()) {
-            Button groupButton = new Button();
-            groupButton.getStyleClass().add("nav-group-button");
-            groupButton.setMaxWidth(Double.MAX_VALUE);
-            groupButton.setAccessibleHelp("Enter 또는 Space로 하위 메뉴를 열고 닫습니다. 오른쪽 방향키로 열고 왼쪽 방향키로 닫습니다.");
-            groupButton.setOnAction(event -> toggleNavigationGroup(group));
-            groupButton.setOnKeyPressed(event -> handleNavigationGroupKey(event, group));
-
-            VBox children = new VBox(3);
-            children.getStyleClass().add("nav-group-children");
-            for (Screen screen : sidebarNavigation.children(group)) {
-                Button button = new Button(screen.label());
-                button.getStyleClass().addAll("nav-button", "nav-child-button");
-                button.setMaxWidth(Double.MAX_VALUE);
-                button.setAccessibleText(group.label() + " 메뉴, " + screen.label() + " 화면 열기");
-                button.setAccessibleHelp("Enter 또는 Space로 화면을 엽니다. 왼쪽 방향키로 상위 메뉴로 이동합니다.");
-                button.setOnAction(event -> openNavigationScreen(screen));
-                button.setOnKeyPressed(event -> {
-                    if (event.getCode() == KeyCode.LEFT) {
-                        groupButton.requestFocus();
-                        event.consume();
-                    }
-                });
-                navigationButtons.put(screen, button);
-                children.getChildren().add(button);
+        VBox nav = new VBox(0);
+        nav.setAlignment(Pos.TOP_CENTER);
+        Screen.NavigationGroup previousGroup = null;
+        for (Screen screen : Screen.values()) {
+            if (!screen.shownInSidebar()) continue;
+            if (previousGroup != null && previousGroup != screen.navigationGroup()) {
+                Separator separator = new Separator();
+                separator.getStyleClass().add("nav-rail-separator");
+                nav.getChildren().add(separator);
             }
-
-            navigationGroupButtons.put(group, groupButton);
-            navigationGroupContents.put(group, children);
-            nav.getChildren().addAll(groupButton, children);
+            Button button = new Button();
+            button.setGraphic(navigationIcon(screen));
+            button.getStyleClass().addAll("nav-button", "nav-rail-button");
+            button.setMaxWidth(Double.MAX_VALUE);
+            button.setAccessibleText(screen.navigationGroup().label() + " 메뉴, " + screen.label() + " 화면 열기");
+            button.setAccessibleHelp("Enter 또는 Space로 " + screen.label() + " 화면을 엽니다.");
+            button.setTooltip(new Tooltip(screen.label()));
+            button.setOnAction(event -> openNavigationScreen(screen));
+            navigationButtons.put(screen, button);
+            nav.getChildren().add(button);
+            previousGroup = screen.navigationGroup();
         }
-        updateNavigationGroups(null);
+
         ScrollPane navScroll = new ScrollPane(nav);
         navScroll.getStyleClass().add("sidebar-scroll");
         navScroll.setFitToWidth(true);
         navScroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        navScroll.setVbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
         VBox.setVgrow(navScroll, Priority.ALWAYS);
-        Label help = new Label("키보드\nF6 / Shift+F6 영역 이동\nAlt+← 뒤로 · Alt+D 홈 · Alt+S 검색\nAlt+O 주문 · Alt+A 계좌\nAlt+R 청각 차트");
-        help.getStyleClass().add("keyboard-help");
-        VBox sidebar = new VBox(14, product, mode, quickNavigation, navScroll, help);
+        VBox sidebar = new VBox(8, product, navScroll);
         sidebar.getStyleClass().add("sidebar");
-        sidebar.setPadding(new Insets(20));
-        sidebar.setPrefWidth(largeTextEnabled ? 250 : 216);
-        sidebar.setMinWidth(largeTextEnabled ? 230 : 200);
-        sidebarRoot = sidebar;
+        sidebar.setAlignment(Pos.TOP_CENTER);
+        sidebar.setPadding(new Insets(8, 6, 8, 6));
+        sidebar.setPrefWidth(72);
+        sidebar.setMinWidth(72);
+        sidebar.setMaxWidth(72);
         return sidebar;
+    }
+
+    private StackPane createWorkspace() {
+        autoHideSidebar = createSidebar();
+        autoHideSidebar.setVisible(false);
+        autoHideSidebar.setManaged(false);
+        autoHideSidebar.setOnMouseEntered(event -> showSidebar());
+        autoHideSidebar.setOnMouseExited(event -> scheduleSidebarHide());
+
+        Region hotspot = new Region();
+        hotspot.getStyleClass().add("sidebar-hotspot");
+        hotspot.setMinWidth(18);
+        hotspot.setPrefWidth(18);
+        hotspot.setMaxWidth(18);
+        hotspot.setMaxHeight(Double.MAX_VALUE);
+        hotspot.setAccessibleText("왼쪽 네비게이션 열기 영역");
+        hotspot.setOnMouseEntered(event -> showSidebar());
+
+        sidebarHideDelay.setOnFinished(event -> hideSidebar());
+        StackPane workspace = new StackPane(screenHost, hotspot, autoHideSidebar);
+        StackPane.setAlignment(hotspot, Pos.TOP_LEFT);
+        StackPane.setAlignment(autoHideSidebar, Pos.TOP_LEFT);
+        workspace.getStyleClass().add("workspace");
+        workspace.setMinSize(0, 0);
+        workspace.setOnMouseMoved(event -> {
+            if (event.getX() <= 24) showSidebar();
+            else if (autoHideSidebar != null && autoHideSidebar.isVisible() && event.getX() > 82) {
+                scheduleSidebarHide();
+            }
+        });
+        return workspace;
+    }
+
+    private void showSidebar() {
+        sidebarHideDelay.stop();
+        if (autoHideSidebar == null) return;
+        autoHideSidebar.setManaged(true);
+        autoHideSidebar.setVisible(true);
+        autoHideSidebar.toFront();
+    }
+
+    private void scheduleSidebarHide() {
+        if (sidebarHasFocus()) return;
+        sidebarHideDelay.playFromStart();
+    }
+
+    private void hideSidebar() {
+        if (sidebarHasFocus()) return;
+        autoHideSidebar.setVisible(false);
+        autoHideSidebar.setManaged(false);
+    }
+
+    private boolean sidebarHasFocus() {
+        return autoHideSidebar != null && root != null && root.getScene() != null
+                && isDescendantOf(root.getScene().getFocusOwner(), autoHideSidebar);
+    }
+
+    private Node navigationIcon(Screen screen) {
+        String data = switch (screen) {
+            case DASHBOARD -> "M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3z";
+            case CONNECTION -> "M7.5 6h3v2h-3a4 4 0 0 0 0 8h3v2h-3a6 6 0 0 1 0-12h3v2h-3a4 4 0 0 0 0-8zm2.5 5h4v2h-4zm3.5-5h3a6 6 0 1 1 0 12h-3v-2h3a4 4 0 1 0 0-8h-3z";
+            case MARKET -> "M4 4h7v7H4zm9 0h7v7h-7zM4 13h7v7H4zm9 0h7v7h-7z";
+            case SEARCH, STOCK_DETAIL -> "M10 3a7 7 0 1 0 4.9 12l5.6 5.5 1.5-1.5-5.5-5.6A7 7 0 0 0 10 3zm0 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10z";
+            case WATCHLIST -> "M12 2.5l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3-5.8 3 1.1-6.5-4.7-4.6 6.5-.9z";
+            case SCANNER -> "M4 4h16v3H4zm0 6h11v3H4zm0 6h7v3H4z";
+            case CONDITION -> "M5 4h14v3H5zm2 6h10v3H7zm3 6h4v3h-4z";
+            case TRADING -> "M3 5h16a2 2 0 0 1 2 2v2h-5a3 3 0 0 0 0 0 6h5v2a2 2 0 0 1-2 2H3zm13 6h6v2h-6a1 1 0 0 1 0-2z";
+            case ACCOUNT -> "M4 4h16v16H4zm3 4v2h10V8zm0 4v2h10v-2zm0 4v2h6v-2z";
+            case US_MARKET -> "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm6.9 9h-3a15.8 15.8 0 0 0-1.2-5A8 8 0 0 1 18.9 11zM12 4c1.1 1.3 1.8 3.8 1.9 7h-3.8c.1-3.2.8-5.7 1.9-7zM9.3 6A15.8 15.8 0 0 0 8.1 11h-3A8 8 0 0 1 9.3 6zM5.1 13h3a15.8 15.8 0 0 0 1.2 5 8 8 0 0 1-4.2-5zM12 20c-1.1-1.3-1.8-3.8-1.9-7h3.8c-.1 3.2-.8 5.7-1.9 7zm2.7-2a15.8 15.8 0 0 0 1.2-5h3a8 8 0 0 1-4.2 5z";
+            case ANOMALY -> "M12 2 1 21h22zm0 5.2-6.2 11.3h12.4zM11 10h2v4h-2zm0 5.5h2v2h-2z";
+            case NOTIFICATIONS -> "M12 22a2.5 2.5 0 0 0 2.4-2h-4.8A2.5 2.5 0 0 0 12 22zM20 17H4l2-2v-5a6 6 0 0 1 5-5.9V2h2v2.1A6 6 0 0 1 18 10v5z";
+            case RADIO -> "M9 4v12.2a3 3 0 1 0 2 2.8V8h7V4zm-3 16a1 1 0 1 1 0-2 1 1 0 0 1 0 2zm9-2a1 1 0 1 1 0-2 1 1 0 0 1 0 2z";
+            case SETTINGS -> "M19.4 13a7.7 7.7 0 0 0 .1-1l2-1.5-2-3.5-2.5 1a8 8 0 0 0-1.7-1L15 4h-4l-.4 3a8 8 0 0 0-1.7 1L6.5 7 4.5 10.5l2 1.5a7.7 7.7 0 0 0 0 2L4.5 15.5 6.5 19 9 18a8 8 0 0 0 1.7 1l.3 3h4l.4-3a8 8 0 0 0 1.7-1l2.5 1 2-3.5zM13 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8z";
+        };
+        javafx.scene.shape.SVGPath icon = new javafx.scene.shape.SVGPath();
+        icon.setContent(data);
+        icon.getStyleClass().add("nav-rail-icon");
+        StackPane iconBox = new StackPane(icon);
+        iconBox.getStyleClass().add("nav-rail-icon-box");
+        iconBox.setMinSize(24, 24);
+        iconBox.setPrefSize(24, 24);
+        iconBox.setMaxSize(24, 24);
+        return iconBox;
     }
 
     private void openNavigationScreen(Screen screen) {
         if (screen == Screen.TRADING) openOrder(OrderSide.BUY);
+        else if (screen == Screen.SEARCH) {
+            stockSearchViewModel.prepare("", "전체");
+            screenController.invalidate(Screen.SEARCH);
+            navigate(Screen.SEARCH);
+        }
         else navigate(screen);
-    }
-
-    private void toggleNavigationGroup(Screen.NavigationGroup group) {
-        sidebarNavigation.toggle(group);
-        updateNavigationGroups(group);
-    }
-
-    private void handleNavigationGroupKey(KeyEvent event, Screen.NavigationGroup group) {
-        if (event.getCode() == KeyCode.RIGHT) {
-            if (sidebarNavigation.isExpanded(group)) {
-                sidebarNavigation.children(group).stream().findFirst()
-                        .map(navigationButtons::get)
-                        .ifPresent(Button::requestFocus);
-            } else {
-                sidebarNavigation.expand(group);
-                updateNavigationGroups(group);
-            }
-            event.consume();
-        } else if (event.getCode() == KeyCode.LEFT && sidebarNavigation.isExpanded(group)) {
-            sidebarNavigation.collapse(group);
-            updateNavigationGroups(group);
-            event.consume();
-        }
-    }
-
-    private void revealNavigationGroup(Screen screen) {
-        sidebarNavigation.reveal(screen);
-        updateNavigationGroups(null);
-    }
-
-    private void updateNavigationGroups(Screen.NavigationGroup changedGroup) {
-        Screen.NavigationGroup activeGroup = screenController == null
-                ? Screen.NavigationGroup.OVERVIEW
-                : screenController.currentScreen()
-                        .map(Screen::navigationGroup)
-                        .orElse(Screen.NavigationGroup.OVERVIEW);
-        for (Screen.NavigationGroup group : Screen.NavigationGroup.values()) {
-            boolean expanded = sidebarNavigation.isExpanded(group);
-            Button button = navigationGroupButtons.get(group);
-            VBox children = navigationGroupContents.get(group);
-            if (button == null || children == null) continue;
-            button.setText((expanded ? "▾  " : "▸  ") + group.label());
-            button.setAccessibleText(group.label() + " 메뉴, " + (expanded ? "펼쳐짐" : "접힘"));
-            button.pseudoClassStateChanged(EXPANDED, expanded);
-            button.pseudoClassStateChanged(CURRENT_GROUP, group == activeGroup);
-            children.setVisible(expanded);
-            children.setManaged(expanded);
-        }
-        if (changedGroup != null) {
-            Button changedButton = navigationGroupButtons.get(changedGroup);
-            if (changedButton != null) {
-                changedButton.notifyAccessibleAttributeChanged(AccessibleAttribute.TEXT);
-            }
-        }
     }
 
     private VBox createTopBar() {
@@ -402,33 +453,37 @@ public final class DesktopApplication extends Application {
         globalSearch.setPromptText("종목명 또는 종목코드 검색");
         globalSearch.setAccessibleText("국내와 미국 종목 통합 검색");
         globalSearch.setAccessibleHelp("검색어를 입력하고 Enter 키를 누르면 종목 상세 화면을 엽니다.");
-        globalSearch.setPrefWidth(320);
+        globalSearch.setPrefWidth(360);
         globalSearch.setMinWidth(180);
         globalSearch.setOnAction(event -> openSearchedStock());
+        configureGlobalSearchMenu();
 
         Button searchButton = new Button("검색");
         searchButton.setOnAction(event -> openSearchedStock());
         HBox search = new HBox(8, globalSearch, searchButton);
+        search.getStyleClass().add("global-search-shell");
         search.setAlignment(Pos.CENTER_LEFT);
-        search.setMaxWidth(Double.MAX_VALUE);
+        search.setMinWidth(240);
+        search.setPrefWidth(420);
+        search.setMaxWidth(560);
         HBox.setHgrow(globalSearch, Priority.ALWAYS);
 
         // 상단 표시는 실제 상태를 따른다. 연결되어 있는데 미연결로 보이거나 그 반대면,
         // 화면을 볼 수 없는 사용자는 지금 값이 실제 시세인지 판단할 근거를 잃는다.
-        boolean live = marketDataSource.startsWith("키움");
-        Label market = new Label(live ? "조회 시세 · " + marketDataSource : marketDataSource);
+        Label market = new Label("시세 공급원 · " + marketDataSource);
         market.getStyleClass().addAll("status-chip", "mode-badge");
         market.setAccessibleText("시세 출처. " + marketDataSource);
-        Button connection = new Button(live ? "키움 API · 연결됨" : "키움 API · 미연결");
-        connection.getStyleClass().add("connection-button");
-        connection.setOnAction(event -> navigate(Screen.CONNECTION));
+        connectionButton.getStyleClass().add("connection-button");
+        connectionButton.setOnAction(event -> navigate(Screen.CONNECTION));
 
         Button alerts = new Button();
         alerts.setOnAction(event -> navigate(Screen.NOTIFICATIONS));
         Runnable refreshAlertCount = () -> {
-            int count = session.notifications().size();
+            int count = (int) session.notifications().stream()
+                    .filter(notification -> notification.startsWith("새 알림 · "))
+                    .count();
             alerts.setText("알림 " + count);
-            alerts.setAccessibleText(count == 0 ? "알림 없음" : "알림 " + count + "건");
+            alerts.setAccessibleText(count == 0 ? "새 알림 없음" : "새 알림 " + count + "건");
         };
         session.notifications().addListener(
                 (javafx.collections.ListChangeListener<String>) change -> refreshAlertCount.run());
@@ -439,18 +494,258 @@ public final class DesktopApplication extends Application {
         account.setAccessibleText("계좌 화면 열기");
         account.setOnAction(event -> navigate(Screen.ACCOUNT));
 
-        Region spacer = new Region(); HBox.setHgrow(spacer, Priority.ALWAYS);
-        HBox context = new HBox(12, backButton, currentLocation, spacer, market, alerts, account, connection);
+        HBox.setHgrow(search, Priority.ALWAYS);
+        HBox context = new HBox(10, backButton, currentLocation, search, market, alerts, account, connectionButton);
         context.setAlignment(Pos.CENTER_LEFT);
-        VBox top = new VBox(10, context, search);
+        VBox top = new VBox(context);
         top.getStyleClass().add("top-bar");
-        top.setPadding(new Insets(12, 18, 12, 18));
+        top.setPadding(new Insets(9, 14, 9, 14));
         return top;
     }
 
+    /**
+     * 상단 검색창에 최근 검색과 자동완성 결과를 붙인다.
+     *
+     * <p>검색 화면의 {@link StockSearchViewModel}을 그대로 재사용해 상단 검색과
+     * 전체 검색 화면이 서로 다른 검색 기록을 만들지 않게 한다.</p>
+     */
+    private void configureGlobalSearchMenu() {
+        if (!globalSearchMenu.getItems().isEmpty()) return;
+
+        Label recentTitle = new Label("최근 검색");
+        recentTitle.getStyleClass().add("search-popup-title");
+        globalRecentSearches = new ListView<>(stockSearchViewModel.recentSearches());
+        globalRecentSearches.setAccessibleText("최근 검색 목록");
+        globalRecentSearches.setAccessibleHelp("위아래 방향키로 선택하고 Enter를 누르면 종목 상세를 엽니다. Delete를 누르면 기록을 삭제합니다.");
+        globalRecentSearches.setPrefHeight(250);
+        globalRecentSearches.setPlaceholder(new Label("아직 최근 검색이 없습니다."));
+        globalRecentSearches.setCellFactory(list -> recentSearchCell());
+        globalRecentSearches.setOnMouseClicked(event -> {
+            if (event.getTarget() instanceof Node target && isInsideButton(target)) return;
+            String recent = globalRecentSearches.getSelectionModel().getSelectedItem();
+            if (recent != null) openGlobalRecentSearch(recent);
+        });
+        globalRecentSearches.setOnKeyPressed(event -> {
+            if (event.getCode() == KeyCode.ENTER) {
+                String recent = globalRecentSearches.getSelectionModel().getSelectedItem();
+                if (recent != null) openGlobalRecentSearch(recent);
+                event.consume();
+            } else if (event.getCode() == KeyCode.DELETE) {
+                String recent = globalRecentSearches.getSelectionModel().getSelectedItem();
+                stockSearchViewModel.removeRecent(recent);
+                if (recent != null) status.setText(recent + " 최근 검색을 삭제했습니다.");
+                event.consume();
+            }
+        });
+        globalRecentSection = new VBox(8, recentTitle, globalRecentSearches);
+
+        Label suggestionTitle = new Label("검색어 자동완성");
+        suggestionTitle.getStyleClass().add("search-popup-title");
+        globalSearchState = new Label("검색어를 입력하면 종목을 찾습니다.");
+        globalSearchState.getStyleClass().add("muted-text");
+        globalSearchState.setWrapText(true);
+        globalSearchSuggestions = new ListView<>(stockSearchViewModel.items());
+        globalSearchSuggestions.setAccessibleText("종목 검색어 자동완성 목록");
+        globalSearchSuggestions.setAccessibleHelp("위아래 방향키로 선택하고 Enter를 누르면 종목 상세를 엽니다.");
+        globalSearchSuggestions.setPrefHeight(300);
+        globalSearchSuggestions.setPlaceholder(new Label("검색 결과가 없습니다."));
+        globalSearchSuggestions.setCellFactory(list -> suggestionCell());
+        globalSearchSuggestions.setOnMouseClicked(event -> {
+            StockSearchItem selected = globalSearchSuggestions.getSelectionModel().getSelectedItem();
+            if (selected != null) openGlobalSearchSuggestion(selected);
+        });
+        globalSearchSuggestions.setOnKeyPressed(event -> {
+            if (event.getCode() == KeyCode.ENTER) {
+                StockSearchItem selected = globalSearchSuggestions.getSelectionModel().getSelectedItem();
+                if (selected != null) openGlobalSearchSuggestion(selected);
+                event.consume();
+            }
+        });
+        globalSuggestionSection = new VBox(8, suggestionTitle, globalSearchState, globalSearchSuggestions);
+
+        globalSearchKeyboardHelp = new Label("↑↓ 선택  ·  Enter 열기  ·  Esc 닫기");
+        globalSearchKeyboardHelp.getStyleClass().add("search-popup-help");
+        globalSearchKeyboardHelp.setVisible(accessibility.keyboardGuidanceEnabled());
+        globalSearchKeyboardHelp.setManaged(accessibility.keyboardGuidanceEnabled());
+        globalSearchPanel = new VBox(10, globalRecentSection, globalSuggestionSection, globalSearchKeyboardHelp);
+        globalSearchPanel.getStyleClass().add("search-suggestion-panel");
+        globalSearchPanel.setAccessibleText("종목 검색 추천 패널");
+
+        CustomMenuItem content = new CustomMenuItem(globalSearchPanel, false);
+        content.getStyleClass().add("search-popup-menu-item");
+        globalSearchMenu.getItems().add(content);
+        globalSearchMenu.getStyleClass().add("search-suggestion-popup");
+        globalSearchMenu.setAutoHide(true);
+        globalSearchMenu.setOnHidden(event -> globalSearchPopupArmed = false);
+
+        globalSearchDelay.setOnFinished(event -> refreshGlobalSearchSuggestions());
+        globalSearch.textProperty().addListener((observable, previous, query) -> {
+            if (globalSearchSelectionInProgress) return;
+            boolean blank = query == null || query.isBlank();
+            updateGlobalSearchSections(blank);
+            globalSearchDelay.stop();
+            if (!blank) {
+                globalSearchState.setText("종목을 찾고 있습니다.");
+                globalSearchDelay.playFromStart();
+            }
+            showGlobalSearchMenu();
+        });
+        globalSearch.setOnMouseClicked(event -> {
+            globalSearchPopupArmed = true;
+            showGlobalSearchMenu();
+        });
+        globalSearch.addEventFilter(KeyEvent.KEY_TYPED, event -> globalSearchPopupArmed = true);
+        globalSearch.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
+            if (event.getCode() == KeyCode.DOWN && globalSearchMenu.isShowing()) {
+                if (globalSearch.getText() == null || globalSearch.getText().isBlank()) {
+                    if (!globalRecentSearches.getItems().isEmpty()) {
+                        globalRecentSearches.getSelectionModel().selectFirst();
+                        globalRecentSearches.requestFocus();
+                    }
+                } else if (!globalSearchSuggestions.getItems().isEmpty()) {
+                    globalSearchSuggestions.getSelectionModel().selectFirst();
+                    globalSearchSuggestions.requestFocus();
+                }
+                event.consume();
+            } else if (event.getCode() == KeyCode.ESCAPE) {
+                globalSearchPopupArmed = false;
+                globalSearchMenu.hide();
+                event.consume();
+            }
+        });
+    }
+
+    private ListCell<String> recentSearchCell() {
+        return new ListCell<>() {
+            private final Label history = new Label("↺");
+            private final Label value = new Label();
+            private final Button remove = new Button("삭제");
+            private final Region spacer = new Region();
+            private final HBox row = new HBox(10, history, value, spacer, remove);
+            {
+                row.setAlignment(Pos.CENTER_LEFT);
+                HBox.setHgrow(spacer, Priority.ALWAYS);
+                value.setMaxWidth(Double.MAX_VALUE);
+                remove.getStyleClass().add("search-history-remove");
+                remove.setOnAction(event -> {
+                    String item = getItem();
+                    stockSearchViewModel.removeRecent(item);
+                    if (item != null) status.setText(item + " 최근 검색을 삭제했습니다.");
+                });
+            }
+            @Override protected void updateItem(String item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null) {
+                    setGraphic(null);
+                    setText(null);
+                } else {
+                    value.setText(item);
+                    setText(null);
+                    setGraphic(row);
+                }
+            }
+        };
+    }
+
+    private ListCell<StockSearchItem> suggestionCell() {
+        return new ListCell<>() {
+            private final Label icon = new Label("⌕");
+            private final Label name = new Label();
+            private final Label detail = new Label();
+            private final VBox labels = new VBox(2, name, detail);
+            private final HBox row = new HBox(11, icon, labels);
+            {
+                row.setAlignment(Pos.CENTER_LEFT);
+                name.getStyleClass().add("search-suggestion-name");
+                detail.getStyleClass().add("search-suggestion-detail");
+            }
+            @Override protected void updateItem(StockSearchItem item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null) {
+                    setGraphic(null);
+                    setText(null);
+                } else {
+                    name.setText(item.name() + "  " + item.symbol());
+                    detail.setText(item.market() + " · " + item.exchange() + " · " + item.price());
+                    setAccessibleText(item.accessibleDescription());
+                    setText(null);
+                    setGraphic(row);
+                }
+            }
+        };
+    }
+
+    private void refreshGlobalSearchSuggestions() {
+        String query = globalSearch.getText() == null ? "" : globalSearch.getText().trim();
+        if (query.isBlank()) return;
+        stockSearchViewModel.filter(query, "전체").whenComplete((result, failure) -> Platform.runLater(() -> {
+            if (!query.equals(globalSearch.getText().trim()) || !result.applied()) return;
+            if (failure != null || !stockSearchViewModel.lastError().isBlank()) {
+                globalSearchState.setText("종목을 불러오지 못했습니다. 연결 상태를 확인해주세요.");
+            } else {
+                globalSearchState.setText(result.count() == 0
+                        ? "일치하는 종목이 없습니다."
+                        : "검색 결과 " + result.count() + "건");
+                if (result.count() > 0) globalSearchSuggestions.getSelectionModel().selectFirst();
+            }
+            showGlobalSearchMenu();
+        }));
+    }
+
+    private void updateGlobalSearchSections(boolean showRecent) {
+        globalRecentSection.setVisible(showRecent);
+        globalRecentSection.setManaged(showRecent);
+        globalSuggestionSection.setVisible(!showRecent);
+        globalSuggestionSection.setManaged(!showRecent);
+    }
+
+    private void showGlobalSearchMenu() {
+        if (globalSearch.getScene() == null || globalSearch.getScene().getWindow() == null
+                || !globalSearch.getScene().getWindow().isShowing() || !globalSearch.isFocused()
+                || !globalSearchPopupArmed) return;
+        updateGlobalSearchSections(globalSearch.getText() == null || globalSearch.getText().isBlank());
+        globalSearchPanel.setPrefWidth(Math.max(460, globalSearch.getWidth()));
+        if (!globalSearchMenu.isShowing()) globalSearchMenu.show(globalSearch, Side.BOTTOM, 0, 7);
+    }
+
+    private void openGlobalSearchSuggestion(StockSearchItem selected) {
+        globalSearchSelectionInProgress = true;
+        globalSearch.setText(selected.name());
+        globalSearch.positionCaret(globalSearch.getText().length());
+        globalSearchSelectionInProgress = false;
+        globalSearchMenu.hide();
+        stockSearchViewModel.select(selected);
+        navigate(Screen.STOCK_DETAIL);
+    }
+
+    private void openGlobalRecentSearch(String recent) {
+        globalSearchMenu.hide();
+        status.setText(recent + " 종목을 다시 찾고 있습니다.");
+        stockSearchViewModel.selectRecent(recent).whenComplete((opened, failure) -> Platform.runLater(() -> {
+            if (failure != null || !opened) {
+                status.setText(recent + " 종목을 다시 찾지 못했습니다.");
+            } else {
+                globalSearchSelectionInProgress = true;
+                globalSearch.setText(recent.substring(0, recent.lastIndexOf(" · ")));
+                globalSearch.positionCaret(globalSearch.getText().length());
+                globalSearchSelectionInProgress = false;
+                navigate(Screen.STOCK_DETAIL);
+            }
+        }));
+    }
+
+    private boolean isInsideButton(Node target) {
+        for (Node node = target; node != null; node = node.getParent()) {
+            if (node instanceof Button) return true;
+        }
+        return false;
+    }
+
     private void focusGlobalSearch() {
+        globalSearchPopupArmed = true;
         globalSearch.requestFocus();
         globalSearch.selectAll();
+        Platform.runLater(this::showGlobalSearchMenu);
     }
 
     private void cycleFocusRegion(boolean reverse) {
@@ -469,13 +764,14 @@ public final class DesktopApplication extends Application {
     }
 
     private void focusSidebar() {
-        Screen.NavigationGroup group = screenController == null
-                ? Screen.NavigationGroup.OVERVIEW
-                : screenController.currentScreen()
-                        .map(Screen::navigationGroup)
-                        .orElse(Screen.NavigationGroup.OVERVIEW);
-        Button groupButton = navigationGroupButtons.get(group);
-        if (groupButton != null) groupButton.requestFocus();
+        showSidebar();
+        Screen current = screenController == null
+                ? Screen.DASHBOARD
+                : screenController.currentScreen().orElse(Screen.DASHBOARD);
+        Button target = navigationButtons.get(current);
+        if (target == null && current == Screen.STOCK_DETAIL) target = navigationButtons.get(Screen.SEARCH);
+        if (target == null) target = navigationButtons.get(Screen.DASHBOARD);
+        if (target != null) target.requestFocus();
     }
 
     private boolean isDescendantOf(Node node, Node ancestor) {
@@ -487,11 +783,15 @@ public final class DesktopApplication extends Application {
     }
 
     private void openSearchedStock() {
+        globalSearchMenu.hide();
         if (globalSearch.getText() == null || globalSearch.getText().isBlank()) {
+            stockSearchViewModel.prepare("", "전체");
+            screenController.invalidate(Screen.SEARCH);
             navigate(Screen.SEARCH);
             return;
         }
         String query = globalSearch.getText().trim();
+        stockSearchViewModel.recordRecentQuery(query);
         status.setText(query + " 종목을 조회하고 있습니다.");
         stockSearchViewModel.filter(query, "전체").thenAccept(result -> {
             if (!result.applied()) return;
@@ -691,35 +991,6 @@ public final class DesktopApplication extends Application {
         return new AccessibleChartView(accessibleChartController);
     }
 
-    /**
-     * 아직 증권사와 연동하지 않은 화면에 대신 보여 줄 안내.
-     *
-     * <p>값을 지어내 채우지 않는다. 화면을 볼 수 없는 사용자는 표에 있는 숫자가 실제 시장
-     * 값인지 확인할 방법이 없으므로, 없는 데이터는 없다고 말하는 편이 안전하다.
-     *
-     * @param what 어떤 데이터인지
-     * @param tr   연동에 사용할 키움 TR. 후속 작업을 알아볼 수 있게 함께 적는다
-     */
-    private javafx.scene.Node notConnectedPanel(String what, String tr) {
-        Label heading = new Label(what + " 데이터는 아직 연동되지 않았습니다.");
-        heading.getStyleClass().add("safety-note");
-        heading.setWrapText(true);
-        Label detail = new Label("실제 값을 받아오기 전까지 임의의 숫자를 표시하지 않습니다. "
-                + "연동 예정 항목: " + tr);
-        detail.setWrapText(true);
-        VBox panel = new VBox(10, heading, detail);
-        panel.setPadding(new Insets(20));
-        panel.setAccessibleText(what + " 데이터는 아직 연동되지 않았습니다. "
-                + "실제 값을 받아오기 전까지 임의의 숫자를 표시하지 않습니다.");
-        return panel;
-    }
-
-    /**
-     * 미수 발생 경고.
-     *
-     * <p>D+2 예수금이 음수면 결제일까지 채워 넣지 않는 한 반대매매 대상이 된다. 색으로만
-     * 알리면 화면을 볼 수 없는 사용자에게 전달되지 않으므로 문장으로 남긴다.
-     */
     private javafx.scene.Node shortfallWarning(Deposits deposits) {
         String text = "미수금 " + Formatters.won(deposits.shortfall())
                 + "이 발생했습니다. 결제일까지 입금하지 않으면 반대매매가 될 수 있습니다.";
@@ -736,9 +1007,6 @@ public final class DesktopApplication extends Application {
      * <p>증권사가 계산한 값과 앱이 더한 값은 다를 수 있다. 어느 쪽인지 밝히지 않으면
      * 사용자가 증권사 화면과 대조할 때 어느 숫자를 믿어야 할지 알 수 없다.
      */
-    private static String assetsSource(Account account) {
-        return account.valuationReportedByBroker() ? "증권사 제공 값" : "앱에서 합산한 값";
-    }
 
     /**
      * 실시간 체결로 마지막 봉을 갱신받기 시작한다.
@@ -783,6 +1051,9 @@ public final class DesktopApplication extends Application {
         realtimeStatus.setText("실시간 " + state.displayName());
         realtimeStatus.getStyleClass().removeAll("status-live", "status-mock");
         realtimeStatus.getStyleClass().add(state.isUsable() ? "status-live" : "status-mock");
+        connectionButton.setText("키움 실시간 · " + state.displayName());
+        connectionButton.getStyleClass().removeAll("status-live", "status-mock");
+        connectionButton.getStyleClass().add(state.isUsable() ? "status-live" : "status-mock");
         realtimeStatus.setAccessibleText("실시간 시세 연결. " + state.displayName()
                 + (detail == null || detail.isBlank() ? "" : ". " + detail));
         refreshSubscriptionCount();
@@ -802,8 +1073,8 @@ public final class DesktopApplication extends Application {
 
     private void refreshSubscriptionCount() {
         int count = marketApplication.liveSubscriptionCount();
-        subscriptionCount.setText("실시간 구독 " + count + " / " + maxSubscriptions);
-        subscriptionCount.setAccessibleText("실시간 구독 종목 " + count + "개. 최대 " + maxSubscriptions + "개.");
+        subscriptionCount.setText("실시간 구독 " + count + "개");
+        subscriptionCount.setAccessibleText("현재 실시간 구독 종목 " + count + "개.");
     }
 
     /**
@@ -818,7 +1089,11 @@ public final class DesktopApplication extends Application {
         // 표가 원본이고 그래프는 보조다. 차트 탭과 같은 순서로 둔다.
         TabPane views = new TabPane(tab("호가 표", ladder.root()), tab("누적 깊이 그래프", depth));
         views.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
-        views.setPrefHeight(430);
+        // 높이를 고정하면 호가 표가 잘려 아래 단계에 아예 닿을 수 없다. 내용에 맞춰 늘어나게
+        // 두고, 화면이 길어지면 바깥 스크롤로 닿는다.
+        views.setMinSize(0, 0);
+        views.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
+        views.getStyleClass().add("order-book-panel");
 
         if (!orderBookViewModel.supported()) {
             ladder.showUnavailable("실시간 호가를 제공하지 않는 연결입니다. " + marketDataSource);
@@ -937,13 +1212,15 @@ public final class DesktopApplication extends Application {
             // 종목 상세를 떠나면 봉 구독을 놓는다. 보이지 않는 차트를 계속 갱신할 이유가 없다.
             if (old == Screen.STOCK_DETAIL && screen != Screen.STOCK_DETAIL) {
                 stockDetailViewModel.stopLiveChart();
-                orderBookViewModel.stop();
                 tradeTapeViewModel.stop();
+            }
+            if ((old == Screen.STOCK_DETAIL || old == Screen.TRADING)
+                    && screen != Screen.STOCK_DETAIL && screen != Screen.TRADING) {
+                orderBookViewModel.stop();
                 orderBookLadder = null;
             }
             refreshSubscriptionCount();
             if (screen == null) return;
-            revealNavigationGroup(screen);
             String location = switch (screen) {
                 case STOCK_DETAIL -> "종목 상세 · " + session.selectedStock().name();
                 case TRADING -> "주문 · " + session.selectedStock().name();
@@ -951,6 +1228,7 @@ public final class DesktopApplication extends Application {
             };
             currentLocation.setText(location);
             currentLocation.setAccessibleText("현재 화면 " + location);
+            Platform.runLater(() -> applyKeyboardGuidance(accessibility.keyboardGuidanceEnabled()));
         });
         screenController.register(Screen.DASHBOARD, this::createDashboard);
         screenController.register(Screen.CONNECTION, this::createConnectionScreen);
@@ -960,225 +1238,247 @@ public final class DesktopApplication extends Application {
         screenController.registerPreservingState(Screen.WATCHLIST, this::createWatchlistScreen);
         screenController.register(Screen.SCANNER, this::createScannerScreen);
         screenController.register(Screen.CONDITION, this::createConditionScreen);
-        screenController.register(Screen.SUPPLY, this::createSupplyScreen);
         screenController.register(Screen.TRADING, this::createTradingScreen);
         screenController.register(Screen.ACCOUNT, this::createAccountScreen);
-        screenController.register(Screen.US_MARKET, this::createUsMarketScreen);
-        screenController.registerPreservingState(Screen.NOTIFICATIONS, this::createNotificationsScreen);
+        screenController.register(Screen.US_MARKET,
+                () -> new UsMarketScreenView(this::createUsWatchlistPanel).create());
+        screenController.registerPreservingState(Screen.ANOMALY, this::createAnomalyScreen);
+        screenController.registerPreservingState(Screen.NOTIFICATIONS,
+                () -> new NotificationsScreenView(session.notifications(), status::setText,
+                        this::scheduleStateSave, this::requestSpeech).create());
         screenController.register(Screen.RADIO, this::createAccessibleChartScreen);
         screenController.registerPreservingState(Screen.SETTINGS, this::createSettingsScreen);
     }
 
-    private ScrollPane createDashboard() {
-        Account snapshot = tradingUseCase.account();
-        Label title = heading("안녕하세요. 오늘의 투자 현황입니다");
-        Label description = new Label("모의투자 계좌 " + snapshot.maskedAccountNo());
+    private VBox createDashboard() {
+        Label loading = new Label("키움 모의계좌를 조회하고 있습니다.");
+        ProgressIndicator progress = new ProgressIndicator();
+        VBox host = new VBox(12, progress, loading);
+        host.setAlignment(Pos.CENTER);
+        host.getStyleClass().addAll("screen-content", "dashboard-screen");
+        CompletableFuture.supplyAsync(tradingUseCase::account).whenComplete((snapshot, failure) ->
+                Platform.runLater(() -> host.getChildren().setAll(
+                        createDashboardContent(failure == null ? snapshot : null))));
+        return host;
+    }
+
+    private VBox createDashboardContent(Account snapshot) {
+        String accountStatus;
+        String profitStatus;
+        String orderableStatus;
+        if (snapshot != null) {
+            accountStatus = Formatters.won(snapshot.totalAssets());
+            profitStatus = signedWon(snapshot.totalProfitLoss());
+            orderableStatus = Formatters.won(snapshot.deposits().orderable());
+        } else {
+            accountStatus = "계좌 조회 필요";
+            profitStatus = "연결 후 표시";
+            orderableStatus = "연결 후 표시";
+        }
+
+        Label title = heading("오늘의 투자 홈");
+        Label description = new Label(snapshot == null
+                ? "키움 계좌를 연결하면 자산과 주문 가능 금액을 보여드립니다."
+                : "키움 모의계좌 " + snapshot.maskedAccountNo());
         description.getStyleClass().add("muted-text");
-        VBox intro = new VBox(4, title, description);
-        Button order = primaryButton("주문하기", () -> openOrder(OrderSide.BUY));
-        Button listen = new Button("화면 요약 듣기");
-        // 읽어 주는 문장도 실제 계좌 값에서 만든다. 화면과 음성이 다르면 안 된다.
+        VBox intro = new VBox(3, title, description);
+        Button listen = new Button("홈 요약 듣기");
+        Account spokenSnapshot = snapshot;
+        listen.setDisable(spokenSnapshot == null);
         listen.setOnAction(event -> requestSpeech(
-                "총 자산 " + Formatters.won(snapshot.totalAssets())
-                        + ", 평가손익은 " + signedWon(snapshot.totalProfitLoss())
-                        + " 입니다. 보유 종목은 " + snapshot.positions().size() + "종목입니다.",
+                "총 자산 " + Formatters.won(spokenSnapshot.totalAssets())
+                        + ", 평가손익은 " + signedWon(spokenSnapshot.totalProfitLoss())
+                        + ", 주문 가능 금액은 " + Formatters.won(spokenSnapshot.deposits().orderable()) + " 입니다.",
                 "dashboard-summary"));
-        Region titleSpacer = new Region(); HBox.setHgrow(titleSpacer, Priority.ALWAYS);
-        HBox header = new HBox(12, intro, titleSpacer, listen, order); header.setAlignment(Pos.CENTER_LEFT);
+        Region spacer = new Region(); HBox.setHgrow(spacer, Priority.ALWAYS);
+        HBox header = new HBox(12, intro, spacer, listen); header.setAlignment(Pos.CENTER_LEFT);
 
-        FlowPane assets = wrappingRow(14,
-                summaryCard("총 자산", Formatters.won(snapshot.totalAssets()),
-                        assetsSource(snapshot), "neutral"),
-                summaryCard("평가손익", signedWon(snapshot.totalProfitLoss()),
-                        "평가금액 " + Formatters.won(snapshot.totalMarketValue())
-                                + " · " + assetsSource(snapshot),
-                        snapshot.totalProfitLoss().signum() >= 0 ? "positive" : "negative"),
-                summaryCard("주문 가능 금액", Formatters.won(snapshot.deposits().orderable()),
-                        "예수금 " + Formatters.won(snapshot.deposits().cash()), "neutral"));
+        GridPane marketState = new GridPane();
+        marketState.setHgap(10);
+        marketState.getColumnConstraints().addAll(equalDashboardColumn(), equalDashboardColumn(), equalDashboardColumn());
+        marketState.add(dashboardStatusCard("계좌 총자산", accountStatus, "키움 API 응답", "neutral"), 0, 0);
+        marketState.add(dashboardStatusCard("평가손익", profitStatus, "보유 종목 기준",
+                snapshot != null && snapshot.totalProfitLoss().signum() < 0 ? "negative" : "positive"), 1, 0);
+        marketState.add(dashboardStatusCard("주문 가능 금액", orderableStatus, realtimeStatus.getText(), "connection"), 2, 0);
 
-        TableView<ObservableList<String>> holdings = textTable("홈 보유종목 요약",
-                snapshot.positions().stream().map(position -> row(
-                        position.name(),
-                        position.quantity() + "주",
-                        Formatters.won(position.currentPrice()),
-                        position.profitLossRate().toPlainString() + "%")).toList(),
-                "종목", "수량", "현재가", "수익률");
-        holdings.setPrefHeight(210);
-        holdings.setOnMouseClicked(event -> { if (event.getClickCount() == 2) openSelectedStock(holdings, 0); });
-        holdings.setOnKeyPressed(event -> { if (event.getCode() == KeyCode.ENTER) openSelectedStock(holdings, 0); });
+        GridPane features = new GridPane();
+        features.setHgap(10); features.setVgap(10);
+        features.getColumnConstraints().addAll(equalDashboardColumn(), equalDashboardColumn(), equalDashboardColumn());
+        features.add(dashboardFeatureCard("종목 찾기", "종목명·코드 검색", Screen.SEARCH), 0, 0);
+        features.add(dashboardFeatureCard("계좌", "자산·예수금·주문 현황", Screen.ACCOUNT), 1, 0);
+        features.add(dashboardFeatureCard("이상 감지", "실시간 가격·거래량 신호", Screen.ANOMALY), 2, 0);
+        features.add(dashboardFeatureCard("관심종목", "내 종목을 빠르게 확인", Screen.WATCHLIST), 0, 1);
+        features.add(dashboardFeatureCard("청각 차트", "시세를 소리로 탐색", Screen.RADIO), 1, 1);
+        features.add(dashboardFeatureCard("음성·화면 설정", "TTS·크기·고대비", Screen.SETTINGS), 2, 1);
 
-        VBox left = card("보유종목", holdings, linkButton("계좌 전체 보기", Screen.ACCOUNT));
-        // 지수와 거래대금 순위는 조회 TR 을 연동해야 채울 수 있다. 예시 숫자를 넣지 않는다.
-        VBox right = card("오늘 시장",
-                notConnectedPanel("지수와 거래대금 순위",
-                        "ka20003 전업종지수, ka10032 거래대금상위"),
-                linkButton("랭킹 전체 보기", Screen.SCANNER));
-        SplitPane center = new SplitPane(left, right); center.setDividerPositions(0.5);
-        left.setMinWidth(0); right.setMinWidth(0);
+        VBox dashboard = new VBox(12, header, sectionHeading("오늘의 계좌 상태"), marketState,
+                sectionHeading("주요 기능"), features);
+        dashboard.getStyleClass().add("dashboard-shell");
+        dashboard.setMaxWidth(980);
+        StackPane centered = new StackPane(dashboard);
+        centered.setAlignment(Pos.TOP_CENTER);
+        VBox body = new VBox(centered);
+        body.getStyleClass().addAll("screen-content", "dashboard-screen");
+        body.setPadding(new Insets(18));
+        VBox.setVgrow(centered, Priority.ALWAYS);
+        return body;
+    }
 
-        // 알림은 사용자의 주문·체결에서 쌓인다. 세션이 비어 있으면 비어 있는 대로 보여 준다.
-        ListView<String> activity = new ListView<>(session.notifications());
-        activity.setAccessibleText("최근 주문과 알림"); activity.setPrefHeight(145);
-        activity.setPlaceholder(new Label("최근 주문과 알림이 아직 없습니다."));
-        VBox activityCard = card("최근 주문 · 알림", activity);
+    private ColumnConstraints equalDashboardColumn() {
+        ColumnConstraints column = new ColumnConstraints();
+        column.setPercentWidth(33.333);
+        column.setHgrow(Priority.ALWAYS);
+        column.setFillWidth(true);
+        return column;
+    }
 
-        VBox body = new VBox(20, header, assets, center, activityCard);
-        return scrollPage("홈 대시보드", body);
+    private VBox dashboardStatusCard(String title, String value, String detail, String tone) {
+        Label titleLabel = new Label(title);
+        titleLabel.getStyleClass().add("dashboard-card-title");
+        Label valueLabel = new Label(value);
+        valueLabel.getStyleClass().add("dashboard-card-value");
+        valueLabel.setWrapText(true);
+        Label detailLabel = new Label(detail);
+        detailLabel.getStyleClass().add("muted-text");
+        detailLabel.setWrapText(true);
+        VBox card = new VBox(5, titleLabel, valueLabel, detailLabel);
+        card.getStyleClass().addAll("dashboard-status-card", "dashboard-tone-" + tone);
+        card.setMaxWidth(Double.MAX_VALUE);
+        return card;
+    }
+
+    private Button dashboardFeatureCard(String title, String detail, Screen screen) {
+        Label titleLabel = new Label(title);
+        titleLabel.getStyleClass().add("dashboard-feature-title");
+        Label detailLabel = new Label(detail);
+        detailLabel.getStyleClass().add("dashboard-feature-detail");
+        detailLabel.setWrapText(true);
+        VBox copy = new VBox(3, titleLabel, detailLabel);
+        copy.setAlignment(Pos.CENTER);
+        VBox graphic = new VBox(7, navigationIcon(screen), copy);
+        graphic.setAlignment(Pos.CENTER);
+        Button button = new Button();
+        button.setGraphic(graphic);
+        button.setMaxWidth(Double.MAX_VALUE);
+        button.setMaxHeight(Double.MAX_VALUE);
+        button.getStyleClass().add("dashboard-feature-card");
+        button.setAccessibleText(title + ". " + detail + ". 화면 열기");
+        button.setOnAction(event -> openNavigationScreen(screen));
+        return button;
     }
 
     private ScrollPane createConnectionScreen() {
-        return new ConnectionScreenView(connectionViewModel, status::setText).create();
+        return new ConnectionScreenView(connectionViewModel, status::setText,
+                tradingUseCase::account, realtimeStatus.textProperty(), marketDataSource).create();
     }
 
-    private ScrollPane createAccountScreen() {
-        Account snapshot = tradingUseCase.account();
-        Label title = heading("계좌");
-        // 계좌번호는 접근 토큰에 연결된 것을 그대로 보여 준다. 목록을 지어내지 않는다.
-        Label accountNo = new Label("모의계좌 " + snapshot.maskedAccountNo());
-        accountNo.getStyleClass().add("status-chip");
-        accountNo.setAccessibleText("조회 중인 계좌. 모의계좌 " + snapshot.maskedAccountNo());
-        Region spacer = new Region(); HBox.setHgrow(spacer, Priority.ALWAYS);
-        HBox header = new HBox(12, title, spacer, accountNo); header.setAlignment(Pos.CENTER_LEFT);
-
-        // 값은 모의주문 엔진이 들고 있는 실제 계좌 상태에서 읽는다. 화면이 따로 계산하거나
-        // 예시 숫자를 적어 두지 않는다.
-        FlowPane metrics = wrappingRow(14,
-                summaryCard("총 평가자산", Formatters.won(snapshot.totalAssets()),
-                        assetsSource(snapshot), "neutral"),
-                summaryCard("평가손익", signedWon(snapshot.totalProfitLoss()),
-                        "평가금액 " + Formatters.won(snapshot.totalMarketValue())
-                                + " · " + assetsSource(snapshot),
-                        snapshot.totalProfitLoss().signum() >= 0 ? "positive" : "negative"),
-                summaryCard("예수금", Formatters.won(snapshot.deposits().cash()),
-                        "주문 가능 " + Formatters.won(snapshot.deposits().orderable()), "neutral"));
-
-        TableView<ObservableList<String>> holdings = textTable("보유종목 표",
-                snapshot.positions().stream().map(position -> row(
-                        position.name(),
-                        position.quantity() + "",
-                        Formatters.won(position.averagePrice()),
-                        Formatters.won(position.currentPrice()),
-                        Formatters.won(position.marketValue()),
-                        signedWon(position.profitLoss()),
-                        position.profitLossRate().toPlainString() + "%")).toList(),
-                "종목", "수량", "평균단가", "현재가", "평가금액", "손익", "수익률");
-        holdings.setPrefHeight(300);
-        holdings.setOnMouseClicked(event -> { if (event.getClickCount() == 2) openSelectedStock(holdings, 0); });
-        holdings.setOnKeyPressed(event -> { if (event.getCode() == KeyCode.ENTER) openSelectedStock(holdings, 0); });
-        Button holdingDetail = new Button("선택 종목 상세"); holdingDetail.setOnAction(event -> openSelectedStock(holdings, 0));
-        Button holdingBuy = primaryButton("선택 종목 매수", () -> navigateForSelectedStock(holdings, 0, OrderSide.BUY));
-        Button holdingSell = new Button("선택 종목 매도"); holdingSell.setOnAction(event -> navigateForSelectedStock(holdings, 0, OrderSide.SELL));
-        VBox holdingsPanel = new VBox(10, holdings, wrappingRow(8, holdingDetail, holdingBuy, holdingSell));
-        holdingsPanel.setPadding(new Insets(10));
-
-        // 실제 증권사 화면처럼 예수금을 단계별로 나눠 보여 준다. "지금 얼마 주문할 수 있나",
-        // "지금 얼마 뽑을 수 있나", "결제가 끝나면 얼마 남나" 는 서로 다른 질문이다.
-        Deposits deposits = snapshot.deposits();
-        VBox cash = new VBox(12,
-                informationRow("예수금", Formatters.won(deposits.cash())),
-                informationRow("D+2 추정예수금", signedWon(deposits.settledCash())),
-                informationRow("주문 대기 금액", Formatters.won(snapshot.balance().locked())),
-                informationRow("주문 가능 금액", Formatters.won(deposits.orderable())),
-                informationRow("출금 가능 금액", Formatters.won(deposits.withdrawable())));
-        if (deposits.hasShortfall()) {
-            cash.getChildren().add(shortfallWarning(deposits));
-        }
-        cash.setPadding(new Insets(20));
-
-        TableView<ObservableList<String>> open = orderStatusTable(true);
-        TableView<ObservableList<String>> fills = orderStatusTable(false);
-        TableView<ObservableList<String>> history = textTable("주문내역",
-                tradingUseCase.orders().stream().map(order -> row(
-                        orderTime(order), order.name(), order.side().displayName(),
-                        order.limitPrice() == null ? "시장가" : Formatters.won(order.limitPrice()),
-                        Long.toString(order.quantity()), order.status().displayName())).toList(),
-                "시간", "종목", "구분", "주문가", "수량", "상태");
-        history.setPlaceholder(new Label("주문 내역이 없습니다."));
-        // 기간별 누적 수익률은 증권사에서 받아야 한다. 현재 보유분의 평가손익만 실제 값으로
-        // 보여 주고, 기간 수익률은 연동 전까지 표시하지 않는다.
-        VBox profit = new VBox(16,
-                informationRow("보유 종목 평가손익", signedWon(snapshot.totalProfitLoss())),
-                informationRow("매입금액", Formatters.won(snapshot.positions().stream()
-                        .map(Position::costBasis).reduce(BigDecimal.ZERO, BigDecimal::add))),
-                informationRow("평가금액", Formatters.won(snapshot.totalMarketValue())),
-                notConnectedPanel("기간별 누적 수익률과 실현손익",
-                        "ka10074 일자별실현손익, ka10085 계좌수익률, kt00016 일별계좌수익률상세"));
-        profit.setPadding(new Insets(20));
-        TableView<JournalEntry> journal = typedTable("매매일지", session.journalEntries(),
-                textColumn("날짜", JournalEntry::date),
-                textColumn("종목", JournalEntry::securityName),
-                textColumn("매수금액", JournalEntry::buyAmount),
-                textColumn("매도금액", JournalEntry::sellAmount),
-                textColumn("손익", JournalEntry::profitLoss),
-                textColumn("전략·메모", JournalEntry::memo),
-                textColumn("태그", JournalEntry::tags));
-        Button addJournal = new Button("일지 작성"); addJournal.setOnAction(event -> showJournalDialog(null));
-        Button editJournal = new Button("선택 수정"); editJournal.setOnAction(event -> {
-            JournalEntry selected = journal.getSelectionModel().getSelectedItem();
-            if (selected == null) {
-                status.setText("수정할 매매일지를 선택해주세요.");
-                journal.requestFocus();
-                return;
-            }
-            showJournalDialog(selected);
-        });
-        Button deleteJournal = new Button("선택 삭제");
-        deleteJournal.setOnAction(event -> deleteSelectedJournal(journal));
-        Button attach = new Button("차트 화면 첨부"); attach.setOnAction(event -> status.setText("현재 차트 화면을 매매일지 첨부 대상으로 선택했습니다."));
-        VBox journalPanel = new VBox(10, journal, wrappingRow(8, addJournal, editJournal, deleteJournal, attach));
-        journalPanel.setPadding(new Insets(10));
-
-        TabPane tabs = new TabPane(
-                tab("보유종목", holdingsPanel), tab("예수금", cash), tab("미체결", open),
-                tab("체결", fills), tab("주문내역", history), tab("손익분석", profit), tab("매매일지", journalPanel));
-        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
-        tabs.setPrefHeight(390);
-        VBox body = new VBox(20, header, metrics, tabs);
-        return scrollPage("계좌 대시보드", body);
+    private StackPane createAccountScreen() {
+        Label loading = new Label("키움 모의계좌와 주문 내역을 조회하고 있습니다.");
+        ProgressIndicator progress = new ProgressIndicator();
+        VBox loadingBox = new VBox(12, progress, loading);
+        loadingBox.setAlignment(Pos.CENTER);
+        StackPane host = new StackPane(loadingBox);
+        host.getStyleClass().add("screen-content");
+        CompletableFuture.supplyAsync(() -> new AccountScreenData(
+                tradingUseCase.account(), tradingUseCase.orders())).whenComplete((data, failure) ->
+                Platform.runLater(() -> {
+                    if (failure != null) {
+                        loading.setText("계좌를 조회하지 못했습니다. 연결 상태를 확인해주세요.");
+                        progress.setVisible(false);
+                    } else {
+                        host.getChildren().setAll(new AccountScreenView(session::journalEntries,
+                            table -> openSelectedStock(table, 0),
+                            (table, orderSide) -> navigateForSelectedStock(table, 0, orderSide),
+                            status::setText,
+                            this::showJournalDialog,
+                            this::deleteSelectedJournal).create(data));
+                    }
+                }));
+        return host;
     }
 
-    private ScrollPane createTradingScreen() {
+    /**
+     * 주문 화면.
+     *
+     * <p>창이 낮으면 아래쪽 주문 상태가 화면 밖으로 밀린다. 접수 결과를 확인하는 자리라
+     * 가려지면 안 되므로 잘라 내지 않고 스크롤로 닿을 수 있게 감싼다.
+     */
+    private javafx.scene.Node createTradingScreen() {
+        Label loading = new Label("키움 모의계좌 주문 상태를 조회하고 있습니다.");
+        ProgressIndicator progress = new ProgressIndicator();
+        VBox host = new VBox(12, progress, loading);
+        host.setAlignment(Pos.CENTER);
+        host.getStyleClass().addAll("screen-content", "trading-screen");
+        CompletableFuture.supplyAsync(tradingUseCase::orders).whenComplete((orders, failure) ->
+                Platform.runLater(() -> {
+                    if (failure != null) {
+                        progress.setVisible(false);
+                        loading.setText("주문 상태를 조회하지 못했습니다. 연결 상태를 확인해주세요.");
+                    } else {
+                        host.getChildren().setAll(createTradingScreenContent(orders));
+                        host.setAlignment(Pos.TOP_LEFT);
+                    }
+                }));
+        ScrollPane scroll = new ScrollPane(host);
+        scroll.setFitToWidth(true);
+        // 높이를 맞추면 내용이 늘어나지 못해 잘린다. 넘치면 스크롤되게 둔다.
+        scroll.setFitToHeight(false);
+        scroll.setAccessibleText("주문 화면");
+        scroll.getStyleClass().add("workspace-scroll");
+        return scroll;
+    }
+
+    private VBox createTradingScreenContent(List<Order> orders) {
         StockDetail selectedDetail = stockDetailViewModel.detail();
         Label title = heading("주문");
-        Label notice = new Label("모의투자 UI입니다. 확인을 눌러도 실제 키움 주문은 전송되지 않습니다.");
+        Label notice = new Label("확인하면 키움 모의투자 서버로 주문이 전송됩니다. 실제 현금이 오가는 실전 주문은 지원하지 않습니다.");
         notice.getStyleClass().add("safety-note"); notice.setWrapText(true);
-        VBox quote = new VBox(8,
-                sectionHeading(selectedDetail.name() + " · " + selectedDetail.symbol()),
-                styledLabel(stockDetailViewModel.formatPrice(selectedDetail.currentPrice()), "stock-price"),
-                new Label("전일 대비 " + signedChangeRate(selectedDetail)),
-                // 호가는 ka10004 로 따로 받아야 한다. 현재가에서 계산해 보여 주면 시장에 없는
-                // 가격으로 주문할 수 있으므로 연동 전까지 표시하지 않는다.
-                informationRow("시가", stockDetailViewModel.formatPrice(selectedDetail.open())),
-                informationRow("고가 / 저가",
-                        stockDetailViewModel.formatPrice(selectedDetail.high()) + " / "
-                                + stockDetailViewModel.formatPrice(selectedDetail.low())));
-        quote.getStyleClass().add("panel-card"); quote.setPadding(new Insets(20)); quote.setPrefWidth(340);
+        Region titleSpacer = new Region();
+        HBox.setHgrow(titleSpacer, Priority.ALWAYS);
+        HBox header = new HBox(12, title, titleSpacer, notice);
+        header.setAlignment(Pos.CENTER_LEFT);
+        notice.setMaxWidth(720);
 
+        Node orderBook = createOrderBookPanel(selectedDetail.name());
         VBox orderForm = createOrderForm();
-        SplitPane orderArea = new SplitPane(quote, orderForm); orderArea.setDividerPositions(0.38);
-        quote.setMinWidth(0); orderForm.setMinWidth(0);
+        SplitPane orderArea = new SplitPane(orderBook, orderForm);
+        orderArea.setDividerPositions(0.46);
+        orderArea.setMinHeight(0);
+        orderArea.getStyleClass().add("trading-order-area");
+        orderForm.setMinWidth(0);
 
-        TableView<ObservableList<String>> openOrders = orderStatusTable(true);
-        TableView<ObservableList<String>> fills = orderStatusTable(false);
-        Button amend = new Button("선택 주문 정정"); amend.setOnAction(event -> showAmendOrderDialog(openOrders));
+        TableView<ObservableList<String>> openOrders = orderStatusTable(true, orders);
+        TableView<ObservableList<String>> fills = orderStatusTable(false, orders);
         Button cancel = new Button("선택 주문 취소"); cancel.setOnAction(event -> cancelSelectedOrder(openOrders));
         Button cancelAll = new Button("미체결 전량 취소"); cancelAll.setOnAction(event -> cancelAllOrders(openOrders));
-        FlowPane orderActions = wrappingRow(8, amend, cancel, cancelAll);
+        FlowPane orderActions = wrappingRow(8, cancel, cancelAll);
         VBox openContent = new VBox(10, stateBanner("재연결 후 주문 상태를 확인했습니다.", "success"), openOrders, orderActions);
         VBox.setVgrow(openOrders, Priority.ALWAYS);
         TabPane statusTabs = new TabPane(tab("미체결", openContent), tab("체결", fills));
-        statusTabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE); statusTabs.setPrefHeight(260);
-        VBox body = new VBox(18, title, notice, orderArea, sectionHeading("주문 상태"), statusTabs);
-        return scrollPage("주문", body);
+        statusTabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        statusTabs.setMinHeight(120);
+        statusTabs.setPrefHeight(165);
+        statusTabs.setMaxHeight(190);
+        statusTabs.getStyleClass().add("order-status-tabs");
+
+        VBox body = new VBox(10, header, orderArea, sectionHeading("주문 상태"), statusTabs);
+        body.getStyleClass().addAll("screen-content", "trading-screen");
+        body.setPadding(new Insets(12));
+        body.setMinSize(0, 0);
+        VBox.setVgrow(orderArea, Priority.ALWAYS);
+        return body;
     }
 
-    private ScrollPane createStockScreen() {
+    private VBox createStockScreen() {
         StockDetail detail = stockDetailViewModel.detail();
         var selection = stockDetailViewModel.selection();
         pendingOrderPrice = stockDetailViewModel.plainOrderPrice();
         Label title = heading(detail.name());
-        Label symbol = new Label(detail.symbol() + " · " + selection.exchange()); symbol.getStyleClass().add("mode-badge");
+        title.getStyleClass().add("stock-detail-title");
+        Label symbol = new Label(detail.symbol() + " · " + selection.exchange());
+        symbol.getStyleClass().addAll("mode-badge", "stock-detail-symbol");
         Button favorite = new Button("관심종목 추가");
+        favorite.getStyleClass().add("stock-compact-action");
         favorite.setOnAction(event -> {
             status.setText(detail.name() + " 종목을 확인하고 있습니다.");
             stockSearchViewModel.findBestMatch(detail.symbol()).thenAccept(item -> {
@@ -1189,31 +1489,39 @@ public final class DesktopApplication extends Application {
             });
         });
         Button buy = primaryButton("매수", () -> openOrder(OrderSide.BUY));
-        Button sell = new Button("매도"); sell.getStyleClass().add("sell-button"); sell.setOnAction(event -> openOrder(OrderSide.SELL));
+        buy.getStyleClass().add("stock-compact-action");
+        Button sell = new Button("매도"); sell.getStyleClass().addAll("sell-button", "stock-compact-action"); sell.setOnAction(event -> openOrder(OrderSide.SELL));
         Region titleSpacer = new Region(); HBox.setHgrow(titleSpacer, Priority.ALWAYS);
-        HBox titleRow = new HBox(12, title, symbol, titleSpacer, favorite, sell, buy); titleRow.setAlignment(Pos.CENTER_LEFT);
+        HBox titleRow = new HBox(8, title, symbol, titleSpacer, favorite, sell, buy); titleRow.setAlignment(Pos.CENTER_LEFT);
         String direction = detail.direction() == PriceDirection.UP ? "상승" : detail.direction() == PriceDirection.DOWN ? "하락" : "보합";
         Label price = new Label(stockDetailViewModel.formatPrice(detail.currentPrice()) + " · " + direction + " "
                 + stockDetailViewModel.formatPrice(detail.changeAmount().abs()) + " · " + detail.changeRate().abs() + "%");
         price.getStyleClass().add("stock-price");
         Button listen = new Button("최신 정보 듣기");
+        listen.getStyleClass().add("stock-compact-action");
         listen.setOnAction(event -> requestSpeech(detail.name() + " 현재가 "
                 + stockDetailViewModel.formatPrice(detail.currentPrice())
                 + ", 전일 대비 " + direction + " " + detail.changeRate().abs() + "퍼센트입니다.",
                 "stock-detail-" + detail.symbol()));
 
-        FlowPane metrics = wrappingRow(12,
-                miniMetric("시가", stockDetailViewModel.formatPrice(detail.open())), miniMetric("고가", stockDetailViewModel.formatPrice(detail.high())),
-                miniMetric("저가", stockDetailViewModel.formatPrice(detail.low())),
-                // 시가총액과 외국인 소진률은 ka10001 이 함께 주지만 아직 도메인 모델에 담지
-                // 않았다. 값을 지어내지 않고 항목 자체를 빼 둔다.
-                miniMetric("거래량", String.format("%,d", detail.volume())));
+        VBox openMetric = miniMetric("시가", stockDetailViewModel.formatPrice(detail.open()));
+        VBox highMetric = miniMetric("고가", stockDetailViewModel.formatPrice(detail.high()));
+        VBox lowMetric = miniMetric("저가", stockDetailViewModel.formatPrice(detail.low()));
+        // 시가총액과 외국인 소진률은 ka10001 이 함께 주지만 아직 도메인 모델에 담지
+        // 않았다. 값을 지어내지 않고 항목 자체를 빼 둔다.
+        VBox volumeMetric = miniMetric("거래량", String.format("%,d", detail.volume()));
+        List.of(openMetric, highMetric, lowMetric, volumeMetric).forEach(metric -> metric.setPrefWidth(108));
+        FlowPane quoteRow = wrappingRow(8, price, listen, openMetric, highMetric, lowMetric, volumeMetric);
+        quoteRow.getStyleClass().add("stock-quote-row");
 
-        FlowPane periods = wrappingRow(8);
+        HBox periods = new HBox(5);
+        periods.setAlignment(Pos.CENTER_LEFT);
+        periods.getStyleClass().add("stock-periods");
         ToggleGroup periodGroup = new ToggleGroup();
         Map<ToggleButton, StockDetailViewModel.ChartRange> periodButtons = new java.util.LinkedHashMap<>();
         for (StockDetailViewModel.ChartRange range : StockDetailViewModel.ChartRange.values()) {
             ToggleButton button = new ToggleButton(range.label()); button.setToggleGroup(periodGroup);
+            button.getStyleClass().add("stock-chart-toggle");
             if (range == StockDetailViewModel.ChartRange.DAY) button.setSelected(true);
             periodButtons.put(button, range); periods.getChildren().add(button);
         }
@@ -1228,7 +1536,9 @@ public final class DesktopApplication extends Application {
         bollinger.selectedProperty().addListener((obs, old, value) -> candleChart.setShowBollinger(value));
         rsi.selectedProperty().addListener((obs, old, value) -> candleChart.setShowRsi(value));
         macd.selectedProperty().addListener((obs, old, value) -> candleChart.setShowMacd(value));
-        FlowPane indicators = wrappingRow(8, movingAverage, bollinger, rsi, macd);
+        HBox indicators = new HBox(8, movingAverage, bollinger, rsi, macd);
+        indicators.setAlignment(Pos.CENTER_LEFT);
+        indicators.getStyleClass().add("stock-indicators");
 
         TableView<PricePoint> history = new TableView<>(FXCollections.observableArrayList(chartPoints));
         history.setAccessibleText(detail.name() + " 최근 가격 흐름 표");
@@ -1258,28 +1568,37 @@ public final class DesktopApplication extends Application {
             });
         }));
         Button soundChart = new Button("이 차트를 소리로 탐색");
+        soundChart.getStyleClass().add("stock-compact-action");
         soundChart.setOnAction(event -> navigate(Screen.RADIO));
+        FlowPane chartToolbar = new FlowPane(10, 6, periods, indicators, soundChart);
+        chartToolbar.setAlignment(Pos.CENTER_LEFT);
+        chartToolbar.setPrefWrapLength(1060);
+        chartToolbar.getStyleClass().add("stock-chart-toolbar");
         TabPane chartRepresentations = new TabPane(tab("그래프", candleChart), tab("접근 가능한 표", history));
-        chartRepresentations.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE); chartRepresentations.setPrefHeight(430);
-        VBox chart = new VBox(12, periods, indicators, chartRepresentations, soundChart); chart.setPadding(new Insets(10));
+        chartRepresentations.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        chartRepresentations.setMinHeight(0); chartRepresentations.setPrefHeight(440);
+        VBox chart = new VBox(7, chartToolbar, chartRepresentations); chart.setPadding(new Insets(6));
+        chart.setMinHeight(0); VBox.setVgrow(chartRepresentations, Priority.ALWAYS);
         startLiveChart(candleChart, history);
 
-        // 호가·체결·수급·기업정보는 아직 연동하지 않았다. 예전에는 현재가에 임의의 값을
-        // 더해 호가를 만들어 보여 주고, 그 호가를 주문 가격으로 넣을 수도 있었다. 시장에
-        // 없는 가격으로 주문이 나갈 수 있어 표시 자체를 없앤다.
+        // 호가와 체결은 키움 조회 뒤 실시간 스트림으로 이어 붙인다. 기업정보·거래원·
+        // 프로그램매매는 아직 실제 TR이 없으므로 완성된 기능처럼 탭을 노출하지 않는다.
         javafx.scene.Node orderBook = createOrderBookPanel(detail.name());
         javafx.scene.Node trades = createTradeTapePanel(detail.name());
-        javafx.scene.Node supply = notConnectedPanel("투자자 수급",
-                "ka10059 종목별투자자기관별, ka10008 외국인 종목별 매매동향");
-        javafx.scene.Node info = notConnectedPanel("기업정보",
-                "ka10001 주식기본정보요청의 PER·EPS·PBR·시가총액");
 
-        TabPane tabs = new TabPane(tab("차트", chart), tab("호가", orderBook), tab("체결", trades),
-                tab("수급", supply), tab("거래원", createBrokerAnalysisPanel()),
-                tab("프로그램", createStockProgramPanel()), tab("기업정보", info));
-        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE); tabs.setPrefHeight(440);
-        VBox body = new VBox(16, titleRow, wrappingRow(12, price, listen), metrics, tabs);
-        return scrollPage("종목 상세 " + detail.name(), body);
+        TabPane tabs = new TabPane(tab("차트", chart), tab("호가", orderBook), tab("체결", trades));
+        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        tabs.setMinHeight(0); tabs.setPrefHeight(540); tabs.setMaxHeight(Double.MAX_VALUE);
+        tabs.getStyleClass().add("stock-detail-tabs");
+        VBox summary = new VBox(8, titleRow, quoteRow);
+        summary.getStyleClass().addAll("panel-card", "stock-detail-summary");
+        VBox body = new VBox(12, summary, tabs);
+        body.setPadding(new Insets(12));
+        body.setMinSize(0, 0); body.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
+        body.getStyleClass().add("screen-content");
+        body.setAccessibleText("종목 상세 " + detail.name());
+        VBox.setVgrow(tabs, Priority.ALWAYS);
+        return body;
     }
 
     private ScrollPane createMarketScreen() {
@@ -1301,7 +1620,7 @@ public final class DesktopApplication extends Application {
         return scrollPage("국내 시장", body);
     }
 
-    private ScrollPane createSearchScreen() {
+    private VBox createSearchScreen() {
         return new SearchScreenView(stockSearchViewModel, this::navigate, status::setText).create();
     }
 
@@ -1339,185 +1658,215 @@ public final class DesktopApplication extends Application {
                 "ka10171 조건검색 목록조회, ka10172 조건검색 요청 일반, ka10173 조건검색 실시간")));
     }
 
-    private ScrollPane createSupplyScreen() {
-        Label title = heading("수급 분석");
-        javafx.scene.Node investors = notConnectedPanel("외국인 · 기관 수급",
-                "ka10008 외국인 종목별 매매동향, ka10059 종목별투자자기관별, ka10131 기관외국인연속매매현황");
-        javafx.scene.Node program = notConnectedPanel("프로그램매매",
-                "ka90005 프로그램매매추이 시간대별, ka90006 프로그램매매차익잔고추이");
-        javafx.scene.Node shortSelling = notConnectedPanel("공매도", "ka10014 공매도추이요청");
-        javafx.scene.Node lending = notConnectedPanel("대차거래",
-                "ka10068 대차거래추이, ka10069 대차거래상위10종목");
-        TabPane tabs = new TabPane(tab("외국인 · 기관", investors),
-                tab("프로그램매매", program), tab("공매도", shortSelling), tab("대차거래", lending),
-                tab("거래원", createBrokerAnalysisPanel()));
-        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE); tabs.setPrefHeight(430);
-        return scrollPage("수급 분석", new VBox(20, title, tabs));
-    }
-
-    private ScrollPane createUsMarketScreen() {
-        Label title = heading("미국주식");
-        Label delayed = new Label("미국 시세 · UI 데모 데이터"); delayed.getStyleClass().add("mode-badge");
-        HBox titleRow = new HBox(12, title, delayed); titleRow.setAlignment(Pos.CENTER_LEFT);
-        TabPane tabs = new TabPane(
-                tab("시장", createUsHomePanel()), tab("종목", createUsStockPanel()),
-                tab("스캐너", createUsScannerPanel()), tab("조건검색", createUsConditionPanel()),
-                tab("관심종목", createUsWatchlistPanel()),
-                tab("계좌", createUsAccountPanel()), tab("주문", createUsOrderPanel()),
-                tab("리서치", createUsResearchPanel()), tab("환전", createFxPanel()));
-        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE); tabs.setPrefHeight(620);
-        return scrollPage("미국주식", new VBox(20, titleRow, tabs));
-    }
-
-    // 미국주식은 국내주식과 TR 체계가 완전히 다르다(usa*, ust*). 어댑터에 아직 구현하지
-    // 않았으므로 화면에 값을 지어내지 않는다. 특히 주문 화면은 실제로 주문을 보낼 수 없는데
-    // 보낼 수 있는 것처럼 보이면 안 된다.
-
-    private VBox createUsHomePanel() {
-        VBox panel = new VBox(18, notConnectedPanel("미국 지수와 랭킹",
-                "usa10102 미국지수 리스트, usa20530 거래량상위, usa20540 거래대금상위"));
-        panel.setPadding(new Insets(12));
-        return panel;
-    }
-
-    private VBox createUsStockPanel() {
-        VBox panel = new VBox(14, notConnectedPanel("미국 종목 상세",
-                "usa20100 현재가 종목정보, usa20101 10호가, usa06012 일 차트"));
-        panel.setPadding(new Insets(12));
-        return panel;
-    }
-
-    private VBox createUsScannerPanel() {
-        VBox panel = new VBox(16, notConnectedPanel("미국주식 스캐너",
-                "usa20510 기간별 등락률상위, usa20530 거래량상위, usa24100 신고가/신저가"));
-        panel.setPadding(new Insets(12));
-        return panel;
-    }
-
-    private VBox createUsConditionPanel() {
-        VBox panel = new VBox(16, notConnectedPanel("미국 조건검색",
-                "usa20280 조건검색 목록조회, usa20281 조건검색 요청 일반"));
-        panel.setPadding(new Insets(12));
-        return panel;
-    }
-
-    private VBox createUsAccountPanel() {
-        VBox panel = new VBox(16, notConnectedPanel("미국주식 계좌",
-                "ust21070 원장잔고확인, ust21110 해외주식 예수금, ust21120 통화별 예수금"));
-        panel.setPadding(new Insets(12));
-        return panel;
-    }
-
+    /** 미국주식 관심종목 패널. 사용자의 기록이라 실제 값을 보여 준다. */
     private VBox createUsWatchlistPanel() {
-        // 관심종목 자체는 사용자의 기록이라 그대로 보여 준다. 다만 미국주식 주문은 아직
-        // 연동하지 않았으므로 주문할 수 있는 것처럼 보이게 하지 않는다.
+        // 다만 미국주식 주문은 아직 연동하지 않았으므로 주문할 수 있는 것처럼 보이게 하지 않는다.
         return new WatchlistScreenView(watchlistViewModel, this::openWatchlistStock,
                 () -> startWatchlistSearch("미국"), status::setText)
                 .createUsPanel(selected -> status.setText(
                         "미국주식 주문은 아직 연동되지 않았습니다. 연동 예정: ust20000 매수, ust20001 매도"));
     }
 
-    private VBox createUsOrderPanel() {
-        VBox panel = new VBox(notConnectedPanel("미국주식 주문",
-                "ust20000 매수, ust20001 매도, ust20002 정정, ust20003 취소, ust21050 원장 미체결"));
-        panel.setPadding(new Insets(18));
-        return panel;
-    }
-
-    private VBox createUsResearchPanel() {
-        VBox panel = new VBox(14, notConnectedPanel("미국주식 리서치", "usa24300 미국주식 리서치"));
-        panel.setPadding(new Insets(12));
-        return panel;
-    }
-
-    private VBox createFxPanel() {
-        VBox panel = new VBox(16, notConnectedPanel("환전",
-                "ust31301 환율조회, ust31300 환전 예상금액, ust31302 환전신청"));
-        panel.setPadding(new Insets(12));
-        return panel;
-    }
-
-    private ScrollPane createNotificationsScreen() {
-        Label title = heading("알림");
-        ComboBox<String> filter = new ComboBox<>(FXCollections.observableArrayList("전체", "주문", "가격", "이상 감지", "연결"));
-        filter.setValue("전체");
-        Button allRead = new Button("모두 읽음");
+    private VBox createAnomalyScreen() {
+        Label title = heading("이상 감지");
+        Label monitoring = new Label(anomalySubscriptions.isEmpty()
+                ? "보유종목이나 관심종목이 있으면 실시간 감시를 시작합니다."
+                : "보유·관심종목 " + anomalySubscriptions.size() + "개를 실시간 감시 중입니다.");
+        monitoring.getStyleClass().add("muted-text");
+        VBox titleBlock = new VBox(2, title, monitoring);
+        Button manageWatchlist = new Button("감시 종목 관리");
+        manageWatchlist.setOnAction(event -> navigate(Screen.WATCHLIST));
         Region spacer = new Region(); HBox.setHgrow(spacer, Priority.ALWAYS);
-        HBox header = new HBox(10, title, spacer, filter, allRead); header.setAlignment(Pos.CENTER_LEFT);
-        FilteredList<String> filtered = new FilteredList<>(session.notifications(), value -> true);
-        filter.valueProperty().addListener((obs, old, selected) -> filtered.setPredicate(
-                value -> selected == null || selected.equals("전체") || value.contains("· " + selected + " ·")));
-        ListView<String> notifications = new ListView<>(filtered);
-        notifications.setAccessibleText("알림 목록"); notifications.setPrefHeight(430);
-        allRead.setOnAction(event -> {
-            for (int i = 0; i < session.notifications().size(); i++) session.notifications().set(i, session.notifications().get(i).replace("새 알림 · ", ""));
-            status.setText("모든 알림을 읽음 처리했습니다.");
-        });
-        Button listen = new Button("선택 알림 듣기");
+        HBox header = new HBox(8, titleBlock, spacer, manageWatchlist);
+        header.setAlignment(Pos.CENTER_LEFT);
+
+        FilteredList<String> signals = new FilteredList<>(session.notifications(),
+                value -> value.contains("· 이상 감지 ·"));
+        StackPane urgentHost = new StackPane();
+        Runnable renderUrgent = () -> urgentHost.getChildren().setAll(
+                signals.isEmpty() ? anomalyEmptyUrgentCard() : anomalyUrgentCard(signals.get(0)));
+        signals.addListener((javafx.collections.ListChangeListener<String>) change -> renderUrgent.run());
+        renderUrgent.run();
+
+        java.util.Set<String> holdingNames = new java.util.HashSet<>();
+        FilteredList<String> holdingSignals = new FilteredList<>(signals,
+                value -> holdingNames.stream().anyMatch(value::contains));
+        FilteredList<String> watchlistSignals = new FilteredList<>(signals,
+                value -> holdingNames.stream().noneMatch(value::contains));
+        CompletableFuture.supplyAsync(tradingUseCase::account).whenComplete((account, failure) ->
+                Platform.runLater(() -> {
+                    if (failure != null) return;
+                    holdingNames.clear();
+                    account.positions().forEach(position -> holdingNames.add(position.name()));
+                    holdingSignals.setPredicate(value -> holdingNames.stream().anyMatch(value::contains));
+                    watchlistSignals.setPredicate(value -> holdingNames.stream().noneMatch(value::contains));
+                }));
+
+        ListView<String> holdings = anomalySignalList(holdingSignals, "보유 종목 이상 신호가 없습니다.");
+        ListView<String> watchlist = anomalySignalList(watchlistSignals, "관심 종목 이상 신호가 없습니다.");
+        holdings.setPrefHeight(150);
+        watchlist.setPrefHeight(190);
+
+        Button listen = new Button("선택 신호 듣기");
         listen.setOnAction(event -> {
-            String selected = notifications.getSelectionModel().getSelectedItem();
+            String selected = holdings.getSelectionModel().getSelectedItem();
+            if (selected == null) selected = watchlist.getSelectionModel().getSelectedItem();
             if (selected == null) {
-                status.setText("들을 알림을 먼저 선택해주세요.");
-                notifications.requestFocus();
+                status.setText("들을 이상 감지 신호를 선택해주세요.");
                 return;
             }
-            requestSpeech(selected, "notification-selected");
+            requestSpeech(selected, "anomaly-selected");
         });
-        Button markRead = new Button("선택 읽음"); markRead.setOnAction(event -> {
-            String selected = notifications.getSelectionModel().getSelectedItem();
+        Button delete = new Button("선택 신호 지우기");
+        delete.getStyleClass().add("danger-outline-button");
+        delete.setOnAction(event -> {
+            String selected = holdings.getSelectionModel().getSelectedItem();
+            if (selected == null) selected = watchlist.getSelectionModel().getSelectedItem();
             if (selected == null) {
-                status.setText("읽음 처리할 알림을 선택해주세요.");
-                notifications.requestFocus();
-                return;
-            }
-            int index = session.notifications().indexOf(selected);
-            if (index >= 0) session.notifications().set(index, selected.replace("새 알림 · ", ""));
-            status.setText("선택한 알림을 읽음 처리했습니다.");
-        });
-        Button delete = new Button("선택 삭제"); delete.setOnAction(event -> {
-            String selected = notifications.getSelectionModel().getSelectedItem();
-            if (selected == null) {
-                status.setText("삭제할 알림을 선택해주세요.");
-                notifications.requestFocus();
+                status.setText("지울 이상 감지 신호를 선택해주세요.");
                 return;
             }
             session.notifications().remove(selected);
-            status.setText("선택한 알림을 삭제했습니다.");
+            scheduleStateSave();
+            status.setText("선택한 이상 감지 신호를 지웠습니다.");
         });
-        VBox history = new VBox(10, notifications, wrappingRow(8, listen, markRead, delete)); history.setPadding(new Insets(10));
+        holdings.getSelectionModel().selectedItemProperty().addListener((obs, old, selected) -> {
+            if (selected != null) watchlist.getSelectionModel().clearSelection();
+        });
+        watchlist.getSelectionModel().selectedItemProperty().addListener((obs, old, selected) -> {
+            if (selected != null) holdings.getSelectionModel().clearSelection();
+        });
 
-        TableView<AlertRule> rules = typedTable("알림 규칙", session.alertRules(),
-                textColumn("종목", AlertRule::securityName),
-                textColumn("조건", AlertRule::condition),
-                textColumn("기준", AlertRule::threshold),
-                textColumn("상태", AlertRule::statusText));
-        Button addRule = new Button("알림 규칙 추가"); addRule.setOnAction(event -> showAlertRuleDialog(null));
-        Button editRule = new Button("선택 수정"); editRule.setOnAction(event -> {
-            AlertRule selected = rules.getSelectionModel().getSelectedItem();
-            if (selected == null) {
-                status.setText("수정할 알림 규칙을 선택해주세요.");
-                rules.requestFocus();
-                return;
+        VBox criteria = new VBox(5,
+                informationRow("가격 급변", anomalyConfig.window().toMinutes() + "분 동안 "
+                        + anomalyConfig.priceThresholdPercent().stripTrailingZeros() + "% 이상"),
+                informationRow("거래량 급증", anomalyConfig.baselineWindow().toMinutes() + "분 기준 대비 "
+                        + anomalyConfig.volumeThresholdRatio().stripTrailingZeros() + "배 이상"),
+                informationRow("반복 제한", "같은 종목·유형은 " + anomalyConfig.cooldown().toMinutes() + "분 동안 다시 알리지 않음"));
+        TitledPane criteriaPane = new TitledPane("자동 이상 감지 기준 보기", criteria);
+        criteriaPane.setExpanded(false);
+
+        VBox shell = new VBox(9, header, urgentHost,
+                anomalySection("보유 종목 알림", holdings),
+                anomalySection("관심 종목 알림", watchlist),
+                wrappingRow(8, listen, delete), criteriaPane);
+        shell.getStyleClass().addAll("anomaly-shell", "settings-shell");
+        shell.setMaxWidth(1040);
+        StackPane centered = new StackPane(shell);
+        centered.setAlignment(Pos.TOP_CENTER);
+        VBox body = new VBox(centered);
+        body.getStyleClass().addAll("screen-content", "anomaly-screen");
+        body.setPadding(new Insets(12));
+        VBox.setVgrow(centered, Priority.ALWAYS);
+        return body;
+    }
+
+    private ListView<String> anomalySignalList(FilteredList<String> items, String emptyText) {
+        ListView<String> list = new ListView<>(items);
+        list.getStyleClass().add("anomaly-signal-list");
+        list.setCellFactory(ignored -> anomalySignalCell());
+        list.setPlaceholder(new Label(emptyText));
+        list.setAccessibleText(emptyText.replace("없습니다.", "목록"));
+        return list;
+    }
+
+    private ListCell<String> anomalySignalCell() {
+        return new ListCell<>() {
+            private final Label name = new Label();
+            private final Label time = new Label();
+            private final Label message = new Label();
+            private final Label badge = new Label();
+            private final Region spacer = new Region();
+            private final HBox top = new HBox(8, name, spacer, time);
+            private final VBox card = new VBox(5, top, message, badge);
+            {
+                getStyleClass().add("anomaly-signal-cell");
+                name.getStyleClass().add("anomaly-signal-name");
+                time.getStyleClass().add("anomaly-signal-time");
+                message.getStyleClass().add("anomaly-signal-message");
+                badge.getStyleClass().add("anomaly-signal-badge");
+                message.setWrapText(true);
+                top.setAlignment(Pos.CENTER_LEFT);
+                HBox.setHgrow(spacer, Priority.ALWAYS);
+                card.getStyleClass().add("anomaly-signal-card");
             }
-            showAlertRuleDialog(selected);
-        });
-        Button toggleRule = new Button("활성·일시정지"); toggleRule.setOnAction(event -> {
-            AlertRule selected = rules.getSelectionModel().getSelectedItem();
-            if (selected == null) {
-                status.setText("상태를 바꿀 알림 규칙을 선택해주세요.");
-                rules.requestFocus();
-                return;
+            @Override protected void updateItem(String item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null) {
+                    setGraphic(null);
+                    setText(null);
+                    return;
+                }
+                String content = anomalyMessage(item);
+                name.setText(anomalySecurityName(content));
+                time.setText(anomalyTime(item));
+                message.setText(content.replaceFirst("^(높음|주의) · ", ""));
+                String kind = content.contains("거래량") ? "거래량 급증"
+                        : content.contains("내렸") ? "가격 급락" : "가격 급등";
+                badge.setText(kind);
+                badge.getStyleClass().removeAll("badge-price-up", "badge-price-down", "badge-volume");
+                badge.getStyleClass().add(content.contains("거래량") ? "badge-volume"
+                        : content.contains("내렸") ? "badge-price-down" : "badge-price-up");
+                setAccessibleText(name.getText() + ". " + kind + ". " + message.getText() + ". " + time.getText());
+                setText(null);
+                setGraphic(card);
             }
-            int index = session.alertRules().indexOf(selected);
-            if (index >= 0) session.alertRules().set(index, selected.toggled());
-            status.setText(selected.securityName() + " 알림 규칙 상태를 변경했습니다.");
-        });
-        Button deleteRule = new Button("선택 삭제");
-        deleteRule.setOnAction(event -> deleteSelectedAlertRule(rules));
-        VBox rulePanel = new VBox(10, rules, wrappingRow(8, addRule, editRule, toggleRule, deleteRule)); rulePanel.setPadding(new Insets(10));
-        TabPane tabs = new TabPane(tab("알림 기록", history), tab("알림 규칙", rulePanel));
-        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE); tabs.setPrefHeight(530);
-        return scrollPage("알림", new VBox(18, header, tabs));
+        };
+    }
+
+    private VBox anomalySection(String title, ListView<String> list) {
+        Label label = new Label(title);
+        label.getStyleClass().add("anomaly-section-title");
+        return new VBox(5, label, list);
+    }
+
+    private VBox anomalyUrgentCard(String signal) {
+        String content = anomalyMessage(signal);
+        Label eyebrow = new Label("최근 이상 신호");
+        Label message = new Label(content.replaceFirst("^(높음|주의) · ", ""));
+        message.setWrapText(true);
+        message.getStyleClass().add("anomaly-urgent-message");
+        Label time = new Label(anomalyTime(signal));
+        Region spacer = new Region(); HBox.setHgrow(spacer, Priority.ALWAYS);
+        HBox top = new HBox(8, eyebrow, spacer, time);
+        Button listen = new Button("소리로 듣기");
+        listen.getStyleClass().add("primary-button");
+        listen.setOnAction(event -> requestSpeech(signal, "anomaly-latest"));
+        Button details = new Button("자세히");
+        details.setOnAction(event -> showInformation("이상 감지 상세", content));
+        VBox card = new VBox(6, top, message, wrappingRow(7, listen, details));
+        card.getStyleClass().add(content.startsWith("높음") ? "anomaly-urgent-high" : "anomaly-urgent-card");
+        return card;
+    }
+
+    private VBox anomalyEmptyUrgentCard() {
+        Label title = new Label("현재 긴급 이상 신호가 없습니다.");
+        title.getStyleClass().add("anomaly-urgent-message");
+        Label detail = new Label(anomalySubscriptions.isEmpty()
+                ? "관심종목을 추가하면 자동 감지를 시작합니다."
+                : "실시간 시세를 감시하고 있습니다.");
+        detail.getStyleClass().add("muted-text");
+        VBox card = new VBox(5, title, detail);
+        card.getStyleClass().add("anomaly-urgent-card");
+        return card;
+    }
+
+    private static String anomalyMessage(String notification) {
+        String normalized = notification.replaceFirst("^새 알림 · ", "");
+        int category = normalized.indexOf(" · 이상 감지 · ");
+        return category < 0 ? normalized : normalized.substring(category + " · 이상 감지 · ".length());
+    }
+
+    private static String anomalyTime(String notification) {
+        String normalized = notification.replaceFirst("^새 알림 · ", "");
+        int separator = normalized.indexOf(" · ");
+        return separator < 0 ? "" : normalized.substring(0, separator);
+    }
+
+    private static String anomalySecurityName(String content) {
+        String plain = content.replaceFirst("^(높음|주의) · ", "");
+        int recent = plain.indexOf(" 최근 ");
+        return recent > 0 ? plain.substring(0, recent) : "이상 신호";
     }
 
     private TableColumn<PricePoint, String> priceColumn(String title, java.util.function.Function<PricePoint, String> mapper) {
@@ -1582,15 +1931,50 @@ public final class DesktopApplication extends Application {
             price.setDisable(selectedType == OrderType.MARKET);
             updateOrderDraft(draft, side.getValue(), selectedType, quantity.getValue(), price.getText());
         });
-        GridPane form = new GridPane(); form.setHgap(10); form.setVgap(10);
-        addField(form, 0, "종목 코드", symbol); addField(form, 1, "종목명", name);
-        addField(form, 2, "매수 / 매도", side); addField(form, 3, "주문 유형", orderType);
-        addField(form, 4, "가격", price); addField(form, 5, "수량", quantity);
+        GridPane form = new GridPane(); form.setHgap(8); form.setVgap(6);
+        addCompactOrderField(form, 0, 0, "종목 코드", symbol);
+        addCompactOrderField(form, 2, 0, "종목명", name);
+        addCompactOrderField(form, 0, 1, "매수 / 매도", side);
+        addCompactOrderField(form, 2, 1, "주문 유형", orderType);
+        addCompactOrderField(form, 0, 2, "가격", price);
+        addCompactOrderField(form, 2, 2, "수량", quantity);
 
+        javafx.beans.property.ObjectProperty<Account> orderAccount =
+                new javafx.beans.property.SimpleObjectProperty<>();
+        Label availableAmount = new Label("모의계좌 조회 중");
+        List<Button> ratioButtons = new java.util.ArrayList<>();
         HBox ratios = new HBox(8);
         for (int ratio : List.of(10, 25, 50, 100)) {
             Button button = new Button(ratio + "%");
-            button.setOnAction(event -> quantity.getValueFactory().setValue(Math.max(1, ratio / 5)));
+            button.setDisable(true);
+            button.setOnAction(event -> {
+                Account account = orderAccount.get();
+                if (account == null) return;
+                long maximum;
+                if (side.getValue() == OrderSide.SELL) {
+                    maximum = account.position(symbol.getText())
+                            .map(Position::availableQuantity).orElse(0L);
+                } else {
+                    try {
+                        BigDecimal unitPrice = orderType.getValue() == OrderType.MARKET
+                                ? stockDetailViewModel.detail().currentPrice()
+                                : new BigDecimal(price.getText().replace(",", "").trim());
+                        maximum = unitPrice.signum() <= 0 ? 0L
+                                : account.deposits().orderable().divideToIntegralValue(unitPrice).longValue();
+                    } catch (RuntimeException invalidPrice) {
+                        maximum = 0L;
+                    }
+                }
+                if (maximum < 1) {
+                    status.setText(side.getValue() == OrderSide.SELL
+                            ? "매도 가능한 보유수량이 없습니다."
+                            : "현재 가격으로 주문할 수 있는 수량이 없습니다.");
+                    return;
+                }
+                long calculated = Math.max(1L, maximum * ratio / 100L);
+                quantity.getValueFactory().setValue((int) Math.min(1_000_000L, calculated));
+            });
+            ratioButtons.add(button);
             ratios.getChildren().add(button);
         }
         Label estimatedAmount = new Label();
@@ -1611,16 +1995,50 @@ public final class DesktopApplication extends Application {
             updateOrderDraft(draft, side.getValue(), orderType.getValue(), value, price.getText());
         });
         updateEstimate.run();
-        VBox estimates = new VBox(8,
+        VBox estimates = new VBox(4,
                 informationRow("주문 예상금액", estimatedAmount),
-                informationRow("주문 가능금액", "7,820,000원"));
-        estimates.getStyleClass().add("estimate-box"); estimates.setPadding(new Insets(12));
+                informationRow("주문 가능금액", availableAmount));
+        estimates.getStyleClass().add("estimate-box"); estimates.setPadding(new Insets(8));
         Button preview = new Button("주문 내용 검토"); preview.getStyleClass().add("primary-button"); preview.setDefaultButton(true);
         preview.setAccessibleHelp("주문을 제출하지 않고 재확인 창을 엽니다.");
-        preview.setOnAction(event -> previewOrder(symbol, name, side, orderType, quantity, price));
-        VBox box = new VBox(14, sectionHeading("모의주문 준비"), form, new Label("주문 비율"), ratios, estimates, preview);
-        box.getStyleClass().add("panel-card"); box.setPadding(new Insets(20));
+        preview.setOnAction(event -> {
+            if (preventDuplicateOrders) {
+                preview.setDisable(true);
+                PauseTransition unlock = new PauseTransition(Duration.millis(900));
+                unlock.setOnFinished(done -> preview.setDisable(false));
+                unlock.play();
+            }
+            previewOrder(symbol, name, side, orderType, quantity, price);
+        });
+        Label ratioLabel = new Label("주문 비율");
+        HBox ratioRow = new HBox(10, ratioLabel, ratios);
+        ratioRow.setAlignment(Pos.CENTER_LEFT);
+        VBox box = new VBox(8, sectionHeading("모의주문 준비"), form, ratioRow, estimates, preview);
+        box.getStyleClass().addAll("panel-card", "order-form-compact");
+        box.setPadding(new Insets(12));
+        box.setMaxHeight(Double.MAX_VALUE);
+        CompletableFuture.supplyAsync(tradingUseCase::account).whenComplete((account, failure) ->
+                Platform.runLater(() -> {
+                    if (failure != null) {
+                        availableAmount.setText("계좌 조회 실패");
+                        ratioButtons.forEach(button -> button.setDisable(true));
+                        return;
+                    }
+                    orderAccount.set(account);
+                    availableAmount.setText(Formatters.won(account.deposits().orderable()));
+                    ratioButtons.forEach(button -> button.setDisable(false));
+                }));
         return box;
+    }
+
+    private void addCompactOrderField(GridPane grid, int labelColumn, int row,
+                                      String labelText, Control control) {
+        Label label = new Label(labelText);
+        label.setLabelFor(control);
+        control.setMaxWidth(Double.MAX_VALUE);
+        grid.add(label, labelColumn, row);
+        grid.add(control, labelColumn + 1, row);
+        GridPane.setHgrow(control, Priority.ALWAYS);
     }
 
     private void updateOrderDraft(OrderDraft initial, OrderSide side, OrderType type,
@@ -1631,32 +2049,30 @@ public final class DesktopApplication extends Application {
         pendingOrderPrice = orderDraft.price();
     }
 
-    private ScrollPane createSettingsScreen() {
-        CheckBox tts = setting("화면 읽기(TTS)", speechEnabled, selected -> {
-            speechEnabled = selected;
+    private VBox createSettingsScreen() {
+        CheckBox tts = setting("화면 읽기(TTS)", accessibility.speechEnabled(), selected -> {
+            accessibility = accessibility.withSpeechEnabled(selected);
             if (selected) announce("음성 안내를 시작합니다.", SpeechPriority.USER_REQUEST, "speech-enabled");
             else speechQueue.clear();
             scheduleStateSave();
         });
-        CheckBox keyboard = setting("키보드 탐색 안내", keyboardGuidanceEnabled,
-                selected -> { keyboardGuidanceEnabled = selected; scheduleStateSave(); });
-        CheckBox reducedMotion = setting("애니메이션 줄이기", reducedMotionEnabled,
-                selected -> { reducedMotionEnabled = selected; scheduleStateSave(); });
-        CheckBox anomalySound = setting("이상 감지 소리", soundEnabled, selected -> { soundEnabled = selected; scheduleStateSave(); });
-        CheckBox largeText = setting("큰 글자", largeTextEnabled, selected -> {
-            largeTextEnabled = selected;
+        CheckBox keyboard = setting("키보드 탐색 안내", accessibility.keyboardGuidanceEnabled(),
+                selected -> { accessibility = accessibility.withKeyboardGuidanceEnabled(selected); applyKeyboardGuidance(selected); scheduleStateSave(); });
+        CheckBox reducedMotion = setting("그림자·시각 효과 줄이기", accessibility.reducedMotionEnabled(),
+                selected -> { accessibility = accessibility.withReducedMotionEnabled(selected); toggleClass("reduced-motion", selected); scheduleStateSave(); });
+        CheckBox anomalySound = setting("앱 효과음", accessibility.soundEnabled(), selected -> { accessibility = accessibility.withSoundEnabled(selected); scheduleStateSave(); });
+        CheckBox largeText = setting("큰 글자", accessibility.largeTextEnabled(), selected -> {
+            accessibility = accessibility.withLargeTextEnabled(selected);
             toggleClass("large-text", selected);
-            if (sidebarRoot != null) {
-                sidebarRoot.setPrefWidth(selected ? 250 : 216);
-                sidebarRoot.setMinWidth(selected ? 230 : 200);
-            }
             scheduleStateSave();
         });
-        CheckBox contrast = setting("고대비", highContrastEnabled, selected -> {
-            highContrastEnabled = selected;
+        CheckBox contrast = setting("고대비", accessibility.highContrastEnabled(), selected -> {
+            accessibility = accessibility.withHighContrastEnabled(selected);
             toggleClass("high-contrast", selected);
             scheduleStateSave();
         });
+        List.of(tts, keyboard, reducedMotion, anomalySound, largeText, contrast)
+                .forEach(control -> control.getStyleClass().add("settings-switch"));
         ComboBox<SpeechVoice> voice = new ComboBox<>();
         SpeechVoice systemDefault = new SpeechVoice("", "시스템 기본 음성", "");
         voice.getItems().add(systemDefault); voice.setValue(systemDefault);
@@ -1689,20 +2105,20 @@ public final class DesktopApplication extends Application {
                 speechQueue.setOptions(speechQueue.options().withVolume(selected.intValue())); scheduleStateSave();
             }
         });
-        ComboBox<String> density = new ComboBox<>(FXCollections.observableArrayList("간단히", "표준", "자세히"));
-        density.setValue(informationDensity);
+        ComboBox<String> density = new ComboBox<>(FXCollections.observableArrayList("좁게", "표준", "넓게"));
+        density.setValue(accessibility.informationDensity());
         density.valueProperty().addListener((obs, old, selected) -> {
-            if (selected != null) { informationDensity = selected; scheduleStateSave(); }
+            if (selected != null) { accessibility = accessibility.withInformationDensity(selected); applyInformationDensity(selected); scheduleStateSave(); }
         });
         GridPane voiceSettings = new GridPane(); voiceSettings.setHgap(16); voiceSettings.setVgap(10);
         addField(voiceSettings, 0, "음성", voice);
         addField(voiceSettings, 1, "속도", speed); addField(voiceSettings, 2, "음량", volume);
-        addField(voiceSettings, 3, "정보량", density);
+        voiceSettings.getColumnConstraints().addAll(equalSettingsColumn(), equalSettingsColumn());
         Button preview = new Button("설정 미리 듣기");
         preview.setOnAction(event -> {
-            boolean before = speechEnabled; speechEnabled = true;
+            boolean before = accessibility.speechEnabled(); accessibility = accessibility.withSpeechEnabled(true);
             announce("음성 설정 미리 듣기입니다. 현재 속도는 " + speed.getValue() + "이고 정보량은 " + density.getValue() + "입니다.",
-                    SpeechPriority.USER_REQUEST, "settings-preview"); speechEnabled = before || tts.isSelected();
+                    SpeechPriority.USER_REQUEST, "settings-preview"); accessibility = accessibility.withSpeechEnabled(before || tts.isSelected());
         });
         Button auditAccessibility = new Button("현재 화면 접근성 검사");
         auditAccessibility.setOnAction(event -> {
@@ -1715,50 +2131,109 @@ public final class DesktopApplication extends Application {
                     .reduce((left, right) -> left + "\n" + right).orElse("");
             showInformation("접근성 검사 결과 " + issues.size() + "건", details);
         });
-        VBox settings = new VBox(8, tts, keyboard, reducedMotion, anomalySound, largeText, contrast);
-        settings.getStyleClass().add("settings-card");
-        VBox accessibility = new VBox(18, sectionHeading("접근성"), settings, sectionHeading("음성 설정"),
-                voiceSettings, wrappingRow(8, preview, auditAccessibility)); accessibility.setPadding(new Insets(18));
+        VBox accessibilityToggles = settingsCard("화면 접근성",
+                tts, keyboard, reducedMotion, largeText, contrast);
+        VBox voiceCard = settingsCard("음성 설정", voiceSettings, wrappingRow(8, preview, auditAccessibility));
+        VBox accessibility = settingsTabContent(accessibilityToggles, voiceCard,
+                stateBanner("변경 사항은 선택 즉시 적용되고 자동 저장됩니다.", "success"));
 
-        VBox kiwoom = new VBox(14, sectionHeading("키움 API 연결"),
-                informationRow("현재 환경", "로컬 모의 UI"), informationRow("REST", "미연결"),
-                informationRow("실시간", "미연결"), informationRow("토큰", "발급 전"),
-                primaryButton("연결 설정 열기", () -> navigate(Screen.CONNECTION)),
-                new Label("App Secret은 화면이나 일반 설정 파일에 표시·저장하지 않습니다."));
-        kiwoom.setPadding(new Insets(18));
+        Label settingsRealtime = new Label(); settingsRealtime.textProperty().bind(realtimeStatus.textProperty());
+        Label settingsAccount = new Label("조회 중");
+        CompletableFuture.supplyAsync(() -> tradingUseCase.account().maskedAccountNo())
+                .whenComplete((account, failure) -> Platform.runLater(() ->
+                        settingsAccount.setText(failure == null ? account : "연결 후 자동 조회")));
+        VBox connectionCard = settingsCard("키움 API 연결",
+                labeledControl("연결 상태", settingsRealtime),
+                informationRow("현재 공급원", marketDataSource),
+                informationRow("계좌", settingsAccount),
+                primaryButton("연결 설정 열기", () -> navigate(Screen.CONNECTION)));
+        VBox securityCard = settingsCard("개인정보·보안",
+                informationRow("비밀 저장 보호", secretStore.protectionLevel().displayName()),
+                informationRow("모의/실전 자격증명", "완전 분리"),
+                informationRow("로그 계좌번호", "마스킹"),
+                informationRow("토큰 평문 저장", "사용 안 함"),
+                new Label("App Secret과 토큰은 화면이나 일반 설정 파일에 표시·저장하지 않습니다."));
+        VBox connectionSecurity = settingsTabContent(connectionCard, securityCard);
 
-        CheckBox confirm = new CheckBox("모든 실전 신규·정정·취소 주문 재확인"); confirm.setSelected(true); confirm.setDisable(true);
-        CheckBox preventDuplicate = new CheckBox("주문 버튼 연속 입력 방지"); preventDuplicate.setSelected(preventDuplicateOrders);
+        Label confirm = stateBanner("모든 신규·취소 주문은 항상 재확인합니다.", "success");
+        CheckBox preventDuplicate = new CheckBox("같은 주문의 연속 입력 방지"); preventDuplicate.setSelected(preventDuplicateOrders);
+        preventDuplicate.getStyleClass().addAll("setting-toggle", "settings-switch");
         preventDuplicate.selectedProperty().addListener((obs, old, value) -> {
             preventDuplicateOrders = value; scheduleStateSave();
         });
-        ComboBox<String> defaultAccount = new ComboBox<>(FXCollections.observableArrayList("모의계좌 ****-1204", "실전계좌 ****-8821"));
-        defaultAccount.setValue("모의계좌 ****-1204");
-        VBox trading = new VBox(14, sectionHeading("거래 안전"), confirm, preventDuplicate,
-                labeledControl("기본 계좌", defaultAccount), informationRow("주문 확인 유효시간", "30초"),
-                informationRow("주문 조회 제한", "초당 5회")); trading.setPadding(new Insets(18));
+        VBox tradingCard = settingsCard("거래 안전", confirm, preventDuplicate,
+                informationRow("주문 계좌", "키움 토큰에 연결된 계좌 자동 사용"));
+        GridPane densitySetting = new GridPane(); densitySetting.setHgap(16); densitySetting.setVgap(8);
+        addField(densitySetting, 0, "화면 밀도", density);
+        VBox advanced = settingsTabContent(settingsCard("화면 표시", densitySetting), tradingCard);
 
-        Slider subscriptionsSlider = new Slider(20, 200, maxSubscriptions); subscriptionsSlider.setShowTickLabels(true); subscriptionsSlider.setMajorTickUnit(20);
-        subscriptionsSlider.valueProperty().addListener((obs, old, value) -> {
-            maxSubscriptions = value.intValue(); scheduleStateSave();
-        });
-        TableView<ObservableList<String>> priorities = textTable("실시간 구독 우선순위",
-                List.of(row("1", "현재 열어둔 종목", "항상"), row("2", "주문 중인 종목", "항상"),
-                        row("3", "보유 종목", "높음"), row("4", "관심종목", "보통"), row("5", "조건검색 결과", "낮음")),
-                "우선순위", "대상", "정책"); priorities.setPrefHeight(280);
-        VBox realtime = new VBox(14, sectionHeading("실시간 데이터"), labeledControl("최대 구독 종목", subscriptionsSlider),
-                priorities, new Label("화면이 닫힌 종목은 자동으로 구독 해제합니다.")); realtime.setPadding(new Insets(18));
+        Label settingsSubscriptions = new Label(); settingsSubscriptions.textProperty().bind(subscriptionCount.textProperty());
+        Button openNotifications = primaryButton("알림 화면 열기", () -> navigate(Screen.NOTIFICATIONS));
+        VBox soundCard = settingsCard("소리 알림", anomalySound,
+                new Label("이상 감지 경고음과 주문 성공·오류 등 앱 효과음을 함께 켜거나 끕니다."));
+        VBox realtimeCard = settingsCard("실시간 알림 데이터",
+                labeledControl("현재 구독", settingsSubscriptions),
+                new Label("화면용 구독은 닫을 때 해제하고, 관심종목 이상 감시는 앱 실행 동안 유지합니다."),
+                openNotifications);
+        VBox notifications = settingsTabContent(soundCard, realtimeCard);
 
-        VBox security = new VBox(14, sectionHeading("보안"),
-                informationRow("Windows 비밀 저장", "DPAPI 사용"), informationRow("모의/실전 자격증명", "완전 분리"),
-                informationRow("로그 계좌번호", "마스킹"), informationRow("토큰 평문 저장", "사용 안 함"),
-                new Label("실전 App Key, Secret, 토큰, 계좌 비밀번호는 SQLite에 저장하지 않습니다."));
-        security.setPadding(new Insets(18));
+        TabPane tabs = new TabPane(settingsTab("접근성", accessibility),
+                settingsTab("연결·보안", connectionSecurity), settingsTab("알림", notifications),
+                settingsTab("고급 설정", advanced));
+        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        tabs.setTabMinWidth(140);
+        tabs.setMinHeight(0);
+        tabs.setMaxHeight(Double.MAX_VALUE);
+        tabs.getStyleClass().add("settings-tabs");
+        Label settingsDescription = new Label("음성, 화면, 연결과 거래 안전 설정을 관리합니다.");
+        settingsDescription.getStyleClass().add("muted-text");
+        VBox titleBlock = new VBox(2, heading("설정"), settingsDescription);
+        VBox shell = new VBox(10, titleBlock, tabs);
+        shell.getStyleClass().add("settings-shell");
+        shell.setMaxWidth(1040);
+        VBox.setVgrow(tabs, Priority.ALWAYS);
+        StackPane centered = new StackPane(shell);
+        centered.setAlignment(Pos.TOP_CENTER);
+        VBox body = new VBox(centered);
+        body.getStyleClass().addAll("screen-content", "settings-screen");
+        body.setPadding(new Insets(12));
+        body.setMinSize(0, 0);
+        VBox.setVgrow(centered, Priority.ALWAYS);
+        return body;
+    }
 
-        TabPane tabs = new TabPane(tab("접근성", accessibility), tab("키움 연결", kiwoom), tab("거래", trading),
-                tab("실시간", realtime), tab("보안", security), tab("화면 상태", createUiStatePanel()));
-        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE); tabs.setPrefHeight(620);
-        return scrollPage("설정", new VBox(18, heading("설정"), tabs));
+    private ColumnConstraints equalSettingsColumn() {
+        ColumnConstraints column = new ColumnConstraints();
+        column.setPercentWidth(50);
+        column.setHgrow(Priority.ALWAYS);
+        column.setFillWidth(true);
+        return column;
+    }
+
+    private VBox settingsCard(String title, Node... content) {
+        Label heading = new Label(title);
+        heading.getStyleClass().add("settings-card-heading");
+        VBox card = new VBox(9, heading);
+        card.getChildren().addAll(content);
+        card.getStyleClass().add("settings-card");
+        card.setMaxWidth(Double.MAX_VALUE);
+        return card;
+    }
+
+    private VBox settingsTabContent(Node... content) {
+        VBox panel = new VBox(10, content);
+        panel.getStyleClass().add("settings-tab-content");
+        panel.setFillWidth(true);
+        return panel;
+    }
+
+    private Tab settingsTab(String title, Node content) {
+        ScrollPane scroll = new ScrollPane(content);
+        scroll.setFitToWidth(true);
+        scroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        scroll.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+        scroll.getStyleClass().add("settings-tab-scroll");
+        return tab(title, scroll);
     }
 
     private void loadVoices(ComboBox<SpeechVoice> voiceBox, SpeechVoice systemDefault) {
@@ -1827,48 +2302,6 @@ public final class DesktopApplication extends Application {
         return panel;
     }
 
-    private void showAlertRuleDialog(AlertRule existing) {
-        Dialog<ButtonType> dialog = new Dialog<>(); dialog.setTitle(existing == null ? "알림 규칙 추가" : "알림 규칙 수정");
-        TextField security = new TextField(existing == null ? "" : existing.securityName());
-        ComboBox<String> condition = new ComboBox<>(FXCollections.observableArrayList("가격 이상", "가격 이하", "등락률 이상", "거래량 급증", "VI", "조건검색 편입"));
-        condition.setValue(existing == null ? "가격 이상" : existing.condition());
-        TextField threshold = new TextField(existing == null ? "" : existing.threshold());
-        CheckBox enabled = new CheckBox("규칙 활성화"); enabled.setSelected(existing == null || existing.enabled());
-        GridPane form = new GridPane(); form.setHgap(12); form.setVgap(10);
-        addField(form, 0, "종목", security); addField(form, 1, "조건", condition); addField(form, 2, "기준", threshold);
-        form.add(enabled, 0, 3, 2, 1); dialog.getDialogPane().setContent(form);
-        ButtonType save = new ButtonType("저장", ButtonBar.ButtonData.OK_DONE);
-        dialog.getDialogPane().getButtonTypes().setAll(save, ButtonType.CANCEL);
-        dialog.showAndWait().filter(save::equals).ifPresent(result -> {
-            if (security.getText().isBlank() || threshold.getText().isBlank()) {
-                showInformation("입력값을 확인하세요", "종목과 기준값은 필수입니다."); return;
-            }
-            AlertRule replacement = new AlertRule(
-                    security.getText(), condition.getValue(), threshold.getText(), enabled.isSelected());
-            if (existing == null) session.alertRules().add(replacement);
-            else {
-                int index = session.alertRules().indexOf(existing);
-                if (index >= 0) session.alertRules().set(index, replacement);
-            }
-        });
-    }
-
-    private void deleteSelectedAlertRule(TableView<AlertRule> table) {
-        AlertRule selected = table.getSelectionModel().getSelectedItem();
-        if (selected == null) {
-            status.setText("삭제할 알림 규칙을 선택해주세요.");
-            table.requestFocus();
-            return;
-        }
-        Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION,
-                selected.securityName() + " 알림 규칙을 삭제하시겠습니까?", ButtonType.OK, ButtonType.CANCEL);
-        confirmation.setHeaderText("알림 규칙 삭제");
-        confirmation.showAndWait().filter(ButtonType.OK::equals).ifPresent(result -> {
-            session.alertRules().remove(selected);
-            status.setText(selected.securityName() + " 알림 규칙을 삭제했습니다.");
-        });
-    }
-
     private void showJournalDialog(JournalEntry existing) {
         Dialog<ButtonType> dialog = new Dialog<>(); dialog.setTitle(existing == null ? "매매일지 작성" : "매매일지 수정");
         TextField date = new TextField(existing == null ? "08/10" : existing.date());
@@ -1922,34 +2355,7 @@ public final class DesktopApplication extends Application {
      * <p>모의주문 엔진이 들고 있는 실제 주문에서 만든다. 예전에는 예시 주문을 적어 두어,
      * 사용자가 낸 주문과 앱이 넣어 둔 예시를 구분할 수 없었다.
      */
-    private TableView<ObservableList<String>> orderStatusTable(boolean open) {
-        List<Order> orders = open
-                ? tradingUseCase.openOrders()
-                : tradingUseCase.orders().stream().filter(order -> order.status().isTerminal()).toList();
-        // 주문번호를 함께 보여 준다. 취소·정정은 이 번호로 원주문을 지정하고, 사용자도
-        // 증권사 화면과 대조할 수 있어야 한다.
-        List<String[]> rows = orders.stream().map(order -> row(
-                order.orderId(),
-                orderTime(order),
-                order.name(),
-                order.side().displayName(),
-                order.limitPrice() == null ? "시장가" : Formatters.won(order.limitPrice()),
-                Long.toString(order.quantity()),
-                Long.toString(order.filledQuantity()),
-                Long.toString(order.remainingQuantity()),
-                order.status().displayName())).toList();
-        TableView<ObservableList<String>> table = textTable(open ? "미체결 주문" : "체결·종료 주문", rows,
-                "주문번호", "시간", "종목", "구분", "주문가", "수량", "체결", "잔여", "상태");
-        table.setPlaceholder(new Label(open
-                ? "미체결 주문이 없습니다." : "체결되었거나 종료된 주문이 없습니다."));
-        return table;
-    }
-
     /** 주문 접수 시각을 화면 표기로 바꾼다. */
-    private static String orderTime(Order order) {
-        return java.time.LocalDateTime.ofInstant(order.createdAt(), java.time.ZoneId.of("Asia/Seoul"))
-                .format(java.time.format.DateTimeFormatter.ofPattern("MM/dd HH:mm"));
-    }
 
     private VBox createUiStatePanel() {
         ComboBox<String> state = new ComboBox<>(FXCollections.observableArrayList(
@@ -2012,29 +2418,6 @@ public final class DesktopApplication extends Application {
     }
 
     /**
-     * 주문 정정 안내.
-     *
-     * <p>정정은 별도 TR(kt10002)이며 아직 연동하지 않았다. 예전에는 표의 글자만 바꿔 정정된
-     * 것처럼 보이게 했는데, 실제로는 원주문이 그대로 살아 있었다. 화면을 볼 수 없는 사용자는
-     * 정정되었다고 안내받고도 옛 가격으로 체결될 수 있었다.
-     *
-     * <p>연동 전까지는 취소 후 재주문으로 안내한다. 두 동작 모두 실제로 증권사에 전달된다.
-     */
-    private void showAmendOrderDialog(TableView<ObservableList<String>> table) {
-        ObservableList<String> selected = table.getSelectionModel().getSelectedItem();
-        if (selected == null) {
-            showInformation("주문을 선택하세요", "정정할 미체결 주문을 먼저 선택해주세요.");
-            return;
-        }
-        String message = "주문 정정은 아직 연동되지 않았습니다. 연동 예정: kt10002 주식 정정주문\n\n"
-                + "지금은 선택 주문을 취소한 뒤 새로 주문해주세요. 취소와 신규 주문은 실제로 "
-                + "키움 모의투자 계좌에 전달됩니다.\n\n"
-                + "선택한 주문번호: " + selected.get(0) + " · " + selected.get(2);
-        status.setText("주문 정정은 아직 연동되지 않았습니다. 취소 후 재주문해주세요.");
-        showInformation("주문 정정을 사용할 수 없습니다", message);
-    }
-
-    /**
      * 선택한 주문을 취소한다.
      *
      * <p>예전에는 표의 글자만 바꿔 취소한 것처럼 보이게 했다. 실제로는 취소되지 않았으므로,
@@ -2055,8 +2438,10 @@ public final class DesktopApplication extends Application {
         confirmation.setContentText("주문번호: " + orderId + "\n원주문 가격: " + selected.get(4)
                 + "\n\n키움 모의투자 계좌로 취소 요청을 보냅니다.");
         confirmation.showAndWait().filter(ButtonType.OK::equals).ifPresent(result -> {
-            try {
-                Order cancelled = tradingUseCase.cancel(orderId);
+            status.setText("키움 모의투자 서버로 주문 취소를 요청하고 있습니다.");
+            CompletableFuture.supplyAsync(() -> tradingUseCase.cancel(orderId))
+                    .whenComplete((cancelled, failure) -> Platform.runLater(() -> {
+                if (failure == null) {
                 String message = name + " 주문번호 " + orderId + " 을(를) 취소했습니다. 상태 "
                         + cancelled.status().displayName();
                 status.setText(message);
@@ -2065,9 +2450,11 @@ public final class DesktopApplication extends Application {
                 play(SoundCue.SUCCESS);
                 screenController.invalidate(Screen.TRADING);
                 screenController.invalidate(Screen.ACCOUNT);
-            } catch (RuntimeException failure) {
-                String reason = failure.getMessage() == null || failure.getMessage().isBlank()
-                        ? failure.getClass().getSimpleName() : failure.getMessage();
+                } else {
+                Throwable cause = failure instanceof java.util.concurrent.CompletionException
+                        && failure.getCause() != null ? failure.getCause() : failure;
+                String reason = cause.getMessage() == null || cause.getMessage().isBlank()
+                        ? cause.getClass().getSimpleName() : cause.getMessage();
                 // 취소 실패를 성공처럼 보이게 두면 안 된다. 주문은 아직 살아 있을 수 있다.
                 status.setText("주문 취소에 실패했습니다. " + reason);
                 addNotification("주문", "주문번호 " + orderId + " 취소에 실패했습니다. " + reason);
@@ -2076,7 +2463,8 @@ public final class DesktopApplication extends Application {
                 play(SoundCue.ERROR);
                 showInformation("주문을 취소하지 못했습니다", reason
                         + "\n\n주문이 아직 남아 있을 수 있습니다. 미체결 목록을 다시 확인해주세요.");
-            }
+                }
+            }));
         });
     }
 
@@ -2087,7 +2475,7 @@ public final class DesktopApplication extends Application {
      * 취소되었다고 안내하면, 남은 주문이 그대로 체결될 수 있다.
      */
     private void cancelAllOrders(TableView<ObservableList<String>> table) {
-        List<String> orderIds = tradingUseCase.openOrders().stream().map(Order::orderId).toList();
+        List<String> orderIds = table.getItems().stream().map(row -> row.get(0)).toList();
         if (orderIds.isEmpty()) {
             showInformation("취소할 주문이 없습니다", "미체결 주문이 없습니다.");
             return;
@@ -2097,27 +2485,33 @@ public final class DesktopApplication extends Application {
                 ButtonType.OK, ButtonType.CANCEL);
         confirmation.setHeaderText("미체결 전량 취소 재확인");
         confirmation.showAndWait().filter(ButtonType.OK::equals).ifPresent(result -> {
-            int cancelled = 0;
-            List<String> failures = new java.util.ArrayList<>();
-            for (String orderId : orderIds) {
-                try {
-                    tradingUseCase.cancel(orderId);
-                    cancelled++;
-                } catch (RuntimeException failure) {
-                    failures.add(orderId);
+            status.setText("키움 모의투자 서버로 " + orderIds.size() + "건의 취소를 요청하고 있습니다.");
+            CompletableFuture.supplyAsync(() -> {
+                int cancelled = 0;
+                List<String> failures = new java.util.ArrayList<>();
+                for (String orderId : orderIds) {
+                    try {
+                        tradingUseCase.cancel(orderId);
+                        cancelled++;
+                    } catch (RuntimeException failure) {
+                        failures.add(orderId);
+                    }
                 }
-            }
-            String message = failures.isEmpty()
-                    ? "미체결 주문 " + cancelled + "건을 취소했습니다."
-                    : "미체결 주문 " + cancelled + "건을 취소했고 " + failures.size()
-                            + "건은 취소하지 못했습니다. 주문번호 " + String.join(", ", failures);
-            status.setText(message);
-            addNotification("주문", message);
-            announce(message, failures.isEmpty() ? SpeechPriority.ORDER : SpeechPriority.CRITICAL,
-                    "order-cancel-all");
-            play(failures.isEmpty() ? SoundCue.SUCCESS : SoundCue.ERROR);
-            screenController.invalidate(Screen.TRADING);
-            screenController.invalidate(Screen.ACCOUNT);
+                return failures.isEmpty()
+                        ? "미체결 주문 " + cancelled + "건을 취소했습니다."
+                        : "미체결 주문 " + cancelled + "건을 취소했고 " + failures.size()
+                                + "건은 취소하지 못했습니다. 주문번호 " + String.join(", ", failures);
+            }).whenComplete((message, failure) -> Platform.runLater(() -> {
+                String resultMessage = failure == null ? message : "미체결 주문 취소 중 오류가 발생했습니다.";
+                boolean partialFailure = failure != null || resultMessage.contains("취소하지 못했습니다");
+                status.setText(resultMessage);
+                addNotification("주문", resultMessage);
+                announce(resultMessage, partialFailure ? SpeechPriority.CRITICAL : SpeechPriority.ORDER,
+                        "order-cancel-all");
+                play(partialFailure ? SoundCue.ERROR : SoundCue.SUCCESS);
+                screenController.invalidate(Screen.TRADING);
+                screenController.invalidate(Screen.ACCOUNT);
+            }));
         });
     }
 
@@ -2144,17 +2538,78 @@ public final class DesktopApplication extends Application {
         }
     }
 
-    /** 손익 금액을 부호와 함께 표기한다. */
-    private static String signedWon(BigDecimal value) {
-        return (value.signum() >= 0 ? "+" : "-") + Formatters.won(value.abs());
+    /** 관심종목 목록을 실제 실시간 이상 감시 구독과 동기화한다. */
+    private void refreshAnomalyMonitoring() {
+        long generation = ++anomalyMonitoringGeneration;
+        anomalySubscriptions.values().forEach(EventSubscription::close);
+        anomalySubscriptions.clear();
+        synchronized (anomalyDetector) {
+            anomalyDetector.reset();
+        }
+        for (WatchlistItem item : session.watchlistItems()) {
+            if (item.needsIdentityRepair()) continue;
+            String key = item.exchange() + ':' + item.symbol();
+            CompletableFuture.runAsync(() -> {
+                if (generation == anomalyMonitoringGeneration) {
+                    addAnomalySubscription(key, item.securityId(), item.securityName());
+                }
+            });
+        }
+        // 보유종목은 관심종목에 넣지 않아도 감시한다. 계좌 조회는 화면 스레드를 막지 않는다.
+        CompletableFuture.supplyAsync(tradingUseCase::account).whenComplete((account, failure) ->
+                Platform.runLater(() -> {
+                    if (failure != null || generation != anomalyMonitoringGeneration) return;
+                    for (Position position : account.positions()) {
+                        CompletableFuture.runAsync(() -> {
+                            if (generation == anomalyMonitoringGeneration) {
+                                addAnomalySubscription("KRX:" + position.symbol(),
+                                        SecurityId.of(position.symbol(), "KRX"), position.name());
+                            }
+                        });
+                    }
+                    if (screenController != null) screenController.invalidate(Screen.ANOMALY);
+                    refreshSubscriptionCount();
+                }));
+        if (screenController != null) screenController.invalidate(Screen.ANOMALY);
+        refreshSubscriptionCount();
     }
 
-    /** 조회 결과의 등락률을 부호와 함께 표기한다. 값을 새로 만들지 않는다. */
-    private static String signedChangeRate(StockDetail detail) {
-        BigDecimal rate = detail.changeRate().setScale(2, java.math.RoundingMode.HALF_UP);
-        String sign = detail.direction() == PriceDirection.DOWN ? "-" : rate.signum() > 0 ? "+" : "";
-        return sign + rate.abs().toPlainString() + "%";
+    private void addAnomalySubscription(String key, SecurityId security, String name) {
+        if (anomalySubscriptions.containsKey(key)) return;
+        try {
+            EventSubscription subscription = marketApplication.monitor(security, new MarketApplicationListener() {
+                @Override public void onQuote(Quote quote) {
+                    List<AnomalyAlert> detected;
+                    synchronized (anomalyDetector) {
+                        detected = anomalyDetector.onQuote(name, quote);
+                    }
+                    if (!detected.isEmpty()) {
+                        Platform.runLater(() -> detected.forEach(DesktopApplication.this::publishAnomaly));
+                    }
+                }
+
+                @Override public void onConnectionChanged(ConnectionState state, String safeDetail) {
+                    // 전역 연결 상태가 같은 정보를 표시한다. 여기서는 시세만 탐지기에 전달한다.
+                }
+            });
+            anomalySubscriptions.put(key, subscription);
+        } catch (RuntimeException failure) {
+            Platform.runLater(() -> status.setText(
+                    name + " 이상 감시를 시작하지 못했습니다: " + failure.getMessage()));
+        }
     }
+
+    private void publishAnomaly(AnomalyAlert alert) {
+        String severity = alert.severity() == AnomalySeverity.HIGH ? "높음" : "주의";
+        addNotification("이상 감지", severity + " · " + alert.explanation());
+        status.setText("이상 감지: " + alert.explanation());
+        announce(alert.explanation(), SpeechPriority.ALERT,
+                "anomaly-" + alert.symbol() + '-' + alert.type());
+        play(alert.severity() == AnomalySeverity.HIGH ? SoundCue.ANOMALY_HIGH : SoundCue.WARNING);
+        if (screenController != null) screenController.invalidate(Screen.ANOMALY);
+    }
+
+    /** 손익 금액을 부호와 함께 표기한다. */
 
     private void previewOrder(TextField symbol, TextField name, ComboBox<OrderSide> side,
                               ComboBox<OrderType> orderType, Spinner<Integer> quantity, TextField price) {
@@ -2165,43 +2620,74 @@ public final class DesktopApplication extends Application {
                             quantity.getValue())
                     : OrderCommand.limit(symbol.getText().trim(), name.getText().trim(), side.getValue(),
                             quantity.getValue(), new BigDecimal(price.getText().replace(",", "").trim()));
-            TradePreview result = tradingUseCase.preview(request, referencePrice);
-            Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION);
-            confirmation.setTitle("모의주문 재확인");
-            confirmation.setHeaderText(request.name() + " " + request.quantity() + "주 " + request.side().displayName() + " 주문을 제출하시겠습니까?");
-            String orderPrice = request.type() == OrderType.MARKET ? "시장가" : Formatters.won(request.limitPrice());
-            confirmation.setContentText("종목 코드: " + request.symbol() + "\n주문 가격: " + orderPrice
-                    + "\n예상 주문금액: " + Formatters.won(result.estimatedAmount())
-                    + costLines(result)
-                    + "\n주문 후 예상 현금: " + Formatters.won(result.availableCashAfter()) + "\n\n실제 주문이 아닌 모의주문입니다.");
-            // 확인 창은 되돌릴 수 없는 동작 직전이다. 화면 글자와 읽어 주는 문장을 같게 둔다.
-            confirmation.getDialogPane().setAccessibleText(result.describe());
-            ButtonType submit = new ButtonType("모의 " + request.side().displayName() + " 제출", ButtonBar.ButtonData.OK_DONE);
-            confirmation.getButtonTypes().setAll(submit, ButtonType.CANCEL);
-            confirmation.showAndWait().filter(submit::equals).ifPresent(button -> {
-                Order receipt = tradingUseCase.submitConfirmed(request, referencePrice);
-                String receiptMessage = receipt.describe();
-                status.setText(receiptMessage + " 주문번호 " + receipt.orderId());
-                addNotification("주문", receiptMessage + " 주문번호 " + receipt.orderId());
-                announce(receiptMessage, SpeechPriority.ORDER, "order-" + receipt.orderId()); play(SoundCue.SUCCESS);
-                Alert completed = new Alert(Alert.AlertType.INFORMATION);
-                completed.setTitle("모의주문 접수 결과");
-                completed.setHeaderText(receiptMessage);
-                completed.setContentText("주문번호: " + receipt.orderId() + "\n주문 화면에 머물거나 이전 화면으로 돌아갈 수 있습니다.");
-                ButtonType back = new ButtonType("이전 화면으로 돌아가기", ButtonBar.ButtonData.BACK_PREVIOUS);
-                ButtonType stay = new ButtonType("주문 화면 유지", ButtonBar.ButtonData.OK_DONE);
-                completed.getButtonTypes().setAll(back, stay);
-                completed.showAndWait().filter(back::equals).ifPresent(resultButton -> navigateBack());
-            });
+            status.setText("키움 모의계좌의 주문 가능 금액을 확인하고 있습니다.");
+            CompletableFuture.supplyAsync(() -> tradingUseCase.preview(request, referencePrice))
+                    .whenComplete((preview, failure) -> Platform.runLater(() -> {
+                        if (failure != null) showOrderFailure("주문 미리보기를 만들지 못했습니다", failure);
+                        else showOrderConfirmation(request, referencePrice, preview);
+                    }));
         } catch (RuntimeException exception) {
-            String reason = exception.getMessage() == null || exception.getMessage().isBlank()
-                    ? exception.getClass().getSimpleName() : exception.getMessage();
-            status.setText("주문 입력 오류: " + reason);
-            // 실패도 알림에 남긴다. 소리로만 알리면 지나간 뒤에 확인할 방법이 없다.
-            addNotification("주문", "주문이 처리되지 않았습니다. " + reason);
-            announce("주문 입력 오류. " + reason, SpeechPriority.CRITICAL, "order-input-error"); play(SoundCue.ERROR);
-            Alert alert = new Alert(Alert.AlertType.ERROR, reason, ButtonType.OK); alert.setHeaderText("주문 입력을 확인하세요."); alert.showAndWait();
+            showOrderFailure("주문 입력을 확인하세요", exception);
         }
+    }
+
+    private void showOrderConfirmation(OrderCommand request, BigDecimal referencePrice, TradePreview result) {
+        Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION);
+        confirmation.setTitle("키움 모의주문 재확인");
+        confirmation.setHeaderText(request.name() + " " + request.quantity() + "주 "
+                + request.side().displayName() + " 주문을 제출하시겠습니까?");
+        String orderPrice = request.type() == OrderType.MARKET ? "시장가" : Formatters.won(request.limitPrice());
+        confirmation.setContentText("종목 코드: " + request.symbol() + "\n주문 가격: " + orderPrice
+                + "\n예상 주문금액: " + Formatters.won(result.estimatedAmount()) + costLines(result)
+                + "\n주문 후 예상 현금: " + Formatters.won(result.availableCashAfter())
+                + "\n\n확인하면 키움 모의투자 서버로 주문을 전송합니다. 실전 주문은 아닙니다.");
+        confirmation.getDialogPane().setAccessibleText(result.describe());
+        ButtonType submit = new ButtonType("모의 " + request.side().displayName() + " 제출", ButtonBar.ButtonData.OK_DONE);
+        confirmation.getButtonTypes().setAll(submit, ButtonType.CANCEL);
+        confirmation.showAndWait().filter(submit::equals).ifPresent(button -> {
+            if (preventDuplicateOrders && isRapidDuplicateOrder(request)) {
+                showInformation("중복 주문을 차단했습니다",
+                        "같은 종목·구분·가격·수량의 주문이 방금 제출됐습니다.\n다시 제출하려면 3초 후 시도해주세요.");
+                return;
+            }
+            status.setText("키움 모의투자 서버로 주문을 전송하고 있습니다.");
+            CompletableFuture.supplyAsync(() -> tradingUseCase.submitConfirmed(request, referencePrice))
+                    .whenComplete((receipt, failure) -> Platform.runLater(() -> {
+                        if (failure != null) {
+                            showOrderFailure("키움 모의주문을 접수하지 못했습니다", failure);
+                            return;
+                        }
+                        rememberSubmittedOrder(request);
+                        String receiptMessage = receipt.describe();
+                        status.setText(receiptMessage + " 주문번호 " + receipt.orderId());
+                        addNotification("주문", receiptMessage + " 주문번호 " + receipt.orderId());
+                        announce(receiptMessage, SpeechPriority.ORDER, "order-" + receipt.orderId());
+                        play(SoundCue.SUCCESS);
+                        Alert completed = new Alert(Alert.AlertType.INFORMATION);
+                        completed.setTitle("키움 모의주문 접수 결과");
+                        completed.setHeaderText(receiptMessage);
+                        completed.setContentText("주문번호: " + receipt.orderId()
+                                + "\n주문 화면에 머물거나 이전 화면으로 돌아갈 수 있습니다.");
+                        ButtonType back = new ButtonType("이전 화면으로 돌아가기", ButtonBar.ButtonData.BACK_PREVIOUS);
+                        ButtonType stay = new ButtonType("주문 화면 유지", ButtonBar.ButtonData.OK_DONE);
+                        completed.getButtonTypes().setAll(back, stay);
+                        completed.showAndWait().filter(back::equals).ifPresent(resultButton -> navigateBack());
+                    }));
+        });
+    }
+
+    private void showOrderFailure(String header, Throwable failure) {
+        Throwable cause = failure instanceof java.util.concurrent.CompletionException && failure.getCause() != null
+                ? failure.getCause() : failure;
+        String reason = cause.getMessage() == null || cause.getMessage().isBlank()
+                ? cause.getClass().getSimpleName() : cause.getMessage();
+        status.setText(header + ": " + reason);
+        addNotification("주문", header + ". " + reason);
+        announce(header + ". " + reason, SpeechPriority.CRITICAL, "order-error");
+        play(SoundCue.ERROR);
+        Alert alert = new Alert(Alert.AlertType.ERROR, reason, ButtonType.OK);
+        alert.setHeaderText(header);
+        alert.showAndWait();
     }
 
     private HBox createStatusBar() {
@@ -2229,17 +2715,10 @@ public final class DesktopApplication extends Application {
     private void restoreLocalState() {
         stateRepository.load().ifPresent(snapshot -> {
             session.restore(snapshot);
+            stockSearchViewModel.recentSearches().setAll(snapshot.recentSearches());
             preventDuplicateOrders = snapshot.preventDuplicateOrders();
-            maxSubscriptions = snapshot.maxSubscriptions();
         });
-        AccessibilityPreferences accessibility = accessibilityPreferencesRepository.load();
-        speechEnabled = accessibility.speechEnabled();
-        soundEnabled = accessibility.soundEnabled();
-        keyboardGuidanceEnabled = accessibility.keyboardGuidanceEnabled();
-        reducedMotionEnabled = accessibility.reducedMotionEnabled();
-        largeTextEnabled = accessibility.largeTextEnabled();
-        highContrastEnabled = accessibility.highContrastEnabled();
-        informationDensity = accessibility.informationDensity();
+        accessibility = accessibilityPreferencesRepository.load();
         String voice = accessibility.voiceName().isBlank() ? null : accessibility.voiceName();
         speechQueue.setOptions(new SpeechOptions(accessibility.speechRate(), accessibility.speechVolume(), voice));
         sonificationPreferences = sonificationPreferencesRepository.load();
@@ -2259,13 +2738,13 @@ public final class DesktopApplication extends Application {
             SpeechOptions speech = speechQueue.options();
             stateRepository.save(new DesktopStateSnapshot(
                     List.copyOf(session.watchlistGroups()), List.copyOf(session.watchlistItems()),
-                    List.copyOf(session.alertRules()), List.copyOf(session.notifications()),
+                    List.copyOf(stockSearchViewModel.recentSearches()), List.copyOf(session.notifications()),
                     List.copyOf(session.journalEntries()), session.selectedStock(),
-                    preventDuplicateOrders, maxSubscriptions));
-            accessibilityPreferencesRepository.save(new AccessibilityPreferences(
-                    speechEnabled, soundEnabled, keyboardGuidanceEnabled, reducedMotionEnabled,
-                    largeTextEnabled, highContrastEnabled, informationDensity,
-                    speech.voiceName() == null ? "" : speech.voiceName(), speech.rate(), speech.volume()));
+                    preventDuplicateOrders));
+            // 음성 설정만 합성기에서 읽어 채운다. 나머지는 이미 들고 있는 값 그대로다.
+            accessibilityPreferencesRepository.save(accessibility.withVoice(
+                    speech.voiceName() == null ? "" : speech.voiceName(),
+                    speech.rate(), speech.volume()));
             sonificationPreferencesRepository.save(accessibleChartController == null
                     ? sonificationPreferences : accessibleChartController.preferences());
         } catch (RuntimeException error) {
@@ -2279,7 +2758,7 @@ public final class DesktopApplication extends Application {
 
     /** 사용자가 직접 누른 듣기 동작은 TTS가 꺼져 있어도 이유를 알려 준다. */
     private void requestSpeech(String text, String key) {
-        if (!speechEnabled || speechQueue.isClosed()) {
+        if (!accessibility.speechEnabled() || speechQueue.isClosed()) {
             status.setText("음성 안내가 꺼져 있습니다. 설정에서 화면 읽기(TTS)를 켜주세요.");
             play(SoundCue.WARNING);
             return;
@@ -2288,11 +2767,49 @@ public final class DesktopApplication extends Application {
     }
 
     private void announce(String text, SpeechPriority priority, String key, SpeechMergePolicy mergePolicy) {
-        if (speechEnabled && !speechQueue.isClosed()) {
+        if (accessibility.speechEnabled() && !speechQueue.isClosed()) {
             speechQueue.announce(new SpeechRequest(text, priority, key, mergePolicy));
         }
     }
-    private void play(SoundCue cue) { if (soundEnabled) soundPort.play(cue); }
+    private void play(SoundCue cue) { if (accessibility.soundEnabled()) soundPort.play(cue); }
+    private void applyKeyboardGuidance(boolean enabled) {
+        toggleClass("keyboard-guidance-off", !enabled);
+        if (root != null) {
+            for (Node guide : root.lookupAll(".keyboard-help")) {
+                guide.setVisible(enabled);
+                guide.setManaged(enabled);
+            }
+        }
+        if (globalSearchKeyboardHelp != null) {
+            globalSearchKeyboardHelp.setVisible(enabled);
+            globalSearchKeyboardHelp.setManaged(enabled);
+        }
+    }
+
+    private boolean isRapidDuplicateOrder(OrderCommand request) {
+        String fingerprint = orderFingerprint(request);
+        long elapsed = System.nanoTime() - lastSubmittedOrderNanos;
+        return fingerprint.equals(lastSubmittedOrderFingerprint)
+                && elapsed >= 0 && elapsed < java.util.concurrent.TimeUnit.SECONDS.toNanos(3);
+    }
+
+    private void rememberSubmittedOrder(OrderCommand request) {
+        lastSubmittedOrderFingerprint = orderFingerprint(request);
+        lastSubmittedOrderNanos = System.nanoTime();
+    }
+
+    private static String orderFingerprint(OrderCommand request) {
+        return request.symbol() + '|' + request.side() + '|' + request.type() + '|'
+                + request.quantity() + '|' + (request.limitPrice() == null ? "MARKET" : request.limitPrice().stripTrailingZeros());
+    }
+
+    private void applyInformationDensity(String density) {
+        if (root == null) return;
+        root.getStyleClass().removeAll("density-compact", "density-detailed");
+        if ("좁게".equals(density)) root.getStyleClass().add("density-compact");
+        if ("넓게".equals(density)) root.getStyleClass().add("density-detailed");
+    }
+
     private void toggleClass(String name, boolean enabled) {
         if (enabled && !root.getStyleClass().contains(name)) root.getStyleClass().add(name);
         if (!enabled) root.getStyleClass().remove(name);
@@ -2301,6 +2818,8 @@ public final class DesktopApplication extends Application {
     @Override public void stop() {
         if (persistenceDelay != null) persistenceDelay.stop();
         saveLocalState();
+        anomalySubscriptions.values().forEach(EventSubscription::close);
+        anomalySubscriptions.clear();
         stockDetailViewModel.stopLiveChart();
         orderBookViewModel.stop();
         tradeTapeViewModel.stop();
