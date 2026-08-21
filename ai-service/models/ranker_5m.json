@@ -1,0 +1,33 @@
+{
+  "features": [
+    "excess_z",
+    "vol_z",
+    "vwap_z",
+    "thrust_z",
+    "hilo_z",
+    "gap_z",
+    "rvol_z",
+    "move_sigma",
+    "vol_mult",
+    "vwap_dev",
+    "day_ret",
+    "mkt_ret",
+    "rvol",
+    "n_fired",
+    "max_abs_z",
+    "top_priority",
+    "bar_of_day",
+    "hour"
+  ],
+  "sigma_frac": 1.0,
+  "recency": false,
+  "half_life_days": null,
+  "used_deep": false,
+  "n_train": 109500,
+  "n_test": 60372,
+  "base_rate": 0.0132,
+  "pr_auc": 0.1078,
+  "roc_auc": 0.8433,
+  "pr_auc_baseline_absz": 0.0357,
+  "pr_auc_baseline_move": 0.0387
+}
