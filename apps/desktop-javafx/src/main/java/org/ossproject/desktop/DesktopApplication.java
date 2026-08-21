@@ -41,7 +41,8 @@ import org.ossproject.anomaly.StreamingAnomalyConfig;
 import org.ossproject.anomaly.StreamingAnomalyDetector;
 import org.ossproject.desktop.composition.DesktopServices;
 import org.ossproject.finance.model.*;
-import org.ossproject.ai.AiInsightPort;
+import org.ossproject.desktop.ai.AiInsightCard;
+import org.ossproject.desktop.viewmodel.AiInsightViewModel;
 import org.ossproject.desktop.ai.AiServiceProcess;
 import org.ossproject.desktop.chart.AccessibleChartController;
 import org.ossproject.desktop.chart.AccessibleChartView;
@@ -107,7 +108,7 @@ public final class DesktopApplication extends Application {
     private final SoundPort soundPort;
     private final SonificationPort sonificationPort;
     private final SecretStore secretStore;
-    private final AiInsightPort aiInsight;
+    private final AiInsightViewModel aiInsightViewModel;
     /** AI 서버를 앱이 띄웠으면 그 프로세스. 사용자가 직접 띄웠거나 못 띄웠으면 null. */
     private final AiServiceProcess aiServiceProcess;
     private AccessibleChartController accessibleChartController;
@@ -192,7 +193,8 @@ public final class DesktopApplication extends Application {
         this.soundPort = services.sounds();
         this.sonificationPort = services.sonification();
         this.secretStore = services.secrets();
-        this.aiInsight = services.aiInsight();
+        this.aiInsightViewModel = new AiInsightViewModel(
+                services.market(), services.aiInsight(), Platform::runLater);
         this.aiServiceProcess = services.aiServiceProcess();
         this.stateRepository = services.stateRepository();
         this.accessibilityPreferencesRepository = services.accessibilityPreferences();
@@ -1217,6 +1219,9 @@ public final class DesktopApplication extends Application {
                 accessibleChartController.stop();
             }
             // 종목 상세를 떠나면 봉 구독을 놓는다. 보이지 않는 차트를 계속 갱신할 이유가 없다.
+            if (old == Screen.ANOMALY && screen != Screen.ANOMALY) {
+                aiInsightViewModel.cancel();
+            }
             if (old == Screen.STOCK_DETAIL && screen != Screen.STOCK_DETAIL) {
                 stockDetailViewModel.stopLiveChart();
                 tradeTapeViewModel.stop();
@@ -1753,7 +1758,7 @@ public final class DesktopApplication extends Application {
         TitledPane criteriaPane = new TitledPane("자동 이상 감지 기준 보기", criteria);
         criteriaPane.setExpanded(false);
 
-        VBox shell = new VBox(9, header, urgentHost,
+        VBox shell = new VBox(9, header, urgentHost, createAiInsightPanel(),
                 anomalySection("보유 종목 알림", holdings),
                 anomalySection("관심 종목 알림", watchlist),
                 wrappingRow(8, listen, delete), criteriaPane);
@@ -1766,6 +1771,27 @@ public final class DesktopApplication extends Application {
         body.setPadding(new Insets(12));
         VBox.setVgrow(centered, Priority.ALWAYS);
         return body;
+    }
+
+    /**
+     * 지금 고른 종목의 AI 분석.
+     *
+     * <p>서비스가 스크린리더용으로 쓴 문장을 그대로 보여 준다. 화면이 문장을 새로 지어
+     * 내면 숫자를 앞에 두게 되고 신뢰도가 낮다는 사실이 빠진다.
+     *
+     * <p>받지 못하면 빈 칸으로 두지 않고 이유를 적는다. 분석이 없는 것과 이상이 없는 것은
+     * 다른 뜻인데, 아무것도 없으면 사용자는 문제가 없다고 읽는다.
+     */
+    private javafx.scene.Node createAiInsightPanel() {
+        AiInsightCard card = new AiInsightCard(text -> requestSpeech(text, "ai-insight"));
+        var selected = session.selectedStock();
+        if (!aiInsightViewModel.available()) {
+            card.unavailable(aiInsightViewModel.unavailableReason());
+            return card.root();
+        }
+        card.waiting();
+        aiInsightViewModel.analyze(selected.securityId(), true, card::show, card::unavailable);
+        return card.root();
     }
 
     private ListView<String> anomalySignalList(FilteredList<String> items, String emptyText) {
