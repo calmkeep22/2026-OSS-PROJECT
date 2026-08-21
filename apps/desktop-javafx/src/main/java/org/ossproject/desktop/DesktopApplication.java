@@ -41,6 +41,8 @@ import org.ossproject.anomaly.StreamingAnomalyConfig;
 import org.ossproject.anomaly.StreamingAnomalyDetector;
 import org.ossproject.desktop.composition.DesktopServices;
 import org.ossproject.finance.model.*;
+import org.ossproject.ai.AiInsightPort;
+import org.ossproject.desktop.ai.AiServiceProcess;
 import org.ossproject.desktop.chart.AccessibleChartController;
 import org.ossproject.desktop.chart.AccessibleChartView;
 import org.ossproject.desktop.chart.CandlestickChartView;
@@ -105,6 +107,9 @@ public final class DesktopApplication extends Application {
     private final SoundPort soundPort;
     private final SonificationPort sonificationPort;
     private final SecretStore secretStore;
+    private final AiInsightPort aiInsight;
+    /** AI 서버를 앱이 띄웠으면 그 프로세스. 사용자가 직접 띄웠거나 못 띄웠으면 null. */
+    private final AiServiceProcess aiServiceProcess;
     private AccessibleChartController accessibleChartController;
     private final Label status = new Label("준비됨");
     private final Label lastDataTime = new Label("마지막 시세 --:--:--");
@@ -187,6 +192,8 @@ public final class DesktopApplication extends Application {
         this.soundPort = services.sounds();
         this.sonificationPort = services.sonification();
         this.secretStore = services.secrets();
+        this.aiInsight = services.aiInsight();
+        this.aiServiceProcess = services.aiServiceProcess();
         this.stateRepository = services.stateRepository();
         this.accessibilityPreferencesRepository = services.accessibilityPreferences();
         this.sonificationPreferencesRepository = services.sonificationPreferences();
@@ -2824,6 +2831,8 @@ public final class DesktopApplication extends Application {
         orderBookViewModel.stop();
         tradeTapeViewModel.stop();
         if (connectionWatch != null) connectionWatch.close();
+        // 앱이 꺼지는데 자식이 남으면 포트를 붙잡고 있어 다음 실행이 실패한다.
+        if (aiServiceProcess != null) aiServiceProcess.close();
         if (subscriptionTicker != null) subscriptionTicker.stop();
         if (accessibleChartController != null) accessibleChartController.close();
         marketApplication.close();

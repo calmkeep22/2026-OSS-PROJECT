@@ -33,6 +33,11 @@ import org.ossproject.secret.SecretStoreException;
 import org.ossproject.secret.SecretBytes;
 import org.ossproject.secret.windows.SecretStoreFactory;
 
+import org.ossproject.ai.AiInsightPort;
+import org.ossproject.ai.http.HttpAiInsightAdapter;
+import org.ossproject.desktop.ai.AiServiceProcess;
+import java.net.URI;
+import java.util.Optional;
 import java.nio.file.Path;
 import java.util.Locale;
 import java.util.concurrent.ForkJoinPool;
@@ -53,6 +58,8 @@ public record DesktopServices(
         DesktopStateRepository stateRepository,
         AccessibilityPreferencesRepository accessibilityPreferences,
         SonificationPreferencesRepository sonificationPreferences,
+        AiInsightPort aiInsight,
+        AiServiceProcess aiServiceProcess,
         String marketDataSource
 ) {
     private static final System.Logger LOGGER = System.getLogger(DesktopServices.class.getName());
@@ -63,6 +70,7 @@ public record DesktopServices(
         Path legacyState = stateDirectory.resolve("ui-state.properties");
         SecretStore secrets = createSecretStore(stateDirectory.resolve("secrets"));
         MarketDataSource source = createMarketDataSource(secrets);
+        AiService ai = createAiService();
         MarketApplicationPort market = new MarketApplicationService(
                 source.stocks(), source.candles(), source.orderBooks(), source.trades(),
                 source.stream(), ForkJoinPool.commonPool(), ForkJoinPool.commonPool(),
@@ -85,6 +93,7 @@ public record DesktopServices(
                         stateDirectory.resolve("accessibility.properties"), legacyState),
                 new PropertiesSonificationPreferencesRepository(
                         stateDirectory.resolve("sonification.properties")),
+                ai.port(), ai.process(),
                 source.description());
     }
 
@@ -94,6 +103,52 @@ public record DesktopServices(
      * <p>실시간 스트림도 여기 함께 담는다. 조회는 증권사에서 받고 실시간은 가짜를 쓰면,
      * 화면에 시세가 멈춰 있어도 연결이 끊긴 것인지 장이 조용한 것인지 알 수 없다.
      */
+    /** AI 분석 창구와 그것을 띄운 프로세스. 프로세스는 앱이 꺼질 때 함께 내린다. */
+    private record AiService(AiInsightPort port, AiServiceProcess process) {
+    }
+
+    /**
+     * AI 분석을 준비한다.
+     *
+     * <p>저장소 안에서 {@code ai-service} 를 찾아 서버를 자식 프로세스로 띄운다. 사용자가
+     * 터미널을 열어 직접 띄우게 하면 대부분은 AI 기능을 못 보고 지나간다.
+     *
+     * <p>파이썬이 없거나 의존 패키지가 설치되지 않았으면 띄우지 못한다. 그래도 앱은 그대로
+     * 돌아간다. AI 는 부가 기능이고 시세와 주문은 이것 없이도 동작해야 한다. 어댑터는
+     * 그대로 만들어 두고, 화면이 연결 상태를 물어 그 사실을 적는다.
+     */
+    private static AiService createAiService() {
+        int port = aiPort();
+        AiInsightPort adapter = new HttpAiInsightAdapter(
+                URI.create("http://127.0.0.1:" + port), java.time.Clock.systemDefaultZone());
+
+        Optional<Path> directory = AiServiceProcess.locateServiceDirectory();
+        if (directory.isEmpty()) {
+            LOGGER.log(System.Logger.Level.INFO, "ai-service 를 찾지 못했습니다. AI 기능은 꺼집니다.");
+            return new AiService(adapter, null);
+        }
+        AiServiceProcess process = new AiServiceProcess(directory.get(), port);
+        if (!process.start()) {
+            LOGGER.log(System.Logger.Level.INFO,
+                    "AI 서버를 띄우지 못했습니다. ai-service 에서 pip install -r requirements.txt 를 실행해주세요.");
+            return new AiService(adapter, null);
+        }
+        return new AiService(adapter, process);
+    }
+
+    /** 포트를 바꿔야 하는 환경을 위해 열어 둔다. */
+    private static int aiPort() {
+        String configured = System.getenv("OPENSTOCK_AI_PORT");
+        if (configured == null || configured.isBlank()) {
+            return AiServiceProcess.DEFAULT_PORT;
+        }
+        try {
+            return Integer.parseInt(configured.trim());
+        } catch (NumberFormatException ignored) {
+            return AiServiceProcess.DEFAULT_PORT;
+        }
+    }
+
     private record MarketDataSource(
             StockQueryPort stocks,
             CandleQueryPort candles,
