@@ -362,12 +362,19 @@ def _confidence_tiers(pooled: dict, data: Path) -> pd.DataFrame:
             sub = d[d["확신도"] >= d["확신도"].quantile(q)]
             if len(sub) < 30:
                 continue
+            # 대표 지표는 **균형정확도**다. 라벨이 한쪽으로 쏠려 있으면 단순
+            # 적중률은 기준선이 50%가 아니라서, 구간끼리 견줄 때 쏠림 변화를
+            # 실력 변화로 잘못 읽는다. 클래스별 재현율을 따로 재서 평균한다.
+            per = [float((sub.loc[sub["실제"] == c, "예측"] == c).mean())
+                   for c in sorted(sub["실제"].unique())]
+            b = float(np.mean(per))
             p = float(sub["적중"].mean())
-            se = float(np.sqrt(max(p * (1 - p), 1e-9) / len(sub)))
+            se = float(np.sqrt(max(b * (1 - b), 1e-9) / len(sub)))
             rows.append({"타깃": tgt, "구간": name, "건수": len(sub),
-                         "적중률": round(p * 100, 2),
-                         "신뢰하한": round((p - 1.96 * se) * 100, 2),
-                         "신뢰상한": round((p + 1.96 * se) * 100, 2)})
+                         "균형정확도": round(b * 100, 2),
+                         "신뢰하한": round((b - 1.96 * se) * 100, 2),
+                         "신뢰상한": round((b + 1.96 * se) * 100, 2),
+                         "적중률": round(p * 100, 2)})
     out = pd.DataFrame(rows)
     if not out.empty:
         out.to_csv(data / "confidence_tiers.csv", index=False,

@@ -149,10 +149,14 @@ def _sec_headline(fc: dict) -> str:
     rows = _tiers()
     best = rows[-1] if rows else None
 
+    # 전체 구간은 표에서 뺀다 — 화면에 실제로 나가는 건 확신이 선 예측이다.
+    rows = [r for r in rows if r.get("구간") != "전체"]
+    best = rows[-1] if rows else None
+
     kpi = []
     if best:
-        kpi.append((f"{float(best['적중률']):.2f}%",
-                    f"변동성 적중률 (확신도 {best['구간']})", "good"))
+        kpi.append((f"{float(best['균형정확도']):.2f}%",
+                    f"변동성 균형정확도 (확신도 {best['구간']})", "good"))
     kpi.append(("3.0배", "이상감지 PR-AUC (규칙 기준선 대비)", "good"))
     kpi.append(("6,228종목", "모델 하나로 대응하는 범위", "good"))
     kpi.append(("167ms", "조회 지연 (조회 시점에 학습하지 않는다)", "good"))
@@ -161,9 +165,11 @@ def _sec_headline(fc: dict) -> str:
 
     if rows:
         p.append(_table(rows, "확신할 때만 보면 — 변동성 예측",
-                        ["구간", "적중률", "신뢰하한", "신뢰상한", "건수"]))
+                        ["구간", "균형정확도", "신뢰하한", "신뢰상한", "건수"]))
+        p.append(_img("03_forecast/figures/11_confidence_tiers.png",
+                      "확신도 구간별 균형정확도 (95% 신뢰구간)"))
         p.append(
-            '<div class="ok"><b>확신이 클수록 잘 맞는다.</b> 고르는 규칙은 '
+            '<div class="ok"><b>확신이 클수록 정확해진다.</b> 고르는 규칙은 '
             "미리 정해 둔 하나다 — <code>|상승확률 − 임계값|</code> 이 큰 순. "
             "종목을 보고 고르지 않으므로 어느 종목에나 똑같이 적용된다. "
             "트레이딩 도구는 매일 모든 종목에 알림을 걸지 않고 확신이 설 때만 "

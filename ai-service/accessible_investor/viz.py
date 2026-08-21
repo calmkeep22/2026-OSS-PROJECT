@@ -56,6 +56,58 @@ def _save(fig, path: Path, verbose: bool = True) -> Path:
     return path
 
 
+def confidence_tiers(tiers: pd.DataFrame, out: Path,
+                     target: str = "변동성", verbose: bool = True) -> Path:
+    """
+    **확신이 클수록 정확해진다** — 이 관계를 한 장으로 보인다.
+
+    트레이딩 도구는 매일 모든 종목에 알림을 걸지 않고 확신이 설 때만 말을
+    건다. 그러니 화면에 실제로 나가는 성능은 전체 평균이 아니라 **위쪽
+    구간**이다. 이 그림은 구간을 좁힐수록 균형정확도가 어떻게 올라가는지를
+    95% 신뢰구간과 함께 보여 준다.
+
+    기준선 50%를 같이 긋는다. 균형정확도는 라벨이 얼마나 쏠려 있든 무작위가
+    정확히 50%가 되는 척도라, 그 선을 넘는 폭이 그대로 실력이다.
+    """
+    plt = setup()
+    d = tiers[tiers["타깃"] == target].reset_index(drop=True)
+    if d.empty:
+        raise ValueError(f"{target} 구간 자료가 없습니다.")
+
+    x = range(len(d))
+    y = d["균형정확도"].to_numpy(dtype=float)
+    lo = d["신뢰하한"].to_numpy(dtype=float)
+    hi = d["신뢰상한"].to_numpy(dtype=float)
+
+    fig, ax = plt.subplots(figsize=(8.4, 4.8))
+    ax.axhline(50, color="#a3122a", lw=1.3, ls="--", zorder=1)
+    # 막대 사이 빈칸에 놓는다. 막대 위에 올리면 글씨가 묻힌다.
+    ax.text(len(d) - 1.5, 50.4, "무작위 50%", color="#a3122a",
+            fontsize=9, ha="center", va="bottom", zorder=4)
+
+    # 좁힐수록 진해진다 — 눈으로도 "위쪽 구간"이라는 게 읽히게
+    shades = ["#b9c6d6", "#7fa0c4", "#3f74ad", "#0b5cad"][-len(d):]
+    ax.bar(x, y, width=0.56, color=shades, zorder=2)
+    ax.errorbar(x, y, yerr=[y - lo, hi - y], fmt="none",
+                ecolor="#16181d", elinewidth=1.3, capsize=6, zorder=3)
+
+    for i, v in enumerate(y):
+        ax.text(i, hi[i] + 0.7, f"{v:.2f}%", ha="center",
+                fontsize=11.5, fontweight="bold", color="#16181d")
+
+    ax.set_xticks(list(x))
+    # 하한과 건수는 막대 위에 얹지 않고 축 아래 이름표에 함께 적는다.
+    ax.set_xticklabels(
+        [f"{g}\n하한 {l:.1f}% · {int(n):,}건"
+         for g, l, n in zip(d["구간"], lo, d["건수"])], fontsize=10)
+    ax.set_ylim(46, max(hi.max() + 4, 68))
+    ax.set_ylabel("균형정확도 (%)", labelpad=8)
+    ax.set_xlabel("확신도 구간 — 오른쪽으로 갈수록 모델이 확신한 예측만 남는다")
+    ax.set_title(f"확신할수록 정확해진다 — 다음날 {target} 예측",
+                 fontsize=12.5, fontweight="bold")
+    return _save(fig, out, verbose)
+
+
 # ==========================================================================
 # 01 예측
 # ==========================================================================
