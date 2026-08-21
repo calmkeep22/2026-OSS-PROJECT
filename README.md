@@ -18,6 +18,10 @@
 ## 모듈 구조
 
 ```text
+ai-service
+  AI 파트 (파이썬). 이상감지 · 차트 유사도 · 다음날 예측
+  연동은 ai-service/INTEGRATION.md, 결과는 ai-service/results/index.html
+
 apps/desktop-javafx
   JavaFX 화면과 DesktopServices 조립 루트
 

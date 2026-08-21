@@ -68,6 +68,9 @@ def test_future_rows_do_not_change_predictions():
     after = corrupt.index > first_day
     rng = np.random.default_rng(0)
     num = list(corrupt.select_dtypes("number").columns)
+    # 거래량처럼 정수인 열에 실수 난수를 넣는다. pandas 2.x 는 조용히 실수로
+    # 올려 줬지만 3.0 부터는 TypeError 를 내므로 먼저 명시적으로 올린다.
+    corrupt[num] = corrupt[num].astype("float64")
     block = pd.DataFrame(rng.normal(size=(int(after.sum()), len(num))) * 100,
                          index=corrupt.index[after], columns=num)
     block = block.where(corrupt.loc[after, num].notna())

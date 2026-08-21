@@ -254,6 +254,36 @@ def _news_lean(df: pd.DataFrame, with_news: bool) -> float | None:
     return round(v, 4) if np.isfinite(v) else None
 
 
+def _significance(mdl: dict, market: str, how: str) -> dict:
+    """
+    **그 시장에서** 이 타깃이 검증을 통과했는가.
+
+    ⚠️ 전체 수치 하나로 답하면 미국 종목에 거짓말을 하게 된다.
+    변동성 전체는 53.23%로 유의미하지만, 갈라 보면 다르다(실측).
+
+        국내  54.79%  [51.17, 58.37]  유의미      15/20종목
+        미국  51.91%  [48.16, 55.77]  **미검증**  11/18종목
+
+    전체 값은 국내가 끌어올린 것이다. 학습 풀이 88% 국내(153종목 중 134)라
+    그럴 수 있고, 미국 시장이 더 효율적이라 그럴 수도 있다. 어느 쪽이든
+    **NVDA 조회에 "유의미"를 달아 보내면 안 된다.**
+
+    시장별 값이 없으면(옛 모델 파일) 전체 값으로 물러선다.
+    """
+    key = "정밀_유의미" if how == "종목별학습" else "유의미"
+    overall = bool(mdl["meta"].get(key, False))
+    bym = (mdl["meta"].get("시장별") or {}).get(market)
+    if not bym:
+        return {"유의미": overall, "유의미근거": "전체"}
+    return {
+        "유의미": bool(bym["유의미"]),
+        "유의미근거": f"{market} 시장 {bym['평가건수']}건",
+        "검증_균형정확도": bym["균형정확도"],
+        "검증_신뢰구간": bym["신뢰구간"],
+        "검증_50%초과종목": bym["50%초과종목"],
+    }
+
+
 def _threshold_adjusted(p: float, thr: float) -> float:
     """
     **기준선을 50%로 옮긴** 확률.
@@ -622,12 +652,7 @@ def predict(code: str, bars: Any = None, *, target: str = "변동성",
         "방식": how,
         "학습표본": out.get("학습표본", mdl["meta"].get("학습행")),
         "모델": mdl["kind"], "모델버전": mdl["version"],
-        # ⚠️ **답을 낸 방식의** 유의성을 실어야 한다.
-        # 정밀 모드로 답해 놓고 파운데이션의 판정을 붙이면 거짓말이 된다.
-        # 지금은 두 방식이 같은 판정(변동성 유의미 · 방향 미검증)이라 값이
-        # 같지만, 재측정에서 갈리는 순간 조용히 틀려질 자리다.
-        "유의미": bool(mdl["meta"].get(
-            "정밀_유의미" if how == "종목별학습" else "유의미", False)),
+        **_significance(mdl, meta["market"], how),
         "봉출처": "외부공급" if bars is not None else "자체조회",
         "소요ms": round((time.time() - t0) * 1000, 1),
     }
@@ -1115,6 +1140,9 @@ def health(check_index: bool = True) -> dict:
     네트워크에서 받는데, 못 받아도 예측은 답을 낸다 — 시장맥락 피처 8개가
     조용히 결측이 될 뿐이다. 그 상태를 모르고 운영하면 32개 중 8개가 빠진
     모델을 정상이라고 믿게 된다.
+
+    `check_index=False` 는 네트워크를 건드리지 않는 빠른 점검이다. 이때도
+    `전체정상` 은 항상 들어 있고, **파일만** 보고 판정한다.
     """
     from . import forecast as _FC
     from . import pooled as PL
@@ -1128,6 +1156,10 @@ def health(check_index: bool = True) -> dict:
         "예측모델": {t: PL.model_path(t).is_file()
                   for t in ("변동성", "방향")},
     }
+    files_ok = bool(
+        out["레지스트리"] and out["참조패널_KR"] and out["참조패널_US"]
+        and out["위험도기준분포"] and all(out["예측모델"].values()))
+
     if check_index:
         idx = {}
         for ix in _FC.INDICES:
@@ -1136,8 +1168,10 @@ def health(check_index: bool = True) -> dict:
             except Exception as e:
                 idx[ix] = f"{type(e).__name__}"
         out["지수"] = idx
-        out["전체정상"] = bool(
-            out["레지스트리"] and out["참조패널_KR"] and out["참조패널_US"]
-            and out["위험도기준분포"] and all(out["예측모델"].values())
-            and all(v is True for v in idx.values()))
+        out["전체정상"] = files_ok and all(v is True for v in idx.values())
+    else:
+        # 지수 점검을 건너뛰어도 판정은 반드시 실어 보낸다. 빼 두면 백엔드의
+        # `r["전체정상"]` 이 KeyError 로 죽거나 `.get()` 이 None 을 돌려주고,
+        # 그 None 을 거짓으로 읽어 **멀쩡한 기동을 실패로 본다.**
+        out["전체정상"] = files_ok
     return out

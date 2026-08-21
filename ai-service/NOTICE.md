@@ -99,9 +99,16 @@ gated 저장소는 접근을 통제하려고 게이트를 둔 것이고, 우회 
 
 Apache 2.0 / BSD / MIT 계열이며 재배포에 제약이 없다.
 
-`numpy` `pandas` `scipy` `scikit-learn` `matplotlib` `pyarrow`
-`torch` `transformers` `onnx` `onnxruntime`
-`stumpy` `pyod` `ruptures` `statsmodels` `dtaidistance` `requests`
+**서비스 실행에 필요한 것** (`requirements.txt`)
+
+`numpy` `pandas` `scipy` `scikit-learn` `joblib` `pyarrow`
+`finance-datareader` `yfinance` `requests`
+
+**재학습·재측정·검사에만 쓰는 것** (`requirements-dev.txt`)
+
+`pytest` `matplotlib` `seaborn` `tqdm` `pykrx`
+`stumpy` `pyod` `ruptures` `statsmodels` `dtaidistance`
+`torch` `transformers`
 
 ---
 

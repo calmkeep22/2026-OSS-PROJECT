@@ -368,13 +368,30 @@ def test_unknown_symbol_raises():
     print("  [12] 없는 종목 → UnknownSymbol")
 
 
+def test_health_always_reports_verdict():
+    """
+    `check_index=False` 는 네트워크를 건드리지 않는 빠른 기동 점검이다.
+    예전에는 이때 `전체정상` 자체가 빠져서, 백엔드가 `.get("전체정상")` 으로
+    받으면 None → 거짓으로 읽혀 **멀쩡한 기동을 실패로 봤다.**
+    """
+    for check in (False, True):
+        h = SV.health(check_index=check)
+        assert "전체정상" in h, f"check_index={check} 인데 판정이 없다"
+        assert isinstance(h["전체정상"], bool), \
+            f"check_index={check}: {type(h['전체정상'])} 가 왔다"
+
+    빠름 = SV.health(check_index=False)
+    assert 빠름["전체정상"] is True, f"배포 파일이 모자란다: {빠름}"
+    assert "지수" not in 빠름, "네트워크를 건드리지 않기로 했는데 지수를 봤다"
+
+
 TESTS = [test_registry_covers_four_indices, test_kosdaq_global_not_dropped,
          test_bars_normalization_is_liberal, test_supplied_bars_are_actually_used,
          test_short_history_degrades_not_fails, test_similar_excludes_itself,
          test_feature_order_is_pinned, test_cache_expires_at_market_close,
          test_brief_survives_partial_failure,
          test_class_share_tickers_resolve, test_fetch_failure_is_typed,
-         test_unknown_symbol_raises]
+         test_unknown_symbol_raises, test_health_always_reports_verdict]
 
 
 if __name__ == "__main__":

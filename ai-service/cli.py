@@ -150,12 +150,6 @@ def cmd_index(args):
     R.rebuild_index()
 
 
-def cmd_package(args):
-    from accessible_investor import package as PK
-
-    PK.run()
-
-
 def cmd_universe(args):
     from accessible_investor import universe as U
 
@@ -545,8 +539,6 @@ def main():
     p = sub.add_parser("index", help="results/index.html 만 다시 만들기")
     p.set_defaults(fn=cmd_index)
 
-    p = sub.add_parser("package", help="results/ README·업로드 목록 갱신")
-    p.set_defaults(fn=cmd_package)
 
     p = sub.add_parser("universe", help="평가 대상 종목 목록")
     p.add_argument("--rebuild", action="store_true", help="다시 뽑기")

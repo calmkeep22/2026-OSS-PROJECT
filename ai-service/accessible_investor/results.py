@@ -41,6 +41,35 @@ def _names() -> list[str]:
     return [e["label"] for e in all_entries()]
 
 
+# 종목별 예시 그림을 몇 개나 남길 것인가
+# ======================================
+# ⚠️ 전 종목을 다 그리면 **거의 같은 그림 37장이 5.2MB**를 차지한다.
+# 이상 신호 타임라인은 종목만 바뀌고 형식이 같아서, 37장을 봐도 3장을 본
+# 것보다 알게 되는 것이 없다. 저장소가 팀 공용이라 그 무게가 모든 팀원의
+# clone 에 얹힌다.
+#
+# **표는 전 종목을 그대로 싣는다** — 근거는 표에 있고, 그림은 "어떻게 생겼나"를
+# 한 번 보여 주는 역할이다. 그래서 그림만 줄인다.
+#
+# 고르는 기준은 **서로 다른 성격**이다. 같은 대형주 셋을 고르면 3장이나
+# 그릴 이유가 없다.
+DEMO_CODES = ["005930",   # 삼성전자   — 코스피 대형, 뉴스 많음
+              "196170",   # 알테오젠   — 코스닥, 변동성 큼
+              "NVDA"]     # 엔비디아   — 미국, 다른 시장·통화
+
+
+def _demo_names() -> list[str]:
+    """예시 그림을 그릴 대표 종목. 유니버스에 없으면 앞에서부터 채운다."""
+    by_code = {e["code"]: e["label"] for e in all_entries()}
+    out = [by_code[c] for c in DEMO_CODES if c in by_code]
+    for e in all_entries():                     # 모자라면 채운다
+        if len(out) >= len(DEMO_CODES):
+            break
+        if e["label"] not in out:
+            out.append(e["label"])
+    return out
+
+
 def _dirs(part: str) -> tuple[Path, Path]:
     d = ROOT / part
     (d / "data").mkdir(parents=True, exist_ok=True)
@@ -311,6 +340,41 @@ def _target_row(target: str, wf: pd.DataFrame, timing: dict,
 # --------------------------------------------------------------------------
 # 파운데이션(풀드) 모델 vs 종목별 재학습
 # --------------------------------------------------------------------------
+def _confidence_tiers(pooled: dict, data: Path) -> pd.DataFrame:
+    """
+    **모델이 확신할 때만 본다** — 그때 적중률이 어떻게 되는가.
+
+    트레이딩 도구는 매일 모든 종목에 알림을 걸지 않는다. 확신이 설 때만
+    말을 건다. 그래서 "전체 평균"보다 **"알림을 걸 만한 것만 골랐을 때"**
+    가 실제 화면에 나가는 성능에 가깝다.
+
+    고르는 규칙은 미리 정해 둔 하나뿐이다 — `|상승확률 − 임계값|` 이 큰 순.
+    종목을 보고 고르지 않으므로 어느 종목에나 같은 규칙이 적용된다.
+    """
+    rows = []
+    for tgt, d in pooled.items():
+        if not {"상승확률", "임계값", "적중"} <= set(d.columns):
+            continue
+        d = d.copy()
+        d["확신도"] = (d["상승확률"] - d["임계값"]).abs()
+        for q, name in ((0.0, "전체"), (0.5, "상위 50%"),
+                        (0.7, "상위 30%"), (0.8, "상위 20%")):
+            sub = d[d["확신도"] >= d["확신도"].quantile(q)]
+            if len(sub) < 30:
+                continue
+            p = float(sub["적중"].mean())
+            se = float(np.sqrt(max(p * (1 - p), 1e-9) / len(sub)))
+            rows.append({"타깃": tgt, "구간": name, "건수": len(sub),
+                         "적중률": round(p * 100, 2),
+                         "신뢰하한": round((p - 1.96 * se) * 100, 2),
+                         "신뢰상한": round((p + 1.96 * se) * 100, 2)})
+    out = pd.DataFrame(rows)
+    if not out.empty:
+        out.to_csv(data / "confidence_tiers.csv", index=False,
+                   encoding="utf-8-sig")
+    return out
+
+
 def run_pooled_eval(days: int = FC.REPORT_DAYS, stack_path: str | None = None,
                     refit_every: int = 1, targets=("변동성", "방향"),
                     holdout: bool = False, verbose: bool = True) -> dict:
@@ -431,6 +495,8 @@ def run_pooled_eval(days: int = FC.REPORT_DAYS, stack_path: str | None = None,
     for t, s in keep_pooled.items():
         s.to_csv(data / f"pooled_walkforward_{t}.csv", index=False,
                  encoding="utf-8-sig")
+
+    _confidence_tiers(keep_pooled, data)
 
     # ── 배포 구조를 정한다 ─────────────────────────────────────────────
     # 정확도만 보고 정하면 안 된다. 종목별이 이겨도 **건당 7.0초**이고
@@ -748,15 +814,17 @@ def run_anomaly(verbose: bool = True) -> dict:
 
     # 종목별 이상 신호 타임라인. 미국 종목도 같은 규칙으로 그린다.
     rows = []
+    demo = set(_demo_names())          # 그림은 대표 종목만 (DEMO_CODES 주석)
     for name in _names():
         try:
             px = FC.load_prices(name).tail(250)
         except Exception:
             continue
         z = F.robust_z(px["close"].pct_change(), window=60, min_periods=20)
-        V.anomaly_timeline(px, z, name,
-                           figs / f"03_timeline_{entry(name)['code']}.png",
-                           verbose=verbose)
+        if name in demo:
+            V.anomaly_timeline(px, z, name,
+                               figs / f"03_timeline_{entry(name)['code']}.png",
+                               verbose=verbose)
         hit = z.abs() > 2.5
         rows.append({"종목": name, "구간일수": len(px),
                      "이상신호": int(hit.sum()),
@@ -848,7 +916,8 @@ def run_similarity(windows=None, top_k: int = 4, forward: int = 20,
 
     if verbose:
         print("  그림 저장")
-    for label, code in kr[:6]:
+    demo = set(_demo_names())          # 그림은 대표 종목만
+    for label, code in [(l, c) for l, c in kr if l in demo][:3]:
         per = out.get(label, {})
         if not per:
             continue
