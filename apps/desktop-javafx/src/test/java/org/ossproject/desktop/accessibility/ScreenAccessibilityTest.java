@@ -9,8 +9,11 @@ import org.ossproject.desktop.orderbook.OrderBookLadderView;
 import org.ossproject.application.port.MarketApplicationPort;
 import org.ossproject.application.usecase.MarketApplicationService;
 import org.ossproject.desktop.view.screen.ScannerScreenView;
+import org.ossproject.desktop.view.screen.OrderFormView;
 import org.ossproject.desktop.view.screen.SearchScreenView;
 import org.ossproject.desktop.view.screen.SettingsScreenView;
+import org.ossproject.desktop.view.screen.StockChartPanel;
+import org.ossproject.desktop.view.screen.StockScreenView;
 import org.ossproject.desktop.view.screen.WatchlistScreenView;
 import org.ossproject.desktop.viewmodel.DesktopSession;
 import org.ossproject.desktop.viewmodel.ScannerViewModel;
@@ -291,5 +294,83 @@ class ScreenAccessibilityTest {
             }
         }
         return null;
+    }
+
+    /**
+     * 주문 폼은 되돌릴 수 없는 동작 직전의 화면이다.
+     *
+     * <p>여기서 조작 요소 이름이 빠지면 스크린리더 사용자는 무엇을 고르고 있는지 모른 채
+     * 주문을 낸다.
+     */
+    @Test
+    @DisplayName("주문 폼의 모든 조작 요소에 이름이 있다")
+    void orderFormNamesEverythingFocusable() {
+        JavaFxToolkit.onFxThread(() -> {
+            org.ossproject.desktop.navigation.OrderDraft draft =
+                    new org.ossproject.desktop.navigation.OrderDraft("005930", "삼성전자",
+                            org.ossproject.finance.model.OrderSide.BUY,
+                            org.ossproject.finance.model.OrderType.LIMIT, 1, "70000",
+                            org.ossproject.desktop.navigation.Screen.DASHBOARD);
+            org.ossproject.desktop.viewmodel.OrderDraftViewModel viewModel =
+                    new org.ossproject.desktop.viewmodel.OrderDraftViewModel(draft,
+                            java.util.Optional::empty);
+            OrderFormView view = new OrderFormView(viewModel, true,
+                    java.math.BigDecimal::toPlainString, order -> { }, text -> { }, order -> { });
+
+            assertNoMissingNames("주문 폼", view.create());
+        });
+    }
+
+    /**
+     * 그래프는 스크린리더가 읽을 수 없다. 표가 곁들이가 아니라 같은 값을 전하는 다른
+     * 길이라, 표까지 포함해 이름이 빠진 곳이 없어야 한다.
+     */
+    @Test
+    @DisplayName("차트 칸의 모든 조작 요소에 이름이 있다")
+    void stockChartPanelNamesEverythingFocusable() {
+        JavaFxToolkit.onFxThread(() -> {
+            StockChartPanel panel = new StockChartPanel("삼성전자",
+                    java.math.BigDecimal::toPlainString,
+                    range -> java.util.concurrent.CompletableFuture.completedFuture(points()),
+                    (chart, table) -> { }, text -> { }, () -> { }, () -> { });
+
+            assertNoMissingNames("차트 칸", panel.create(points()));
+        });
+    }
+
+    /** 종목 상세는 차트와 호가와 체결이 모이는 자리라 조작 요소가 가장 많다. */
+    @Test
+    @DisplayName("종목 상세의 모든 조작 요소에 이름이 있다")
+    void stockScreenNamesEverythingFocusable() {
+        JavaFxToolkit.onFxThread(() -> {
+            StockScreenView view = new StockScreenView(detail(), "KRX",
+                    java.math.BigDecimal::toPlainString,
+                    new javafx.scene.control.Button("관심종목 추가"),
+                    () -> { }, () -> { }, (text, channel) -> { });
+
+            assertNoMissingNames("종목 상세", view.create(
+                    new javafx.scene.control.Label("차트"),
+                    new javafx.scene.control.Label("호가"),
+                    new javafx.scene.control.Label("체결")));
+        });
+    }
+
+    private static java.util.List<org.ossproject.finance.model.PricePoint> points() {
+        java.util.List<org.ossproject.finance.model.PricePoint> points = new java.util.ArrayList<>();
+        for (int day = 1; day <= 30; day++) {
+            java.math.BigDecimal close = java.math.BigDecimal.valueOf(70000 + day * 100L);
+            points.add(new org.ossproject.finance.model.PricePoint(
+                    java.time.LocalDate.of(2026, 8, 1).plusDays(day - 1),
+                    close, close, close, close, 1000L));
+        }
+        return points;
+    }
+
+    private static org.ossproject.finance.model.StockDetail detail() {
+        return new org.ossproject.finance.model.StockDetail("005930", "삼성전자",
+                new java.math.BigDecimal("70000"), new java.math.BigDecimal("500"),
+                new java.math.BigDecimal("0.7"), org.ossproject.finance.model.PriceDirection.UP,
+                new java.math.BigDecimal("69500"), new java.math.BigDecimal("70500"),
+                new java.math.BigDecimal("69000"), 1_000_000L, java.time.Instant.EPOCH);
     }
 }

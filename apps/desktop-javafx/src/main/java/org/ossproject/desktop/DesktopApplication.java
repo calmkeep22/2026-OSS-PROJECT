@@ -48,11 +48,15 @@ import org.ossproject.desktop.viewmodel.AiInsightViewModel;
 import org.ossproject.desktop.view.StockPicker;
 import org.ossproject.desktop.view.WatchlistToggle;
 import org.ossproject.desktop.view.screen.NewsScreenView;
+import org.ossproject.desktop.view.screen.OrderFormView;
+import org.ossproject.desktop.view.screen.StockChartPanel;
+import org.ossproject.desktop.view.screen.StockScreenView;
 import org.ossproject.desktop.view.screen.SettingsScreenView;
 import org.ossproject.desktop.view.screen.SimilarScreenView;
 import org.ossproject.desktop.view.screen.StockComparisonDialog;
 import org.ossproject.ai.SimilarStock;
 import org.ossproject.desktop.viewmodel.NewsViewModel;
+import org.ossproject.desktop.viewmodel.OrderDraftViewModel;
 import org.ossproject.desktop.ai.AiServiceProcess;
 import org.ossproject.desktop.chart.AccessibleChartController;
 import org.ossproject.desktop.chart.AccessibleChartView;
@@ -1518,15 +1522,17 @@ public final class DesktopApplication extends Application {
         return body;
     }
 
+    /**
+     * 종목 상세 화면.
+     *
+     * <p>여기서는 조립만 한다. 차트와 호가와 체결은 각자 클래스가 있고, 이 메서드는 그것을
+     * 만들어 넘긴다.
+     */
     private VBox createStockScreen() {
         StockDetail detail = stockDetailViewModel.detail();
-        var selection = stockDetailViewModel.selection();
+        StockSelection selection = stockDetailViewModel.selection();
         pendingOrderPrice = stockDetailViewModel.plainOrderPrice();
-        Label title = heading(detail.name());
-        title.getStyleClass().add("stock-detail-title");
-        Label symbol = new Label(detail.symbol() + " · " + selection.exchange());
-        symbol.getStyleClass().addAll("mode-badge", "stock-detail-symbol");
-        // 담긴 뒤에도 "추가" 라고 적혀 있으면 눌린 것인지 알 수 없다. 단추가 상태를 든다.
+
         Button favorite = new WatchlistToggle(session.watchlistItems(), detail.symbol(),
                 selection.exchange(), detail.name(),
                 () -> addToWatchlistBySymbol(detail.symbol(), detail.name()),
@@ -1535,118 +1541,25 @@ public final class DesktopApplication extends Application {
                     scheduleStateSave();
                 },
                 status::setText).button();
-        favorite.getStyleClass().add("stock-compact-action");
-        Button buy = primaryButton("매수", () -> openOrder(OrderSide.BUY));
-        buy.getStyleClass().add("stock-compact-action");
-        Button sell = new Button("매도"); sell.getStyleClass().addAll("sell-button", "stock-compact-action"); sell.setOnAction(event -> openOrder(OrderSide.SELL));
-        Region titleSpacer = new Region(); HBox.setHgrow(titleSpacer, Priority.ALWAYS);
-        HBox titleRow = new HBox(8, title, symbol, titleSpacer, favorite, sell, buy); titleRow.setAlignment(Pos.CENTER_LEFT);
-        String direction = detail.direction() == PriceDirection.UP ? "상승" : detail.direction() == PriceDirection.DOWN ? "하락" : "보합";
-        Label price = new Label(stockDetailViewModel.formatPrice(detail.currentPrice()) + " · " + direction + " "
-                + stockDetailViewModel.formatPrice(detail.changeAmount().abs()) + " · " + detail.changeRate().abs() + "%");
-        price.getStyleClass().add("stock-price");
-        Button listen = new Button("최신 정보 듣기");
-        listen.getStyleClass().add("stock-compact-action");
-        listen.setOnAction(event -> requestSpeech(detail.name() + " 현재가 "
-                + stockDetailViewModel.formatPrice(detail.currentPrice())
-                + ", 전일 대비 " + direction + " " + detail.changeRate().abs() + "퍼센트입니다.",
-                "stock-detail-" + detail.symbol()));
 
-        VBox openMetric = miniMetric("시가", stockDetailViewModel.formatPrice(detail.open()));
-        VBox highMetric = miniMetric("고가", stockDetailViewModel.formatPrice(detail.high()));
-        VBox lowMetric = miniMetric("저가", stockDetailViewModel.formatPrice(detail.low()));
-        // 시가총액과 외국인 소진률은 ka10001 이 함께 주지만 아직 도메인 모델에 담지
-        // 않았다. 값을 지어내지 않고 항목 자체를 빼 둔다.
-        VBox volumeMetric = miniMetric("거래량", String.format("%,d", detail.volume()));
-        List.of(openMetric, highMetric, lowMetric, volumeMetric).forEach(metric -> metric.setPrefWidth(108));
-        FlowPane quoteRow = wrappingRow(8, price, listen, openMetric, highMetric, lowMetric, volumeMetric);
-        quoteRow.getStyleClass().add("stock-quote-row");
-
-        HBox periods = new HBox(5);
-        periods.setAlignment(Pos.CENTER_LEFT);
-        periods.getStyleClass().add("stock-periods");
-        ToggleGroup periodGroup = new ToggleGroup();
-        Map<ToggleButton, StockDetailViewModel.ChartRange> periodButtons = new java.util.LinkedHashMap<>();
-        for (StockDetailViewModel.ChartRange range : StockDetailViewModel.ChartRange.values()) {
-            ToggleButton button = new ToggleButton(range.label()); button.setToggleGroup(periodGroup);
-            button.getStyleClass().add("stock-chart-toggle");
-            if (range == StockDetailViewModel.ChartRange.DAY) button.setSelected(true);
-            periodButtons.put(button, range); periods.getChildren().add(button);
-        }
-
-        List<PricePoint> chartPoints = stockDetailViewModel.history(StockDetailViewModel.ChartRange.DAY);
-        CandlestickChartView candleChart = new CandlestickChartView(chartPoints);
-        CheckBox movingAverage = new CheckBox("이동평균"); movingAverage.setSelected(true);
-        CheckBox bollinger = new CheckBox("Bollinger Band");
-        CheckBox rsi = new CheckBox("RSI");
-        CheckBox macd = new CheckBox("MACD");
-        movingAverage.selectedProperty().addListener((obs, old, value) -> candleChart.setShowMovingAverages(value));
-        bollinger.selectedProperty().addListener((obs, old, value) -> candleChart.setShowBollinger(value));
-        rsi.selectedProperty().addListener((obs, old, value) -> candleChart.setShowRsi(value));
-        macd.selectedProperty().addListener((obs, old, value) -> candleChart.setShowMacd(value));
-        HBox indicators = new HBox(8, movingAverage, bollinger, rsi, macd);
-        indicators.setAlignment(Pos.CENTER_LEFT);
-        indicators.getStyleClass().add("stock-indicators");
-
-        TableView<PricePoint> history = new TableView<>(FXCollections.observableArrayList(chartPoints));
-        history.setAccessibleText(detail.name() + " 최근 가격 흐름 표");
-        history.setAccessibleHelp("차트와 동일한 날짜별 시가, 고가, 저가, 종가와 거래량입니다.");
-        history.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
-        history.getColumns().add(priceColumn("날짜", point -> point.date().toString()));
-        history.getColumns().add(priceColumn("시가", point -> stockDetailViewModel.formatPrice(point.open())));
-        history.getColumns().add(priceColumn("고가", point -> stockDetailViewModel.formatPrice(point.high())));
-        history.getColumns().add(priceColumn("저가", point -> stockDetailViewModel.formatPrice(point.low())));
-        history.getColumns().add(priceColumn("종가", point -> stockDetailViewModel.formatPrice(point.close())));
-        history.getColumns().add(priceColumn("거래량", point -> Long.toString(point.volume())));
-        history.setPrefHeight(350);
-        periodButtons.forEach((button, range) -> button.setOnAction(event -> {
-            button.setDisable(true);
-            status.setText(detail.name() + " " + range.label() + " 차트를 조회하고 있습니다.");
-            stockDetailViewModel.loadHistory(range).whenComplete((updated, failure) -> {
-                button.setDisable(false);
-                if (failure != null || updated.isEmpty()) {
-                    status.setText(detail.name() + " 차트를 조회하지 못했습니다.");
-                    play(SoundCue.ERROR);
-                } else {
-                    candleChart.setPoints(updated);
-                    history.getItems().setAll(updated);
-                    startLiveChart(candleChart, history);
-                    status.setText(detail.name() + " " + range.label() + " 차트로 변경했습니다.");
-                }
-            });
-        }));
-        Button soundChart = new Button("이 차트를 소리로 탐색");
-        soundChart.getStyleClass().add("stock-compact-action");
-        soundChart.setOnAction(event -> navigate(Screen.RADIO));
-        FlowPane chartToolbar = new FlowPane(10, 6, periods, indicators, soundChart);
-        chartToolbar.setAlignment(Pos.CENTER_LEFT);
-        chartToolbar.setPrefWrapLength(1060);
-        chartToolbar.getStyleClass().add("stock-chart-toolbar");
-        TabPane chartRepresentations = new TabPane(tab("그래프", candleChart), tab("접근 가능한 표", history));
-        chartRepresentations.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
-        chartRepresentations.setMinHeight(0); chartRepresentations.setPrefHeight(440);
-        VBox chart = new VBox(7, chartToolbar, chartRepresentations); chart.setPadding(new Insets(6));
-        chart.setMinHeight(0); VBox.setVgrow(chartRepresentations, Priority.ALWAYS);
-        startLiveChart(candleChart, history);
+        StockChartPanel chartPanel = new StockChartPanel(detail.name(),
+                stockDetailViewModel::formatPrice,
+                stockDetailViewModel::loadHistory,
+                this::startLiveChart,
+                status::setText,
+                () -> play(SoundCue.ERROR),
+                () -> navigate(Screen.RADIO));
 
         // 호가와 체결은 키움 조회 뒤 실시간 스트림으로 이어 붙인다. 기업정보·거래원·
-        // 프로그램매매는 아직 실제 TR이 없으므로 완성된 기능처럼 탭을 노출하지 않는다.
-        javafx.scene.Node orderBook = createOrderBookPanel(detail.name());
-        javafx.scene.Node trades = createTradeTapePanel(detail.name());
-
-        TabPane tabs = new TabPane(tab("차트", chart), tab("호가", orderBook), tab("체결", trades));
-        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
-        tabs.setMinHeight(0); tabs.setPrefHeight(540); tabs.setMaxHeight(Double.MAX_VALUE);
-        tabs.getStyleClass().add("stock-detail-tabs");
-        VBox summary = new VBox(8, titleRow, quoteRow);
-        summary.getStyleClass().addAll("panel-card", "stock-detail-summary");
-        VBox body = new VBox(12, summary, tabs);
-        body.setPadding(new Insets(12));
-        body.setMinSize(0, 0); body.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
-        body.getStyleClass().add("screen-content");
-        body.setAccessibleText("종목 상세 " + detail.name());
-        VBox.setVgrow(tabs, Priority.ALWAYS);
-        return body;
+        // 프로그램매매는 아직 실제 TR 이 없으므로 완성된 기능처럼 탭을 노출하지 않는다.
+        return new StockScreenView(detail, selection.exchange(),
+                stockDetailViewModel::formatPrice, favorite,
+                () -> openOrder(OrderSide.BUY), () -> openOrder(OrderSide.SELL),
+                this::requestSpeech)
+                .create(chartPanel.create(
+                                stockDetailViewModel.history(StockDetailViewModel.ChartRange.DAY)),
+                        createOrderBookPanel(detail.name()),
+                        createTradeTapePanel(detail.name()));
     }
 
     private ScrollPane createMarketScreen() {
@@ -2204,10 +2117,6 @@ public final class DesktopApplication extends Application {
         return recent > 0 ? plain.substring(0, recent) : "이상 신호";
     }
 
-    private TableColumn<PricePoint, String> priceColumn(String title, java.util.function.Function<PricePoint, String> mapper) {
-        TableColumn<PricePoint, String> column = new TableColumn<>(title);
-        column.setCellValueFactory(data -> new SimpleStringProperty(mapper.apply(data.getValue()))); return column;
-    }
 
     private List<PricePoint> dailyPriceHistory(String symbol, int count) {
         return candleAdapter.getCandles(symbol, CandleInterval.DAY, count).stream()
@@ -2235,153 +2144,59 @@ public final class DesktopApplication extends Application {
         column.setCellValueFactory(data -> new SimpleStringProperty(mapper.apply(data.getValue()))); return column;
     }
 
+    /**
+     * 모의주문 폼.
+     *
+     * <p>초안과 수량 셈은 뷰모델이 맡는다. 화면 안에 두면 "10퍼센트를 눌렀을 때 몇 주인가"
+     * 를 검사할 수 없다. 주문은 되돌릴 수 없는 동작이라 그 셈이 틀리면 사용자가 의도하지
+     * 않은 수량으로 주문한다.
+     */
     private VBox createOrderForm() {
-        var selected = stockDetailViewModel.selection();
+        StockSelection selected = stockDetailViewModel.selection();
         OrderDraft draft = orderDraft == null
                 ? new OrderDraft(selected.symbol(), selected.name(), OrderSide.BUY,
-                OrderType.LIMIT, 1, pendingOrderPrice, Screen.DASHBOARD)
+                        OrderType.LIMIT, 1, pendingOrderPrice, Screen.DASHBOARD)
                 : orderDraft;
         orderDraft = draft;
-        TextField symbol = new TextField(draft.symbol()); TextField name = new TextField(draft.name());
-        symbol.setEditable(false); name.setEditable(false);
-        symbol.setAccessibleHelp("종목을 바꾸려면 종목검색에서 다른 종목을 선택해주세요.");
-        name.setAccessibleHelp(symbol.getAccessibleHelp());
-        ComboBox<OrderSide> side = new ComboBox<>(FXCollections.observableArrayList(OrderSide.values())); side.setValue(draft.side());
-        side.setConverter(new StringConverter<>() {
-            @Override public String toString(OrderSide value) { return value == null ? "" : value.displayName(); }
-            @Override public OrderSide fromString(String value) { return OrderSide.valueOf(value); }
-        });
-        ComboBox<OrderType> orderType = new ComboBox<>(FXCollections.observableArrayList(OrderType.values()));
-        orderType.setValue(draft.type());
-        orderType.setConverter(new StringConverter<>() {
-            @Override public String toString(OrderType value) { return value == null ? "" : value.displayName(); }
-            @Override public OrderType fromString(String value) { return OrderType.valueOf(value); }
-        });
-        Spinner<Integer> quantity = new Spinner<>(1, 1_000_000, draft.quantity()); quantity.setEditable(true);
-        TextField price = new TextField(draft.price());
-        price.setDisable(draft.type() == OrderType.MARKET);
-        side.valueProperty().addListener((obs, old, selectedSide) ->
-                updateOrderDraft(draft, selectedSide, orderType.getValue(), quantity.getValue(), price.getText()));
-        orderType.valueProperty().addListener((obs, old, selectedType) -> {
-            price.setDisable(selectedType == OrderType.MARKET);
-            updateOrderDraft(draft, side.getValue(), selectedType, quantity.getValue(), price.getText());
-        });
-        GridPane form = new GridPane(); form.setHgap(8); form.setVgap(6);
-        addCompactOrderField(form, 0, 0, "종목 코드", symbol);
-        addCompactOrderField(form, 2, 0, "종목명", name);
-        addCompactOrderField(form, 0, 1, "매수 / 매도", side);
-        addCompactOrderField(form, 2, 1, "주문 유형", orderType);
-        addCompactOrderField(form, 0, 2, "가격", price);
-        addCompactOrderField(form, 2, 2, "수량", quantity);
 
-        javafx.beans.property.ObjectProperty<Account> orderAccount =
-                new javafx.beans.property.SimpleObjectProperty<>();
-        Label availableAmount = new Label("모의계좌 조회 중");
-        List<Button> ratioButtons = new java.util.ArrayList<>();
-        HBox ratios = new HBox(8);
-        for (int ratio : List.of(10, 25, 50, 100)) {
-            Button button = new Button(ratio + "%");
-            button.setDisable(true);
-            button.setOnAction(event -> {
-                Account account = orderAccount.get();
-                if (account == null) return;
-                long maximum;
-                if (side.getValue() == OrderSide.SELL) {
-                    maximum = account.position(symbol.getText())
-                            .map(Position::availableQuantity).orElse(0L);
-                } else {
-                    try {
-                        BigDecimal unitPrice = orderType.getValue() == OrderType.MARKET
-                                ? stockDetailViewModel.detail().currentPrice()
-                                : new BigDecimal(price.getText().replace(",", "").trim());
-                        maximum = unitPrice.signum() <= 0 ? 0L
-                                : account.deposits().orderable().divideToIntegralValue(unitPrice).longValue();
-                    } catch (RuntimeException invalidPrice) {
-                        maximum = 0L;
-                    }
-                }
-                if (maximum < 1) {
-                    status.setText(side.getValue() == OrderSide.SELL
-                            ? "매도 가능한 보유수량이 없습니다."
-                            : "현재 가격으로 주문할 수 있는 수량이 없습니다.");
-                    return;
-                }
-                long calculated = Math.max(1L, maximum * ratio / 100L);
-                quantity.getValueFactory().setValue((int) Math.min(1_000_000L, calculated));
-            });
-            ratioButtons.add(button);
-            ratios.getChildren().add(button);
-        }
-        Label estimatedAmount = new Label();
-        Runnable updateEstimate = () -> {
-            try {
-                BigDecimal unitPrice = new BigDecimal(price.getText().replace(",", "").trim());
-                estimatedAmount.setText(stockDetailViewModel.formatPrice(unitPrice.multiply(BigDecimal.valueOf(quantity.getValue()))));
-            } catch (RuntimeException invalid) {
-                estimatedAmount.setText("가격을 확인하세요");
-            }
-        };
-        price.textProperty().addListener((obs, old, value) -> {
-            updateEstimate.run();
-            updateOrderDraft(draft, side.getValue(), orderType.getValue(), quantity.getValue(), value);
-        });
-        quantity.valueProperty().addListener((obs, old, value) -> {
-            updateEstimate.run();
-            updateOrderDraft(draft, side.getValue(), orderType.getValue(), value, price.getText());
-        });
-        updateEstimate.run();
-        VBox estimates = new VBox(4,
-                informationRow("주문 예상금액", estimatedAmount),
-                informationRow("주문 가능금액", availableAmount));
-        estimates.getStyleClass().add("estimate-box"); estimates.setPadding(new Insets(8));
-        Button preview = new Button("주문 내용 검토"); preview.getStyleClass().add("primary-button"); preview.setDefaultButton(true);
-        preview.setAccessibleHelp("주문을 제출하지 않고 재확인 창을 엽니다.");
-        preview.setOnAction(event -> {
-            if (preventDuplicateOrders) {
-                preview.setDisable(true);
-                PauseTransition unlock = new PauseTransition(Duration.millis(900));
-                unlock.setOnFinished(done -> preview.setDisable(false));
-                unlock.play();
-            }
-            previewOrder(symbol, name, side, orderType, quantity, price);
-        });
-        Label ratioLabel = new Label("주문 비율");
-        HBox ratioRow = new HBox(10, ratioLabel, ratios);
-        ratioRow.setAlignment(Pos.CENTER_LEFT);
-        VBox box = new VBox(8, sectionHeading("모의주문 준비"), form, ratioRow, estimates, preview);
-        box.getStyleClass().addAll("panel-card", "order-form-compact");
-        box.setPadding(new Insets(12));
-        box.setMaxHeight(Double.MAX_VALUE);
+        OrderDraftViewModel viewModel = new OrderDraftViewModel(draft, this::currentPriceIfKnown);
+        OrderFormView view = new OrderFormView(viewModel, preventDuplicateOrders,
+                stockDetailViewModel::formatPrice, this::previewOrder, status::setText,
+                this::rememberOrderDraft);
+        VBox form = view.create();
+
+        // 계좌 조회는 화면 스레드를 막지 않는다. 도착하면 비율 단추가 열린다.
         CompletableFuture.supplyAsync(tradingUseCase::account).whenComplete((account, failure) ->
                 Platform.runLater(() -> {
                     if (failure != null) {
-                        availableAmount.setText("계좌 조회 실패");
-                        ratioButtons.forEach(button -> button.setDisable(true));
+                        view.accountFailed();
                         return;
                     }
-                    orderAccount.set(account);
-                    availableAmount.setText(Formatters.won(account.deposits().orderable()));
-                    ratioButtons.forEach(button -> button.setDisable(false));
+                    viewModel.setAccount(account);
+                    view.accountLoaded();
                 }));
-        return box;
+        return form;
     }
 
-    private void addCompactOrderField(GridPane grid, int labelColumn, int row,
-                                      String labelText, Control control) {
-        Label label = new Label(labelText);
-        label.setLabelFor(control);
-        control.setMaxWidth(Double.MAX_VALUE);
-        grid.add(label, labelColumn, row);
-        grid.add(control, labelColumn + 1, row);
-        GridPane.setHgrow(control, Priority.ALWAYS);
+    /** 화면이 고친 초안을 앱도 든다. 주문 화면을 떠났다 돌아와도 값이 남는다. */
+    private void rememberOrderDraft(OrderDraft updated) {
+        orderDraft = updated;
+        pendingOrderPrice = updated.price();
     }
 
-    private void updateOrderDraft(OrderDraft initial, OrderSide side, OrderType type,
-                                  Integer quantity, String price) {
-        if (side == null || type == null || quantity == null || quantity <= 0
-                || price == null || price.isBlank()) return;
-        orderDraft = new OrderDraft(initial.symbol(), initial.name(), side, type, quantity, price, initial.origin());
-        pendingOrderPrice = orderDraft.price();
+    /**
+     * 지금 아는 현재가. 조회 전이거나 실패했으면 비어 있다.
+     *
+     * <p>모르면 모른다고 한다. 0 을 돌려주면 시장가 비율 단추가 "살 수 있는 수량이 없다"
+     * 가 아니라 엉뚱한 수량을 내놓는다.
+     */
+    private java.util.Optional<BigDecimal> currentPriceIfKnown() {
+        try {
+            return java.util.Optional.ofNullable(stockDetailViewModel.detail())
+                    .map(StockDetail::currentPrice);
+        } catch (RuntimeException notLoaded) {
+            return java.util.Optional.empty();
+        }
     }
 
     /**
@@ -2830,15 +2645,21 @@ public final class DesktopApplication extends Application {
 
     /** 손익 금액을 부호와 함께 표기한다. */
 
-    private void previewOrder(TextField symbol, TextField name, ComboBox<OrderSide> side,
-                              ComboBox<OrderType> orderType, Spinner<Integer> quantity, TextField price) {
+    /**
+     * 주문 재확인 창을 연다.
+     *
+     * <p>화면 컨트롤이 아니라 초안을 받는다. 컨트롤을 여섯 개 넘겨받으면 이 메서드가 폼의
+     * 생김새에 매여, 폼을 고칠 때마다 함께 고쳐야 한다.
+     */
+    private void previewOrder(OrderDraft draft) {
         try {
             BigDecimal referencePrice = stockDetailViewModel.detail().currentPrice();
-            OrderCommand request = orderType.getValue() == OrderType.MARKET
-                    ? OrderCommand.market(symbol.getText().trim(), name.getText().trim(), side.getValue(),
-                            quantity.getValue())
-                    : OrderCommand.limit(symbol.getText().trim(), name.getText().trim(), side.getValue(),
-                            quantity.getValue(), new BigDecimal(price.getText().replace(",", "").trim()));
+            OrderCommand request = draft.type() == OrderType.MARKET
+                    ? OrderCommand.market(draft.symbol(), draft.name(), draft.side(),
+                            draft.quantity())
+                    : OrderCommand.limit(draft.symbol(), draft.name(), draft.side(),
+                            draft.quantity(),
+                            new BigDecimal(draft.price().replace(",", "").trim()));
             status.setText("키움 모의계좌의 주문 가능 금액을 확인하고 있습니다.");
             CompletableFuture.supplyAsync(() -> tradingUseCase.preview(request, referencePrice))
                     .whenComplete((preview, failure) -> Platform.runLater(() -> {
