@@ -40,7 +40,9 @@ class SidebarNavigationModelTest {
 
         assertEquals(List.of(
                 Screen.SEARCH,
-                Screen.WATCHLIST
+                Screen.WATCHLIST,
+                Screen.SIMILAR,
+                Screen.NEWS
         ), model.children(Screen.NavigationGroup.MARKET_EXPLORATION));
         assertFalse(model.children(Screen.NavigationGroup.MARKET_EXPLORATION)
                 .contains(Screen.STOCK_DETAIL));

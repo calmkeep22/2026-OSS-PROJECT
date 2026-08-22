@@ -12,6 +12,8 @@ include(
     ":modules:fake-adapters",
     ":modules:broker-api",
     ":modules:kiwoom-adapter",
+    ":modules:ai-insight-api",
+    ":modules:ai-insight-http",
     ":modules:persistence-sqlite",
     ":modules:secret-store-api",
     ":modules:file-secret-store",

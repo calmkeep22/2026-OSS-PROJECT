@@ -224,6 +224,21 @@
 .state-success { -fx-background-color: #e7f7ef; -fx-border-color: #3ba272; -fx-text-fill: #075c36; }
 .state-warning { -fx-background-color: #fff6db; -fx-border-color: #d9a300; -fx-text-fill: #664d03; }
 .state-error { -fx-background-color: #fdecec; -fx-border-color: #d92d20; -fx-text-fill: #8f1d18; }
+/* 뉴스 감성 지수처럼 경고도 성공도 아닌 사실을 담는 띠. 경고색을 쓰면 무엇이 진짜
+   주의할 일인지 흐려진다. */
+.state-info { -fx-background-color: #eef4ff; -fx-border-color: #3d6aff; -fx-text-fill: #17356b; }
+/* 닮은 차트 순위. 숫자 하나라 색만으로 순위를 알리지 않고 자리와 크기로도 구분한다. */
+.rank-badge { -fx-background-color: #3d6aff; -fx-text-fill: #ffffff; -fx-font-weight: 700;
+    -fx-min-width: 26; -fx-min-height: 26; -fx-alignment: center;
+    -fx-background-radius: 13; -fx-padding: 0 6; }
+/* 챗봇과 나. 말풍선 방향 대신 배경으로 가른다 — 화면을 볼 수 없으면 방향은 안 들린다.
+   그래서 접근성 이름에도 누가 한 말인지 먼저 넣는다. */
+/* 눌러서 여는 카드. 초점 테두리를 굵게 준다 — 키보드로 다니는 사용자에게는 지금 어디에
+   있는지가 이 테두리 하나뿐이다. */
+.clickable-card:hover { -fx-border-color: #3d6aff; -fx-cursor: hand; }
+.clickable-card:focused { -fx-border-color: #3d6aff; -fx-border-width: 2; }
+.chat-bot { -fx-background-color: #f4f7ff; -fx-border-color: #c9d6ff; }
+.chat-user { -fx-background-color: #ffffff; -fx-border-color: #dfe3e8; }
 .state-preview { -fx-background-color: #ffffff; -fx-border-color: #d1d6db; -fx-border-radius: 12; -fx-background-radius: 12; -fx-padding: 18; }
 .anomaly-high { -fx-background-color: #fff7e6; -fx-border-color: #f5a623; -fx-border-width: 2; -fx-border-radius: 12; -fx-background-radius: 12; -fx-padding: 22; -fx-font-weight: 700; }
 .radio-status { -fx-background-color: #eef4ff; -fx-border-color: #3d6aff; -fx-border-width: 2; -fx-border-radius: 12; -fx-background-radius: 12; -fx-padding: 18; -fx-font-weight: 700; }
@@ -409,6 +424,7 @@
 .high-contrast .table-view, .high-contrast .list-view, .high-contrast .tab-pane,
 .high-contrast .workspace-scroll, .high-contrast .workspace-scroll > .viewport,
 .high-contrast .state-preview, .high-contrast .state-banner, .high-contrast .search-suggestion-panel,
+.high-contrast .chat-bot, .high-contrast .chat-user,
 .high-contrast .dashboard-screen, .high-contrast .dashboard-shell,
 .high-contrast .dashboard-status-card, .high-contrast .dashboard-feature-card,
 .high-contrast .settings-shell, .high-contrast .settings-tab-content,

@@ -41,6 +41,16 @@ import org.ossproject.anomaly.StreamingAnomalyConfig;
 import org.ossproject.anomaly.StreamingAnomalyDetector;
 import org.ossproject.desktop.composition.DesktopServices;
 import org.ossproject.finance.model.*;
+import org.ossproject.desktop.ai.AiInsightListPanel;
+
+import java.util.LinkedHashMap;
+import org.ossproject.desktop.viewmodel.AiInsightViewModel;
+import org.ossproject.desktop.view.screen.NewsScreenView;
+import org.ossproject.desktop.view.screen.SimilarScreenView;
+import org.ossproject.desktop.view.screen.StockComparisonDialog;
+import org.ossproject.ai.SimilarStock;
+import org.ossproject.desktop.viewmodel.NewsViewModel;
+import org.ossproject.desktop.ai.AiServiceProcess;
 import org.ossproject.desktop.chart.AccessibleChartController;
 import org.ossproject.desktop.chart.AccessibleChartView;
 import org.ossproject.desktop.chart.CandlestickChartView;
@@ -105,6 +115,22 @@ public final class DesktopApplication extends Application {
     private final SoundPort soundPort;
     private final SonificationPort sonificationPort;
     private final SecretStore secretStore;
+    private final AiInsightViewModel aiInsightViewModel;
+    /** AI 서버를 앱이 띄웠으면 그 프로세스. 사용자가 직접 띄웠거나 못 띄웠으면 null. */
+    private final NewsViewModel newsViewModel;
+    /** 지금 보고 있는 화면. 결과가 늦게 와도 그때 살아 있는 화면에만 넣는다. */
+    private SimilarScreenView similarView;
+    private NewsScreenView newsView;
+    /** 이상 감지 화면의 AI 분석 목록. 화면을 다시 만들면 새로 잡힌다. */
+    private AiInsightListPanel aiInsightListPanel;
+    /**
+     * 마지막으로 받은 분석.
+     *
+     * <p>챗봇이 근거로 쓴다. 서버가 다시 계산하면 그새 값이 바뀌어 사용자가 화면에서
+     * 보고 있는 것과 다른 답을 듣는다.
+     */
+    private org.ossproject.ai.AiInsight lastInsight;
+    private final AiServiceProcess aiServiceProcess;
     private AccessibleChartController accessibleChartController;
     private final Label status = new Label("준비됨");
     private final Label lastDataTime = new Label("마지막 시세 --:--:--");
@@ -187,6 +213,10 @@ public final class DesktopApplication extends Application {
         this.soundPort = services.sounds();
         this.sonificationPort = services.sonification();
         this.secretStore = services.secrets();
+        this.aiInsightViewModel = new AiInsightViewModel(
+                services.market(), services.aiInsight(), Platform::runLater);
+        this.newsViewModel = new NewsViewModel(services.news(), Platform::runLater);
+        this.aiServiceProcess = services.aiServiceProcess();
         this.stateRepository = services.stateRepository();
         this.accessibilityPreferencesRepository = services.accessibilityPreferences();
         this.sonificationPreferencesRepository = services.sonificationPreferences();
@@ -416,6 +446,10 @@ public final class DesktopApplication extends Application {
             case TRADING -> "M3 5h16a2 2 0 0 1 2 2v2h-5a3 3 0 0 0 0 0 6h5v2a2 2 0 0 1-2 2H3zm13 6h6v2h-6a1 1 0 0 1 0-2z";
             case ACCOUNT -> "M4 4h16v16H4zm3 4v2h10V8zm0 4v2h10v-2zm0 4v2h6v-2z";
             case US_MARKET -> "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm6.9 9h-3a15.8 15.8 0 0 0-1.2-5A8 8 0 0 1 18.9 11zM12 4c1.1 1.3 1.8 3.8 1.9 7h-3.8c.1-3.2.8-5.7 1.9-7zM9.3 6A15.8 15.8 0 0 0 8.1 11h-3A8 8 0 0 1 9.3 6zM5.1 13h3a15.8 15.8 0 0 0 1.2 5 8 8 0 0 1-4.2-5zM12 20c-1.1-1.3-1.8-3.8-1.9-7h3.8c-.1 3.2-.8 5.7-1.9 7zm2.7-2a15.8 15.8 0 0 0 1.2-5h3a8 8 0 0 1-4.2 5z";
+            // 겹친 물결 두 줄. 닮은 모양을 겹쳐 놓았다는 뜻이다.
+            case SIMILAR -> "M3 15c3-6 6-6 9 0s6 6 9 0v3c-3 6-6 6-9 0s-6-6-9 0zm0-8c3-6 6-6 9 0s6 6 9 0v3c-3 6-6 6-9 0s-6-6-9 0z";
+            // 접힌 신문.
+            case NEWS -> "M4 4h13v16H4zm2 3v2h9V7zm0 4v2h9v-2zm0 4v2h6v-2zm13-8h3v11a2 2 0 0 1-4 0V7z";
             case ANOMALY -> "M12 2 1 21h22zm0 5.2-6.2 11.3h12.4zM11 10h2v4h-2zm0 5.5h2v2h-2z";
             case NOTIFICATIONS -> "M12 22a2.5 2.5 0 0 0 2.4-2h-4.8A2.5 2.5 0 0 0 12 22zM20 17H4l2-2v-5a6 6 0 0 1 5-5.9V2h2v2.1A6 6 0 0 1 18 10v5z";
             case RADIO -> "M9 4v12.2a3 3 0 1 0 2 2.8V8h7V4zm-3 16a1 1 0 1 1 0-2 1 1 0 0 1 0 2zm9-2a1 1 0 1 1 0-2 1 1 0 0 1 0 2z";
@@ -1210,6 +1244,9 @@ public final class DesktopApplication extends Application {
                 accessibleChartController.stop();
             }
             // 종목 상세를 떠나면 봉 구독을 놓는다. 보이지 않는 차트를 계속 갱신할 이유가 없다.
+            if (old == Screen.ANOMALY && screen != Screen.ANOMALY) {
+                aiInsightViewModel.cancel();
+            }
             if (old == Screen.STOCK_DETAIL && screen != Screen.STOCK_DETAIL) {
                 stockDetailViewModel.stopLiveChart();
                 tradeTapeViewModel.stop();
@@ -1224,6 +1261,8 @@ public final class DesktopApplication extends Application {
             String location = switch (screen) {
                 case STOCK_DETAIL -> "종목 상세 · " + session.selectedStock().name();
                 case TRADING -> "주문 · " + session.selectedStock().name();
+                case SIMILAR -> "닮은 차트 · " + session.selectedStock().name();
+                case NEWS -> "뉴스 · " + session.selectedStock().name();
                 default -> screen.label();
             };
             currentLocation.setText(location);
@@ -1246,6 +1285,8 @@ public final class DesktopApplication extends Application {
         screenController.registerPreservingState(Screen.NOTIFICATIONS,
                 () -> new NotificationsScreenView(session.notifications(), status::setText,
                         this::scheduleStateSave, this::requestSpeech).create());
+        screenController.register(Screen.SIMILAR, this::createSimilarScreen);
+        screenController.register(Screen.NEWS, this::createNewsScreen);
         screenController.register(Screen.RADIO, this::createAccessibleChartScreen);
         screenController.registerPreservingState(Screen.SETTINGS, this::createSettingsScreen);
     }
@@ -1667,7 +1708,133 @@ public final class DesktopApplication extends Application {
                         "미국주식 주문은 아직 연동되지 않았습니다. 연동 예정: ust20000 매수, ust20001 매도"));
     }
 
-    private VBox createAnomalyScreen() {
+    /**
+     * 닮은 차트 화면.
+     *
+     * <p>이 화면이 하는 말은 하나다 — 과거 어느 구간이 지금과 모양이 닮았다. 예측이
+     * 아니다. 그래서 단서를 목록보다 먼저 읽히는 자리에 둔다.
+     */
+    private javafx.scene.Node createSimilarScreen() {
+        StockSelection selected = session.selectedStock();
+        similarView = new SimilarScreenView(selected.name(),
+                this::requestSpeech,
+                this::addSimilarToWatchlist,
+                (symbol, name) -> compareWithSelected(selected, symbol, name),
+                ignored -> loadSimilar());
+        javafx.scene.Node node = similarView.create();
+        loadSimilar();
+        return node;
+    }
+
+    private void loadSimilar() {
+        SimilarScreenView view = similarView;
+        if (view == null) {
+            return;
+        }
+        if (!aiInsightViewModel.available()) {
+            // 서버는 모델을 읽고 지수를 받은 뒤에야 포트를 연다. 그 사이의 연결 거부를
+            // 실패로 적으면 사용자는 고칠 수 없는 문제로 읽고 포기한다.
+            view.unavailable(aiServiceProcess != null && aiServiceProcess.running()
+                    ? "AI 서버를 준비하고 있습니다. 10초쯤 걸립니다."
+                    : aiInsightViewModel.unavailableReason());
+            return;
+        }
+        view.loading();
+        aiInsightViewModel.analyze(session.selectedStock().securityId(), true,
+                insight -> {
+                    lastInsight = insight;
+                    view.show(insight);
+                },
+                view::unavailable);
+    }
+
+    /** 닮은 종목을 관심 목록에 담는다. 이미 있으면 그 사실을 알린다. */
+    private void addSimilarToWatchlist(String symbol, String name) {
+        boolean exists = session.watchlistItems().stream()
+                .anyMatch(item -> item.symbol().equalsIgnoreCase(symbol));
+        if (exists) {
+            status.setText(name + "은 이미 관심 종목에 있습니다.");
+            return;
+        }
+        String group = "국내";
+        if (!session.watchlistGroups().contains(group)) {
+            session.watchlistGroups().add(group);
+        }
+        session.watchlistItems().add(
+                new WatchlistItem(group, group, symbol, name, "KRX", "KRW", "없음"));
+        scheduleStateSave();
+        status.setText(name + "을 관심 종목에 담았습니다.");
+    }
+
+    /**
+     * 두 종목을 나란히 보여 준다.
+     *
+     * <p>봉을 둘 다 받고 나서 연다. 하나만 받고 열면 빈 칸이 0원으로 읽힌다.
+     */
+    private void compareWithSelected(StockSelection selected, String symbol, String name) {
+        status.setText(selected.name() + "과 " + name + " 시세를 조회하고 있습니다.");
+        SecurityId other = SecurityId.of(symbol, "KRX");
+        marketApplication.loadCandles(selected.securityId(), CandleInterval.DAY, 20)
+                .thenCombine(marketApplication.loadCandles(other, CandleInterval.DAY, 20),
+                        java.util.Map::entry)
+                .whenComplete((pair, failure) -> Platform.runLater(() -> {
+                    if (failure != null) {
+                        status.setText(name + " 시세를 받지 못해 비교할 수 없습니다.");
+                        return;
+                    }
+                    status.setText(selected.name() + "과 " + name + "을 비교합니다.");
+                    StockComparisonDialog.show(selected.name(), pair.getKey(),
+                            name, pair.getValue(),
+                            similarFieldOf(symbol, SimilarStock::similarityPercent,
+                                    java.math.BigDecimal.ZERO),
+                            similarFieldOf(symbol, SimilarStock::explanation, ""),
+                            () -> addSimilarToWatchlist(symbol, name));
+                }));
+    }
+
+    /** 방금 받은 분석에서 그 종목의 값을 꺼낸다. 없으면 지어내지 않고 기본값을 쓴다. */
+    private <T> T similarFieldOf(String symbol,
+                                 java.util.function.Function<SimilarStock, T> field, T fallback) {
+        if (lastInsight == null) {
+            return fallback;
+        }
+        return lastInsight.similar().stream()
+                .filter(stock -> stock.symbol().equalsIgnoreCase(symbol))
+                .findFirst().map(field).orElse(fallback);
+    }
+
+    /**
+     * 뉴스와 챗봇 화면.
+     *
+     * <p>챗봇에는 화면이 이미 보여 주고 있는 분석을 함께 넘긴다. 서버가 다시 계산하면
+     * 그새 값이 바뀌어 사용자가 보고 있는 것과 다른 답을 듣는다.
+     */
+    private javafx.scene.Node createNewsScreen() {
+        StockSelection selected = session.selectedStock();
+        newsView = new NewsScreenView(selected.name(), this::requestSpeech,
+                (question, onAnswer) -> newsViewModel.ask(
+                        selected.securityId(), question, lastInsight, onAnswer),
+                this::loadNews);
+        javafx.scene.Node node = newsView.create();
+        loadNews();
+        // 챗봇이 분석을 근거로 답할 수 있게 미리 받아 둔다. 실패해도 뉴스는 그대로 나온다.
+        if (lastInsight == null && aiInsightViewModel.available()) {
+            aiInsightViewModel.analyze(selected.securityId(), false,
+                    insight -> lastInsight = insight, reason -> { });
+        }
+        return node;
+    }
+
+    private void loadNews() {
+        NewsScreenView view = newsView;
+        if (view == null) {
+            return;
+        }
+        view.loading();
+        newsViewModel.load(session.selectedStock().securityId(), view::show, view::unavailable);
+    }
+
+    private javafx.scene.Node createAnomalyScreen() {
         Label title = heading("이상 감지");
         Label monitoring = new Label(anomalySubscriptions.isEmpty()
                 ? "보유종목이나 관심종목이 있으면 실시간 감시를 시작합니다."
@@ -1746,7 +1913,7 @@ public final class DesktopApplication extends Application {
         TitledPane criteriaPane = new TitledPane("자동 이상 감지 기준 보기", criteria);
         criteriaPane.setExpanded(false);
 
-        VBox shell = new VBox(9, header, urgentHost,
+        VBox shell = new VBox(9, header, urgentHost, createAiInsightPanel(),
                 anomalySection("보유 종목 알림", holdings),
                 anomalySection("관심 종목 알림", watchlist),
                 wrappingRow(8, listen, delete), criteriaPane);
@@ -1758,7 +1925,86 @@ public final class DesktopApplication extends Application {
         body.getStyleClass().addAll("screen-content", "anomaly-screen");
         body.setPadding(new Insets(12));
         VBox.setVgrow(centered, Priority.ALWAYS);
-        return body;
+        // 내용이 창보다 길어지면 BorderPane 은 넘친 만큼 위쪽 막대를 덮는다. 잘라 내지 않고
+        // 스크롤로 닿게 한다. AI 분석이 여러 줄로 접히면 화면이 쉽게 길어진다.
+        ScrollPane scroll = new ScrollPane(body);
+        scroll.setFitToWidth(true);
+        scroll.setAccessibleText("이상 감지 화면");
+        scroll.getStyleClass().add("workspace-scroll");
+        return scroll;
+    }
+
+    /**
+     * 보유·관심 종목의 AI 분석.
+     *
+     * <p>이 화면은 종목 하나를 들여다보는 곳이 아니라 여러 종목을 훑는 곳이다. 한 종목짜리
+     * 카드를 맨 위에 두면 아래 목록과 아무 관계 없는 정보가 제일 먼저 읽힌다. 게다가 이
+     * 화면에는 종목 선택기가 없어서 사용자는 문안을 끝까지 들어야 어느 종목인지 알 수 있다.
+     *
+     * <p>닮은 종목은 끄고 부른다. 종목당 몇 초가 더 드는데 목록에서 쓸 정보가 아니다.
+     * 그건 닮은 차트 화면에서 종목 하나를 골라 볼 때 켠다.
+     */
+    private javafx.scene.Node createAiInsightPanel() {
+        aiInsightListPanel = new AiInsightListPanel(text -> requestSpeech(text, "ai-insight"));
+        loadAiInsightList();
+        return aiInsightListPanel.root();
+    }
+
+    private void loadAiInsightList() {
+        AiInsightListPanel panel = aiInsightListPanel;
+        if (panel == null) {
+            return;
+        }
+        if (!aiInsightViewModel.available()) {
+            // 서버는 모델을 읽고 지수를 받은 뒤에야 포트를 연다. 그 사이의 연결 거부를
+            // 실패로 적으면 사용자는 고칠 수 없는 문제로 읽고 포기한다.
+            panel.unavailable(aiServiceProcess != null && aiServiceProcess.running()
+                    ? "AI 서버를 준비하고 있습니다. 10초쯤 걸립니다."
+                    : aiInsightViewModel.unavailableReason(), this::loadAiInsightList);
+            return;
+        }
+        panel.waiting();
+        // 계좌 조회가 끝나야 보유 종목을 안다. 화면 스레드를 막지 않는다.
+        CompletableFuture.supplyAsync(tradingUseCase::account)
+                .handle((account, failure) -> failure == null ? account : null)
+                .thenAccept(account -> Platform.runLater(() -> startAiInsightList(panel, account)));
+    }
+
+    /**
+     * 감시 중인 종목을 모아 차례로 분석한다.
+     *
+     * <p>보유 종목을 먼저, 관심 종목을 뒤에 둔다. 돈이 들어가 있는 쪽이 먼저 읽혀야 한다.
+     * 같은 종목이 양쪽에 있으면 한 번만 넣는다.
+     */
+    private void startAiInsightList(AiInsightListPanel panel, Account account) {
+        // 거래소를 함께 들고 다닌다. 종목 코드만 남기고 KRX 로 다시 만들면, 관심 목록에
+        // 담아 둔 미국 종목이 같은 코드의 국내 종목으로 조회된다.
+        Map<SecurityId, String> names = new LinkedHashMap<>();
+        if (account != null) {
+            for (Position position : account.positions()) {
+                names.putIfAbsent(SecurityId.of(position.symbol(), "KRX"), position.name());
+            }
+        }
+        for (WatchlistItem item : session.watchlistItems()) {
+            if (!item.needsIdentityRepair()) {
+                names.putIfAbsent(item.securityId(), item.securityName());
+            }
+        }
+        if (names.isEmpty()) {
+            panel.empty("보유 종목이나 관심 종목을 추가하면 AI 분석을 함께 보여 드립니다.");
+            return;
+        }
+
+        List<SecurityId> securities = List.copyOf(names.keySet());
+        List<String> symbols = new java.util.ArrayList<>();
+        for (SecurityId security : securities) {
+            symbols.add(security.symbol());
+        }
+        panel.starting(List.copyOf(symbols), List.copyOf(names.values()));
+        aiInsightViewModel.analyzeAll(securities, false,
+                (security, insight) -> panel.show(security.symbol(), insight),
+                (security, reason) -> panel.failed(security.symbol(), reason),
+                panel::finished);
     }
 
     private ListView<String> anomalySignalList(FilteredList<String> items, String emptyText) {
@@ -2541,6 +2787,7 @@ public final class DesktopApplication extends Application {
     /** 관심종목 목록을 실제 실시간 이상 감시 구독과 동기화한다. */
     private void refreshAnomalyMonitoring() {
         long generation = ++anomalyMonitoringGeneration;
+        trackNewsForWatchedStocks();
         anomalySubscriptions.values().forEach(EventSubscription::close);
         anomalySubscriptions.clear();
         synchronized (anomalyDetector) {
@@ -2572,6 +2819,34 @@ public final class DesktopApplication extends Application {
                 }));
         if (screenController != null) screenController.invalidate(Screen.ANOMALY);
         refreshSubscriptionCount();
+    }
+
+    /**
+     * 보유·관심 종목의 뉴스를 미리 받아 두게 한다.
+     *
+     * <p>구글 뉴스 RSS 는 최근 7일까지만 준다. 오늘 안 받으면 그날치는 영영 없고, 아카이브가
+     * 비면 뉴스 피처가 중립으로 채워지면서 오류 하나 없이 예측만 서서히 무뎌진다.
+     *
+     * <p>감시 목록을 새로 잡을 때 함께 알린다. 사용자가 실제로 보는 종목이 곧 쌓아야 할
+     * 종목이라 목록을 따로 관리할 이유가 없다.
+     */
+    private void trackNewsForWatchedStocks() {
+        List<SecurityId> watched = new java.util.ArrayList<>();
+        for (WatchlistItem item : session.watchlistItems()) {
+            if (!item.needsIdentityRepair()) {
+                watched.add(item.securityId());
+            }
+        }
+        newsViewModel.track(watched);
+        CompletableFuture.supplyAsync(tradingUseCase::account).thenAccept(account -> {
+            List<SecurityId> held = new java.util.ArrayList<>();
+            for (Position position : account.positions()) {
+                // 계좌는 국내 모의투자라 보유 종목은 KRX 다. 관심 목록은 미국이 섞일 수
+                // 있어 저장해 둔 거래소를 그대로 쓴다.
+                held.add(SecurityId.of(position.symbol(), "KRX"));
+            }
+            newsViewModel.track(held);
+        }).exceptionally(failure -> null);
     }
 
     private void addAnomalySubscription(String key, SecurityId security, String name) {
@@ -2824,6 +3099,8 @@ public final class DesktopApplication extends Application {
         orderBookViewModel.stop();
         tradeTapeViewModel.stop();
         if (connectionWatch != null) connectionWatch.close();
+        // 앱이 꺼지는데 자식이 남으면 포트를 붙잡고 있어 다음 실행이 실패한다.
+        if (aiServiceProcess != null) aiServiceProcess.close();
         if (subscriptionTicker != null) subscriptionTicker.stop();
         if (accessibleChartController != null) accessibleChartController.close();
         marketApplication.close();

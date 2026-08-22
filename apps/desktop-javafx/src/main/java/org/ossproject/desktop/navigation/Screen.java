@@ -18,6 +18,8 @@ public enum Screen {
     TRADING("주문", true, NavigationGroup.TRADING_ASSETS),
     ACCOUNT("계좌", true, NavigationGroup.TRADING_ASSETS),
     US_MARKET("미국주식", false, NavigationGroup.OVERSEAS),
+    SIMILAR("닮은 차트", true, NavigationGroup.MARKET_EXPLORATION),
+    NEWS("뉴스 · 챗봇", true, NavigationGroup.MARKET_EXPLORATION),
     ANOMALY("이상 감지", true, NavigationGroup.ACCESSIBILITY_TOOLS),
     NOTIFICATIONS("알림", true, NavigationGroup.ACCESSIBILITY_TOOLS),
     RADIO("청각 차트", true, NavigationGroup.ACCESSIBILITY_TOOLS),
