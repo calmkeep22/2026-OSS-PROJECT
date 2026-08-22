@@ -82,4 +82,31 @@ public record AccessibilityPreferences(
                 reducedMotionEnabled, largeTextEnabled, highContrastEnabled,
                 informationDensity, voice, rate, volume);
     }
+
+    public AccessibilityPreferences withVoiceName(String value) {
+        return withVoice(value, speechRate, speechVolume);
+    }
+
+    public AccessibilityPreferences withSpeechRate(double value) {
+        return withVoice(voiceName, value, speechVolume);
+    }
+
+    public AccessibilityPreferences withSpeechVolume(int value) {
+        return withVoice(voiceName, speechRate, value);
+    }
+
+    /**
+     * 합성기에 넘길 값.
+     *
+     * <p>화면이 조립하지 않는다. 설정 화면이 직접 {@code SpeechOptions} 를 만들어
+     * 합성기에 넣고 저장은 다른 곳에서 하면, 한쪽만 도는 경우가 생긴다 — 소리는 바뀌었는데
+     * 다음 실행 때 되돌아가거나 그 반대다. 여기서 한 번만 만들면 둘이 갈라지지 않는다.
+     *
+     * <p>빈 음성 이름은 {@code null} 로 바꾼다. {@code SpeechOptions} 에서 그것이 시스템
+     * 기본 음성을 뜻한다.
+     */
+    public org.ossproject.accessibility.notification.SpeechOptions speechOptions() {
+        return new org.ossproject.accessibility.notification.SpeechOptions(
+                speechRate, speechVolume, voiceName.isBlank() ? null : voiceName);
+    }
 }
