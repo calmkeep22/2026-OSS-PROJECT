@@ -6,9 +6,9 @@ import org.ossproject.application.port.MarketDataStreamPort;
 import org.ossproject.application.port.OrderBookListener;
 import org.ossproject.application.port.QuoteListener;
 import org.ossproject.application.port.TradeListener;
-import org.ossproject.finance.model.OrderBook;
-import org.ossproject.finance.model.Quote;
-import org.ossproject.finance.model.Trade;
+import org.ossproject.finance.model.orderbook.OrderBook;
+import org.ossproject.finance.model.market.Quote;
+import org.ossproject.finance.model.market.Trade;
 
 import java.util.Collection;
 import java.util.LinkedHashSet;

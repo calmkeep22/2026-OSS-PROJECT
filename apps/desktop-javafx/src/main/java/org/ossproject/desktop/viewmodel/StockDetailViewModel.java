@@ -2,12 +2,12 @@ package org.ossproject.desktop.viewmodel;
 
 import org.ossproject.application.port.EventSubscription;
 import org.ossproject.application.port.MarketApplicationPort;
-import org.ossproject.finance.model.Candle;
-import org.ossproject.finance.model.CandleInterval;
-import org.ossproject.finance.model.PricePeriod;
-import org.ossproject.finance.model.PricePoint;
+import org.ossproject.finance.model.market.Candle;
+import org.ossproject.finance.model.market.CandleInterval;
+import org.ossproject.finance.model.market.PricePeriod;
+import org.ossproject.finance.model.market.PricePoint;
 import org.ossproject.finance.model.SecurityId;
-import org.ossproject.finance.model.StockDetail;
+import org.ossproject.finance.model.market.StockDetail;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;

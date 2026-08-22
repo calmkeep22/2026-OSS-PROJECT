@@ -6,7 +6,7 @@ import org.ossproject.kiwoom.mapping.KiwoomTr;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.ossproject.application.port.AccountPort;
 import org.ossproject.broker.error.BrokerException;
-import org.ossproject.finance.model.Account;
+import org.ossproject.finance.model.account.Account;
 
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;

@@ -9,8 +9,8 @@ import org.ossproject.application.port.ConnectionState;
 import org.ossproject.application.port.MarketDataStreamPort;
 import org.ossproject.broker.error.BrokerTransientException;
 import org.ossproject.broker.resilience.RetryPolicy;
-import org.ossproject.finance.model.OrderBook;
-import org.ossproject.finance.model.Quote;
+import org.ossproject.finance.model.orderbook.OrderBook;
+import org.ossproject.finance.model.market.Quote;
 
 import java.math.BigDecimal;
 import java.net.URI;

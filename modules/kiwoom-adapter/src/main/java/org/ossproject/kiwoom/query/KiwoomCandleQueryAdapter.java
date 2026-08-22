@@ -3,8 +3,8 @@ package org.ossproject.kiwoom.query;
 import org.ossproject.kiwoom.config.KiwoomRestClient;
 
 import org.ossproject.application.port.CandleQueryPort;
-import org.ossproject.finance.model.Candle;
-import org.ossproject.finance.model.CandleInterval;
+import org.ossproject.finance.model.market.Candle;
+import org.ossproject.finance.model.market.CandleInterval;
 
 import java.util.List;
 import java.util.Objects;

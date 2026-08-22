@@ -7,8 +7,8 @@ import org.ossproject.application.usecase.MarketApplicationService;
 import org.ossproject.fake.FakeCandleQueryAdapter;
 import org.ossproject.fake.FakeMarketDataStreamAdapter;
 import org.ossproject.fake.FakeStockQueryAdapter;
-import org.ossproject.finance.model.SecuritySummary;
-import org.ossproject.finance.model.StockDetail;
+import org.ossproject.finance.model.market.SecuritySummary;
+import org.ossproject.finance.model.market.StockDetail;
 
 import java.util.List;
 

@@ -2,9 +2,9 @@ package org.ossproject.fake;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.ossproject.finance.model.OrderBook;
-import org.ossproject.finance.model.PriceLadder;
-import org.ossproject.finance.model.PriceLadderConfig;
+import org.ossproject.finance.model.orderbook.OrderBook;
+import org.ossproject.finance.model.orderbook.PriceLadder;
+import org.ossproject.finance.model.orderbook.PriceLadderConfig;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;

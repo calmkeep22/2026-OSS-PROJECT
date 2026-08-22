@@ -15,10 +15,10 @@ import org.ossproject.broker.resilience.CircuitBreaker;
 import org.ossproject.broker.resilience.ResilientExecutor;
 import org.ossproject.broker.resilience.RetryPolicy;
 import org.ossproject.broker.resilience.Sleeper;
-import org.ossproject.finance.model.Candle;
-import org.ossproject.finance.model.CandleInterval;
-import org.ossproject.finance.model.Quote;
-import org.ossproject.finance.model.StockDetail;
+import org.ossproject.finance.model.market.Candle;
+import org.ossproject.finance.model.market.CandleInterval;
+import org.ossproject.finance.model.market.Quote;
+import org.ossproject.finance.model.market.StockDetail;
 import org.ossproject.kiwoom.http.JdkHttpTransport;
 
 import java.net.URI;

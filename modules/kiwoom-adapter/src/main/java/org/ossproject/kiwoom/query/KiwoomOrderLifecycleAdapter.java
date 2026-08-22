@@ -4,8 +4,8 @@ import org.ossproject.kiwoom.config.KiwoomRestClient;
 
 import org.ossproject.application.port.OrderLifecyclePort;
 import org.ossproject.broker.error.BrokerException;
-import org.ossproject.finance.model.Order;
-import org.ossproject.finance.model.OrderCommand;
+import org.ossproject.finance.model.order.Order;
+import org.ossproject.finance.model.order.OrderCommand;
 
 import java.time.Clock;
 import java.time.Duration;

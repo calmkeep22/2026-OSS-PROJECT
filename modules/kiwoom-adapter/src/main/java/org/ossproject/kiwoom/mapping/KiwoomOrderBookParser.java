@@ -1,8 +1,8 @@
 package org.ossproject.kiwoom.mapping;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import org.ossproject.finance.model.OrderBook;
-import org.ossproject.finance.model.OrderBookLevel;
+import org.ossproject.finance.model.orderbook.OrderBook;
+import org.ossproject.finance.model.orderbook.OrderBookLevel;
 
 import java.math.BigDecimal;
 import java.time.Instant;

@@ -2,7 +2,7 @@ package org.ossproject.application.policy;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.ossproject.finance.model.OrderCommand;
+import org.ossproject.finance.model.order.OrderCommand;
 import org.ossproject.finance.model.OrderSide;
 
 import java.math.BigDecimal;

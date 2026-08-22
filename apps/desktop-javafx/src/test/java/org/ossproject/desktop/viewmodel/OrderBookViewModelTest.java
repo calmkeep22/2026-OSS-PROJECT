@@ -5,12 +5,12 @@ import org.ossproject.application.usecase.MarketApplicationService;
 import org.ossproject.fake.FakeCandleQueryAdapter;
 import org.ossproject.fake.FakeMarketDataStreamAdapter;
 import org.ossproject.fake.FakeStockQueryAdapter;
-import org.ossproject.finance.model.DepthChartView;
+import org.ossproject.finance.model.orderbook.DepthChartView;
 import org.ossproject.finance.model.Exchange;
-import org.ossproject.finance.model.OrderBook;
-import org.ossproject.finance.model.OrderBookLevel;
-import org.ossproject.finance.model.PriceLadderView;
-import org.ossproject.finance.model.Quote;
+import org.ossproject.finance.model.orderbook.OrderBook;
+import org.ossproject.finance.model.orderbook.OrderBookLevel;
+import org.ossproject.finance.model.orderbook.PriceLadderView;
+import org.ossproject.finance.model.market.Quote;
 import org.ossproject.finance.model.SecurityId;
 
 import java.math.BigDecimal;
@@ -34,8 +34,8 @@ class OrderBookViewModelTest {
             Runnable::run, Runnable::run, java.time.Clock.systemUTC());
     private final MutableClock clock = new MutableClock(Instant.parse("2026-08-20T05:00:00Z"));
     private final OrderBookViewModel viewModel = new OrderBookViewModel(market, Runnable::run,
-            org.ossproject.finance.model.PriceLadderConfig.defaults(),
-            org.ossproject.finance.model.DepthChartConfig.defaults(), clock);
+            org.ossproject.finance.model.orderbook.PriceLadderConfig.defaults(),
+            org.ossproject.finance.model.orderbook.DepthChartConfig.defaults(), clock);
 
     /** 시간을 손으로 밀어 실시간이 멈춘 상황을 만든다. */
     private static final class MutableClock extends java.time.Clock {

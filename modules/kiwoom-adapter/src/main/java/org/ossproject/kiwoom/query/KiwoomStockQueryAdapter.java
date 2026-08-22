@@ -5,8 +5,8 @@ import org.ossproject.kiwoom.mapping.KiwoomTr;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import org.ossproject.application.port.StockQueryPort;
-import org.ossproject.finance.model.SecuritySummary;
-import org.ossproject.finance.model.StockDetail;
+import org.ossproject.finance.model.market.SecuritySummary;
+import org.ossproject.finance.model.market.StockDetail;
 
 import java.util.ArrayList;
 import java.util.Comparator;

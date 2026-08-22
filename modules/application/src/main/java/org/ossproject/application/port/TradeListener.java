@@ -1,6 +1,6 @@
 package org.ossproject.application.port;
 
-import org.ossproject.finance.model.Trade;
+import org.ossproject.finance.model.market.Trade;
 
 /**
  * 체결 한 건이 들어왔을 때 받는다.

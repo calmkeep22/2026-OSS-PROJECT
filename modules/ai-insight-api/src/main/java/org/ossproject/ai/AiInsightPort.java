@@ -1,6 +1,6 @@
 package org.ossproject.ai;
 
-import org.ossproject.finance.model.Candle;
+import org.ossproject.finance.model.market.Candle;
 import org.ossproject.finance.model.SecurityId;
 
 import java.util.List;

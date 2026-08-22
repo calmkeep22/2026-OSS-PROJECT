@@ -1,8 +1,8 @@
 package org.ossproject.desktop.orderbook;
 
-import org.ossproject.finance.model.DepthCurve;
-import org.ossproject.finance.model.DepthPoint;
-import org.ossproject.finance.model.OrderBook;
+import org.ossproject.finance.model.orderbook.DepthCurve;
+import org.ossproject.finance.model.orderbook.DepthPoint;
+import org.ossproject.finance.model.orderbook.OrderBook;
 
 import java.math.BigDecimal;
 import java.text.NumberFormat;

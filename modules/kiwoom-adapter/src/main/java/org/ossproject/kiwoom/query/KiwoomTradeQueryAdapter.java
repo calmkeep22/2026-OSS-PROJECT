@@ -3,7 +3,7 @@ package org.ossproject.kiwoom.query;
 import org.ossproject.kiwoom.config.KiwoomRestClient;
 
 import org.ossproject.application.port.TradeQueryPort;
-import org.ossproject.finance.model.Trade;
+import org.ossproject.finance.model.market.Trade;
 
 import java.util.List;
 import java.util.Objects;

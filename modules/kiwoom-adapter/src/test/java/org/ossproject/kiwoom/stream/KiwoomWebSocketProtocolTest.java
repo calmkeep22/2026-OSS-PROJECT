@@ -3,9 +3,9 @@ package org.ossproject.kiwoom.stream;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.ossproject.finance.model.Trade;
+import org.ossproject.finance.model.market.Trade;
 import org.ossproject.finance.model.OrderSide;
-import org.ossproject.finance.model.OrderBook;
+import org.ossproject.finance.model.orderbook.OrderBook;
 
 import java.math.BigDecimal;
 import java.time.Clock;

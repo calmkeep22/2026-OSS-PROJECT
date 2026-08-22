@@ -12,7 +12,7 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import org.ossproject.finance.model.PriceDirection;
-import org.ossproject.finance.model.StockDetail;
+import org.ossproject.finance.model.market.StockDetail;
 
 import java.math.BigDecimal;
 import java.util.List;

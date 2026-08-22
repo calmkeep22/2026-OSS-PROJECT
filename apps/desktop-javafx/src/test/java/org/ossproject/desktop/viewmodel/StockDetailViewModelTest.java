@@ -5,14 +5,14 @@ import org.ossproject.application.usecase.MarketApplicationService;
 import org.ossproject.fake.FakeCandleQueryAdapter;
 import org.ossproject.fake.FakeMarketDataStreamAdapter;
 import org.ossproject.fake.FakeStockQueryAdapter;
-import org.ossproject.finance.model.Candle;
-import org.ossproject.finance.model.PricePoint;
-import org.ossproject.finance.model.StockDetail;
+import org.ossproject.finance.model.market.Candle;
+import org.ossproject.finance.model.market.PricePoint;
+import org.ossproject.finance.model.market.StockDetail;
 
 import java.util.List;
 import java.time.Clock;
 import java.time.ZoneOffset;
-import org.ossproject.finance.model.Quote;
+import org.ossproject.finance.model.market.Quote;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicInteger;

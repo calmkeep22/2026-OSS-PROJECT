@@ -1,7 +1,7 @@
 package org.ossproject.mocktrading;
 
-import org.ossproject.finance.model.Account;
-import org.ossproject.finance.model.Balance;
+import org.ossproject.finance.model.account.Account;
+import org.ossproject.finance.model.account.Balance;
 
 import java.math.BigDecimal;
 import java.util.List;

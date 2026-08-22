@@ -70,7 +70,7 @@ public enum KiwoomTr {
     }
 
     /** 봉 주기에 맞는 차트 TR. */
-    public static KiwoomTr chartFor(org.ossproject.finance.model.CandleInterval interval) {
+    public static KiwoomTr chartFor(org.ossproject.finance.model.market.CandleInterval interval) {
         if (interval == null) {
             throw new IllegalArgumentException("봉 주기는 필수입니다.");
         }
@@ -87,7 +87,7 @@ public enum KiwoomTr {
      *
      * @throws IllegalArgumentException 분봉이 아닌 주기인 경우
      */
-    public static String tickScopeOf(org.ossproject.finance.model.CandleInterval interval) {
+    public static String tickScopeOf(org.ossproject.finance.model.market.CandleInterval interval) {
         return switch (interval) {
             case MINUTE_1 -> "1";
             case MINUTE_5 -> "5";

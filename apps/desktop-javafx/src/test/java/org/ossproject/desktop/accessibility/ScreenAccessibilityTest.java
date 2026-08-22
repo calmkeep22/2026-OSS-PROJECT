@@ -309,7 +309,7 @@ class ScreenAccessibilityTest {
             org.ossproject.desktop.navigation.OrderDraft draft =
                     new org.ossproject.desktop.navigation.OrderDraft("005930", "삼성전자",
                             org.ossproject.finance.model.OrderSide.BUY,
-                            org.ossproject.finance.model.OrderType.LIMIT, 1, "70000",
+                            org.ossproject.finance.model.order.OrderType.LIMIT, 1, "70000",
                             org.ossproject.desktop.navigation.Screen.DASHBOARD);
             org.ossproject.desktop.viewmodel.OrderDraftViewModel viewModel =
                     new org.ossproject.desktop.viewmodel.OrderDraftViewModel(draft,
@@ -355,19 +355,19 @@ class ScreenAccessibilityTest {
         });
     }
 
-    private static java.util.List<org.ossproject.finance.model.PricePoint> points() {
-        java.util.List<org.ossproject.finance.model.PricePoint> points = new java.util.ArrayList<>();
+    private static java.util.List<org.ossproject.finance.model.market.PricePoint> points() {
+        java.util.List<org.ossproject.finance.model.market.PricePoint> points = new java.util.ArrayList<>();
         for (int day = 1; day <= 30; day++) {
             java.math.BigDecimal close = java.math.BigDecimal.valueOf(70000 + day * 100L);
-            points.add(new org.ossproject.finance.model.PricePoint(
+            points.add(new org.ossproject.finance.model.market.PricePoint(
                     java.time.LocalDate.of(2026, 8, 1).plusDays(day - 1),
                     close, close, close, close, 1000L));
         }
         return points;
     }
 
-    private static org.ossproject.finance.model.StockDetail detail() {
-        return new org.ossproject.finance.model.StockDetail("005930", "삼성전자",
+    private static org.ossproject.finance.model.market.StockDetail detail() {
+        return new org.ossproject.finance.model.market.StockDetail("005930", "삼성전자",
                 new java.math.BigDecimal("70000"), new java.math.BigDecimal("500"),
                 new java.math.BigDecimal("0.7"), org.ossproject.finance.model.PriceDirection.UP,
                 new java.math.BigDecimal("69500"), new java.math.BigDecimal("70500"),

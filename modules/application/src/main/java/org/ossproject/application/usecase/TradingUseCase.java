@@ -3,12 +3,12 @@ package org.ossproject.application.usecase;
 import org.ossproject.application.policy.OrderGuard;
 import org.ossproject.application.port.AccountPort;
 import org.ossproject.application.port.OrderLifecyclePort;
-import org.ossproject.finance.model.Account;
-import org.ossproject.finance.model.Order;
-import org.ossproject.finance.model.OrderCommand;
+import org.ossproject.finance.model.account.Account;
+import org.ossproject.finance.model.order.Order;
+import org.ossproject.finance.model.order.OrderCommand;
 import org.ossproject.finance.model.OrderSide;
-import org.ossproject.finance.model.FeeSchedule;
-import org.ossproject.finance.model.TradePreview;
+import org.ossproject.finance.model.order.FeeSchedule;
+import org.ossproject.finance.model.order.TradePreview;
 
 import java.math.BigDecimal;
 import java.util.List;

@@ -10,7 +10,7 @@ import org.ossproject.application.usecase.MarketApplicationService;
 import org.ossproject.fake.FakeCandleQueryAdapter;
 import org.ossproject.fake.FakeMarketDataStreamAdapter;
 import org.ossproject.fake.FakeStockQueryAdapter;
-import org.ossproject.finance.model.Candle;
+import org.ossproject.finance.model.market.Candle;
 import org.ossproject.finance.model.Exchange;
 import org.ossproject.finance.model.SecurityId;
 

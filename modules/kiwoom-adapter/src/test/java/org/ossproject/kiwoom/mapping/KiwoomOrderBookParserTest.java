@@ -5,8 +5,8 @@ import org.ossproject.kiwoom.mapping.KiwoomOrderBookParser;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.ossproject.finance.model.OrderBook;
-import org.ossproject.finance.model.OrderBookLevel;
+import org.ossproject.finance.model.orderbook.OrderBook;
+import org.ossproject.finance.model.orderbook.OrderBookLevel;
 
 import java.math.BigDecimal;
 import java.time.Instant;

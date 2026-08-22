@@ -11,8 +11,8 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import org.ossproject.desktop.chart.CandlestickChartView;
-import org.ossproject.finance.model.Candle;
-import org.ossproject.finance.model.PricePoint;
+import org.ossproject.finance.model.market.Candle;
+import org.ossproject.finance.model.market.PricePoint;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;

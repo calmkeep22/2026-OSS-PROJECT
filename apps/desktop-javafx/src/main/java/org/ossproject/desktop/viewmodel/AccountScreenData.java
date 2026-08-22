@@ -1,7 +1,7 @@
 package org.ossproject.desktop.viewmodel;
 
-import org.ossproject.finance.model.Account;
-import org.ossproject.finance.model.Order;
+import org.ossproject.finance.model.account.Account;
+import org.ossproject.finance.model.order.Order;
 
 import java.util.List;
 

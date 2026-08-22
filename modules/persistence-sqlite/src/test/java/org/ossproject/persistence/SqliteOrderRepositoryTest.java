@@ -5,12 +5,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.ossproject.finance.model.Execution;
-import org.ossproject.finance.model.Order;
-import org.ossproject.finance.model.OrderCommand;
+import org.ossproject.finance.model.order.Execution;
+import org.ossproject.finance.model.order.Order;
+import org.ossproject.finance.model.order.OrderCommand;
 import org.ossproject.finance.model.OrderSide;
-import org.ossproject.finance.model.OrderStatus;
-import org.ossproject.finance.model.OrderType;
+import org.ossproject.finance.model.order.OrderStatus;
+import org.ossproject.finance.model.order.OrderType;
 
 import java.math.BigDecimal;
 import java.nio.file.Path;

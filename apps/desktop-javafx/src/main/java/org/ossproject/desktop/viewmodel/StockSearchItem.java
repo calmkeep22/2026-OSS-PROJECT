@@ -1,6 +1,6 @@
 package org.ossproject.desktop.viewmodel;
 
-import org.ossproject.finance.model.SecuritySummary;
+import org.ossproject.finance.model.market.SecuritySummary;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;

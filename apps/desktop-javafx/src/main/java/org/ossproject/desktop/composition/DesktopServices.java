@@ -18,7 +18,7 @@ import org.ossproject.application.port.OrderLifecyclePort;
 import org.ossproject.application.port.StockQueryPort;
 import org.ossproject.application.usecase.MarketApplicationService;
 import org.ossproject.application.usecase.TradingUseCase;
-import org.ossproject.finance.model.FeeSchedule;
+import org.ossproject.finance.model.order.FeeSchedule;
 import org.ossproject.desktop.persistence.AccessibilityPreferencesRepository;
 import org.ossproject.desktop.persistence.DesktopStateRepository;
 import org.ossproject.desktop.persistence.PropertiesAccessibilityPreferencesRepository;

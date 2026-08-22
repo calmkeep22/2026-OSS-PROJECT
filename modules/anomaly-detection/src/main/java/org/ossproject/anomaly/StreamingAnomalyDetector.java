@@ -1,6 +1,6 @@
 package org.ossproject.anomaly;
 
-import org.ossproject.finance.model.Quote;
+import org.ossproject.finance.model.market.Quote;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;

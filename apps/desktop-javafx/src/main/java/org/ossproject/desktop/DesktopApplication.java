@@ -41,6 +41,10 @@ import org.ossproject.anomaly.StreamingAnomalyConfig;
 import org.ossproject.anomaly.StreamingAnomalyDetector;
 import org.ossproject.desktop.composition.DesktopServices;
 import org.ossproject.finance.model.*;
+import org.ossproject.finance.model.account.*;
+import org.ossproject.finance.model.market.*;
+import org.ossproject.finance.model.order.*;
+import org.ossproject.finance.model.orderbook.*;
 import org.ossproject.desktop.ai.AiInsightListPanel;
 
 import java.util.LinkedHashMap;

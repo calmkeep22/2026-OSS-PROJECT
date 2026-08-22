@@ -1,10 +1,10 @@
 package org.ossproject.fake;
 
 import org.junit.jupiter.api.Test;
-import org.ossproject.finance.model.Candle;
-import org.ossproject.finance.model.CandleInterval;
-import org.ossproject.finance.model.SecuritySummary;
-import org.ossproject.finance.model.StockDetail;
+import org.ossproject.finance.model.market.Candle;
+import org.ossproject.finance.model.market.CandleInterval;
+import org.ossproject.finance.model.market.SecuritySummary;
+import org.ossproject.finance.model.market.StockDetail;
 
 import java.math.BigDecimal;
 import java.util.List;

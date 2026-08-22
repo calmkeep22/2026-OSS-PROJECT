@@ -9,7 +9,7 @@ import javafx.scene.layout.GridPane;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import org.ossproject.desktop.viewmodel.ConnectionViewModel;
-import org.ossproject.finance.model.Account;
+import org.ossproject.finance.model.account.Account;
 import org.ossproject.secret.SecretBytes;
 
 import java.util.List;

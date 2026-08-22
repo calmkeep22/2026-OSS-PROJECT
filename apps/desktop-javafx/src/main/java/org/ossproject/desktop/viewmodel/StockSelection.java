@@ -1,6 +1,6 @@
 package org.ossproject.desktop.viewmodel;
 
-import org.ossproject.finance.model.SecuritySummary;
+import org.ossproject.finance.model.market.SecuritySummary;
 import org.ossproject.finance.model.SecurityId;
 
 import java.util.Objects;

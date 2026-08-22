@@ -2,7 +2,7 @@ package org.ossproject.desktop.navigation;
 
 import org.junit.jupiter.api.Test;
 import org.ossproject.finance.model.OrderSide;
-import org.ossproject.finance.model.OrderType;
+import org.ossproject.finance.model.order.OrderType;
 
 import static org.junit.jupiter.api.Assertions.*;
 

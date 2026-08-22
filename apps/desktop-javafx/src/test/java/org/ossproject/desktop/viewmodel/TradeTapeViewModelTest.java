@@ -8,7 +8,7 @@ import org.ossproject.fake.FakeStockQueryAdapter;
 import org.ossproject.finance.model.Exchange;
 import org.ossproject.finance.model.OrderSide;
 import org.ossproject.finance.model.SecurityId;
-import org.ossproject.finance.model.Trade;
+import org.ossproject.finance.model.market.Trade;
 
 import java.math.BigDecimal;
 import java.time.Instant;

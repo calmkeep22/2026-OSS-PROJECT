@@ -10,7 +10,7 @@ import org.ossproject.ai.Confidence;
 import org.ossproject.ai.Forecast;
 import org.ossproject.ai.SimilarOutlook;
 import org.ossproject.ai.SimilarStock;
-import org.ossproject.finance.model.Candle;
+import org.ossproject.finance.model.market.Candle;
 import org.ossproject.finance.model.SecurityId;
 
 import java.io.IOException;

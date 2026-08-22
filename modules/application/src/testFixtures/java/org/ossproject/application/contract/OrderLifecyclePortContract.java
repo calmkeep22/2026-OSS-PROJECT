@@ -2,8 +2,8 @@ package org.ossproject.application.contract;
 
 import org.junit.jupiter.api.Test;
 import org.ossproject.application.port.OrderLifecyclePort;
-import org.ossproject.finance.model.OrderCommand;
-import org.ossproject.finance.model.OrderStatus;
+import org.ossproject.finance.model.order.OrderCommand;
+import org.ossproject.finance.model.order.OrderStatus;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;

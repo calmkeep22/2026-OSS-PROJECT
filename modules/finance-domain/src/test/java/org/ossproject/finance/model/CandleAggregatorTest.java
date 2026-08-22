@@ -1,5 +1,10 @@
 package org.ossproject.finance.model;
 
+import org.ossproject.finance.model.market.Candle;
+import org.ossproject.finance.model.market.CandleAggregator;
+import org.ossproject.finance.model.market.CandleInterval;
+import org.ossproject.finance.model.market.Quote;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 

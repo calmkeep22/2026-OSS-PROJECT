@@ -1,6 +1,6 @@
 package org.ossproject.application.port;
 
-import org.ossproject.finance.model.Quote;
+import org.ossproject.finance.model.market.Quote;
 
 /** 실시간 시세 수신자. */
 @FunctionalInterface

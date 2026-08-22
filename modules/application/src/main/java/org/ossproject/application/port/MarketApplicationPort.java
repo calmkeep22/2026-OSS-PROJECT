@@ -1,10 +1,10 @@
 package org.ossproject.application.port;
 
-import org.ossproject.finance.model.Candle;
-import org.ossproject.finance.model.CandleInterval;
+import org.ossproject.finance.model.market.Candle;
+import org.ossproject.finance.model.market.CandleInterval;
 import org.ossproject.finance.model.SecurityId;
-import org.ossproject.finance.model.SecuritySummary;
-import org.ossproject.finance.model.StockDetail;
+import org.ossproject.finance.model.market.SecuritySummary;
+import org.ossproject.finance.model.market.StockDetail;
 
 import java.util.List;
 import java.util.concurrent.CompletionStage;
@@ -64,7 +64,7 @@ public interface MarketApplicationPort extends AutoCloseable {
     /**
      * 실시간 체결을 구독한다.
      *
-     * <p>{@link #monitor} 가 주는 {@link org.ossproject.finance.model.Quote} 는 현재가와
+     * <p>{@link #monitor} 가 주는 {@link org.ossproject.finance.model.market.Quote} 는 현재가와
      * 누적 거래량만 담는다. 체결 목록을 만들려면 건별 수량과 방향이 필요하다.
      */
     EventSubscription monitorTrades(SecurityId security, TradeListener listener);

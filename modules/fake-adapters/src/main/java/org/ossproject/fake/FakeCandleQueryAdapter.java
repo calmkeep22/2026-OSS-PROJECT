@@ -1,8 +1,8 @@
 package org.ossproject.fake;
 
 import org.ossproject.application.port.CandleQueryPort;
-import org.ossproject.finance.model.Candle;
-import org.ossproject.finance.model.CandleInterval;
+import org.ossproject.finance.model.market.Candle;
+import org.ossproject.finance.model.market.CandleInterval;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;

@@ -9,7 +9,7 @@ import javafx.scene.layout.Region;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.TextAlignment;
-import org.ossproject.finance.model.PricePoint;
+import org.ossproject.finance.model.market.PricePoint;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;

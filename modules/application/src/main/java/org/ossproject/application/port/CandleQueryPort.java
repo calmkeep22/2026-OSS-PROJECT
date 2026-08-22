@@ -1,7 +1,7 @@
 package org.ossproject.application.port;
 
-import org.ossproject.finance.model.Candle;
-import org.ossproject.finance.model.CandleInterval;
+import org.ossproject.finance.model.market.Candle;
+import org.ossproject.finance.model.market.CandleInterval;
 import org.ossproject.finance.model.SecurityId;
 
 import java.util.List;

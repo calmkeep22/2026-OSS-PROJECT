@@ -1,8 +1,8 @@
 package org.ossproject.fake;
 
 import org.ossproject.application.port.StockQueryPort;
-import org.ossproject.finance.model.SecuritySummary;
-import org.ossproject.finance.model.StockDetail;
+import org.ossproject.finance.model.market.SecuritySummary;
+import org.ossproject.finance.model.market.StockDetail;
 
 import java.time.Clock;
 import java.util.Comparator;

@@ -1,6 +1,6 @@
 package org.ossproject.application.port;
 
-import org.ossproject.finance.model.OrderBook;
+import org.ossproject.finance.model.orderbook.OrderBook;
 
 /**
  * 실시간 호가창 수신자.

@@ -6,8 +6,8 @@ import javafx.collections.ObservableList;
 import javafx.collections.transformation.FilteredList;
 import org.ossproject.application.port.MarketApplicationPort;
 import org.ossproject.desktop.state.WatchlistItem;
-import org.ossproject.finance.model.SecuritySummary;
-import org.ossproject.finance.model.StockDetail;
+import org.ossproject.finance.model.market.SecuritySummary;
+import org.ossproject.finance.model.market.StockDetail;
 
 import java.util.ArrayList;
 import java.util.List;

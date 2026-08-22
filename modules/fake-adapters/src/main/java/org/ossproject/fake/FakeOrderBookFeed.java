@@ -2,8 +2,8 @@ package org.ossproject.fake;
 
 import org.ossproject.application.port.OrderBookListener;
 import org.ossproject.application.port.OrderBookQueryPort;
-import org.ossproject.finance.model.OrderBook;
-import org.ossproject.finance.model.OrderBookLevel;
+import org.ossproject.finance.model.orderbook.OrderBook;
+import org.ossproject.finance.model.orderbook.OrderBookLevel;
 
 import java.math.BigDecimal;
 import java.time.Clock;

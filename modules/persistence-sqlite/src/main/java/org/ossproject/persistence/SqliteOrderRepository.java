@@ -1,11 +1,11 @@
 package org.ossproject.persistence;
 
 import org.ossproject.application.port.OrderRepository;
-import org.ossproject.finance.model.Execution;
-import org.ossproject.finance.model.Order;
+import org.ossproject.finance.model.order.Execution;
+import org.ossproject.finance.model.order.Order;
 import org.ossproject.finance.model.OrderSide;
-import org.ossproject.finance.model.OrderStatus;
-import org.ossproject.finance.model.OrderType;
+import org.ossproject.finance.model.order.OrderStatus;
+import org.ossproject.finance.model.order.OrderType;
 
 import java.math.BigDecimal;
 import java.sql.Connection;

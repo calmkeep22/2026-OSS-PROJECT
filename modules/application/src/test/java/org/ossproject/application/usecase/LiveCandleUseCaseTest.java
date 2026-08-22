@@ -9,9 +9,9 @@ import org.ossproject.application.port.ConnectionListener;
 import org.ossproject.application.port.ConnectionState;
 import org.ossproject.application.port.MarketDataStreamPort;
 import org.ossproject.application.port.QuoteListener;
-import org.ossproject.finance.model.Candle;
-import org.ossproject.finance.model.CandleInterval;
-import org.ossproject.finance.model.Quote;
+import org.ossproject.finance.model.market.Candle;
+import org.ossproject.finance.model.market.CandleInterval;
+import org.ossproject.finance.model.market.Quote;
 
 import java.math.BigDecimal;
 import java.time.Clock;

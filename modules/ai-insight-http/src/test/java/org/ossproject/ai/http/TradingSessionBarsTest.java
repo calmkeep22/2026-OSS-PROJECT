@@ -2,8 +2,8 @@ package org.ossproject.ai.http;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.ossproject.finance.model.Candle;
-import org.ossproject.finance.model.CandleInterval;
+import org.ossproject.finance.model.market.Candle;
+import org.ossproject.finance.model.market.CandleInterval;
 
 import java.math.BigDecimal;
 import java.time.Clock;
