@@ -1,4 +1,4 @@
-package org.ossproject.sonification;
+package org.ossproject.sonification.timing;
 
 import org.ossproject.sonification.model.TimeSeriesSample;
 

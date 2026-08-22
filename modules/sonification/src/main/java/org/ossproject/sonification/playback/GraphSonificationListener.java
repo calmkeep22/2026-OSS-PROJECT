@@ -1,4 +1,4 @@
-package org.ossproject.sonification;
+package org.ossproject.sonification.playback;
 
 import org.ossproject.sonification.model.GraphAudioFrame;
 

@@ -10,7 +10,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.util.StringConverter;
-import org.ossproject.sonification.GraphPlaybackState;
+import org.ossproject.sonification.playback.GraphPlaybackState;
 import org.ossproject.sonification.model.GraphScaleMode;
 
 import java.util.List;

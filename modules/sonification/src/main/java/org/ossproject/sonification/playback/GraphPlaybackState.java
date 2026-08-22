@@ -1,4 +1,4 @@
-package org.ossproject.sonification;
+package org.ossproject.sonification.playback;
 
 /** Lifecycle states of a historical graph playback controller. */
 public enum GraphPlaybackState {

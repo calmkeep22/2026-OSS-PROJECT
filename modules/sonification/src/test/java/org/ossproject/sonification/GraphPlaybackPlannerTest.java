@@ -1,5 +1,10 @@
 package org.ossproject.sonification;
 
+import org.ossproject.sonification.analysis.LargestTriangleThreeBucketsReducer;
+import org.ossproject.sonification.playback.GraphPlaybackPlan;
+import org.ossproject.sonification.playback.GraphPlaybackPlanner;
+import org.ossproject.sonification.timing.TimestampProportionalTimeMapping;
+
 import org.junit.jupiter.api.Test;
 import org.ossproject.sonification.model.TimeSeriesSample;
 

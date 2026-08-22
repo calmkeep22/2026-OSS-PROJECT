@@ -1,5 +1,7 @@
 package org.ossproject.sonification;
 
+import org.ossproject.sonification.analysis.GraphAnalyzer;
+
 import org.junit.jupiter.api.Test;
 import org.ossproject.sonification.model.GraphTrend;
 import org.ossproject.sonification.model.TimeSeriesSample;

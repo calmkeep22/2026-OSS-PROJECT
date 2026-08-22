@@ -1,4 +1,8 @@
-package org.ossproject.sonification;
+package org.ossproject.sonification.playback;
+
+import org.ossproject.sonification.analysis.GraphAnalyzer;
+import org.ossproject.sonification.analysis.GraphSeriesReducer;
+import org.ossproject.sonification.timing.GraphTimeMapping;
 
 import org.ossproject.sonification.model.TimeSeriesSample;
 

@@ -1,5 +1,8 @@
 package org.ossproject.sonification;
 
+import org.ossproject.sonification.playback.GraphSonificationListener;
+import org.ossproject.sonification.playback.StreamingGraphSonifier;
+
 import org.junit.jupiter.api.Test;
 import org.ossproject.sonification.model.*;
 import org.ossproject.sonification.port.SonificationOverflowPolicy;

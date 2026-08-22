@@ -1,4 +1,4 @@
-package org.ossproject.sonification;
+package org.ossproject.sonification.analysis;
 
 import org.ossproject.sonification.model.GraphSummary;
 import org.ossproject.sonification.model.GraphTrend;
