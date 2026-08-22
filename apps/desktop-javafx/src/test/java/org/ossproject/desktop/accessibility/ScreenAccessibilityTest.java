@@ -10,6 +10,7 @@ import org.ossproject.application.port.MarketApplicationPort;
 import org.ossproject.application.usecase.MarketApplicationService;
 import org.ossproject.desktop.view.screen.ScannerScreenView;
 import org.ossproject.desktop.view.screen.SearchScreenView;
+import org.ossproject.desktop.view.screen.SettingsScreenView;
 import org.ossproject.desktop.view.screen.WatchlistScreenView;
 import org.ossproject.desktop.viewmodel.DesktopSession;
 import org.ossproject.desktop.viewmodel.ScannerViewModel;
@@ -183,5 +184,112 @@ class ScreenAccessibilityTest {
             assertEquals(1, issues.size(), "이름 없는 단추 하나를 잡아야 합니다");
             assertEquals("MISSING_ACCESSIBLE_NAME", issues.get(0).code());
         });
+    }
+
+    /**
+     * 설정 화면은 이 앱에서 접근성 기능을 켜고 끄는 유일한 자리다.
+     *
+     * <p>조작 요소가 스물 몇 개라 이름 누락이 생기기 쉽고, 여기서 이름이 빠지면 접근성
+     * 기능 자체를 켤 수 없게 된다.
+     */
+    @Test
+    @DisplayName("설정 화면의 모든 조작 요소에 이름이 있다")
+    void settingsScreenNamesEverythingFocusable() {
+        JavaFxToolkit.onFxThread(() -> {
+            assertNoMissingNames("설정", settingsView().create());
+        });
+    }
+
+    /**
+     * 화면은 값을 바꿔 돌려주기만 한다.
+     *
+     * <p>화면이 합성기를 직접 만지고 저장은 다른 곳에서 하면 한쪽만 도는 경우가 생긴다 —
+     * 소리는 바뀌었는데 다음 실행 때 되돌아가거나 그 반대다.
+     */
+    @Test
+    @DisplayName("설정을 바꾸면 바뀐 값 전체를 앱에 돌려준다")
+    void settingsHandBackTheWholeValue() {
+        JavaFxToolkit.onFxThread(() -> {
+            java.util.List<org.ossproject.desktop.state.AccessibilityPreferences> changes =
+                    new java.util.ArrayList<>();
+            SettingsScreenView view = settingsView(changes::add);
+            Node root = view.create();
+            materialise(root);
+
+            javafx.scene.control.CheckBox contrast = findCheckBox(root, "고대비");
+            assertTrue(contrast != null, "고대비 스위치를 찾지 못했습니다.");
+            contrast.setSelected(true);
+
+            assertEquals(1, changes.size());
+            assertTrue(changes.get(0).highContrastEnabled());
+        });
+    }
+
+    /** 앞서 바꾼 값이 다음 변경에 살아 있어야 한다. 낱개로 돌려주면 서로를 덮어쓴다. */
+    @Test
+    @DisplayName("설정을 연달아 바꾸면 앞의 변경이 살아 있다")
+    void settingsAccumulateAcrossChanges() {
+        JavaFxToolkit.onFxThread(() -> {
+            java.util.List<org.ossproject.desktop.state.AccessibilityPreferences> changes =
+                    new java.util.ArrayList<>();
+            SettingsScreenView view = settingsView(changes::add);
+            Node root = view.create();
+            materialise(root);
+
+            findCheckBox(root, "고대비").setSelected(true);
+            findCheckBox(root, "큰 글자").setSelected(true);
+
+            org.ossproject.desktop.state.AccessibilityPreferences last =
+                    changes.get(changes.size() - 1);
+            assertTrue(last.highContrastEnabled() && last.largeTextEnabled(),
+                    "앞서 바꾼 고대비가 큰 글자 변경에 덮여 사라졌습니다.");
+        });
+    }
+
+    private SettingsScreenView settingsView() {
+        return settingsView(preferences -> { });
+    }
+
+    private SettingsScreenView settingsView(
+            java.util.function.Consumer<org.ossproject.desktop.state.AccessibilityPreferences> onChanged) {
+        SettingsScreenView.Context context = new SettingsScreenView.Context(
+                "키움 모의투자", "운영체제 보호",
+                new javafx.beans.property.SimpleStringProperty("연결됨"),
+                new javafx.beans.property.SimpleStringProperty("3개"),
+                () -> "1234****",
+                java.util.List::of);
+        SettingsScreenView.Actions actions = new SettingsScreenView.Actions(
+                onChanged, value -> { }, text -> { }, () -> { }, screen -> { }, text -> { });
+        return new SettingsScreenView(
+                org.ossproject.desktop.state.AccessibilityPreferences.DEFAULT, true, context, actions);
+    }
+
+    private static javafx.scene.control.CheckBox findCheckBox(Node node, String text) {
+        if (node instanceof javafx.scene.control.CheckBox box && text.equals(box.getText())) {
+            return box;
+        }
+        if (node instanceof javafx.scene.control.ScrollPane scroll && scroll.getContent() != null) {
+            return findCheckBox(scroll.getContent(), text);
+        }
+        if (node instanceof javafx.scene.control.TabPane tabs) {
+            for (javafx.scene.control.Tab tab : tabs.getTabs()) {
+                if (tab.getContent() != null) {
+                    javafx.scene.control.CheckBox found = findCheckBox(tab.getContent(), text);
+                    if (found != null) {
+                        return found;
+                    }
+                }
+            }
+            return null;
+        }
+        if (node instanceof javafx.scene.Parent parent) {
+            for (Node child : parent.getChildrenUnmodifiable()) {
+                javafx.scene.control.CheckBox found = findCheckBox(child, text);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
     }
 }

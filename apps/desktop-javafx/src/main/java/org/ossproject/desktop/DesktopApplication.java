@@ -46,6 +46,7 @@ import org.ossproject.desktop.ai.AiInsightListPanel;
 import java.util.LinkedHashMap;
 import org.ossproject.desktop.viewmodel.AiInsightViewModel;
 import org.ossproject.desktop.view.screen.NewsScreenView;
+import org.ossproject.desktop.view.screen.SettingsScreenView;
 import org.ossproject.desktop.view.screen.SimilarScreenView;
 import org.ossproject.desktop.view.screen.StockComparisonDialog;
 import org.ossproject.ai.SimilarStock;
@@ -2295,210 +2296,65 @@ public final class DesktopApplication extends Application {
         pendingOrderPrice = orderDraft.price();
     }
 
+    /**
+     * 설정 화면.
+     *
+     * <p>화면은 값을 바꿔 돌려주기만 한다. 합성기에 적용하는 일도, 저장하는 일도 여기서
+     * 맡는다. 화면이 직접 합성기를 만지고 저장은 다른 곳에서 하면 한쪽만 도는 경우가 생긴다.
+     */
     private VBox createSettingsScreen() {
-        CheckBox tts = setting("화면 읽기(TTS)", accessibility.speechEnabled(), selected -> {
-            accessibility = accessibility.withSpeechEnabled(selected);
-            if (selected) announce("음성 안내를 시작합니다.", SpeechPriority.USER_REQUEST, "speech-enabled");
-            else speechQueue.clear();
-            scheduleStateSave();
-        });
-        CheckBox keyboard = setting("키보드 탐색 안내", accessibility.keyboardGuidanceEnabled(),
-                selected -> { accessibility = accessibility.withKeyboardGuidanceEnabled(selected); applyKeyboardGuidance(selected); scheduleStateSave(); });
-        CheckBox reducedMotion = setting("그림자·시각 효과 줄이기", accessibility.reducedMotionEnabled(),
-                selected -> { accessibility = accessibility.withReducedMotionEnabled(selected); toggleClass("reduced-motion", selected); scheduleStateSave(); });
-        CheckBox anomalySound = setting("앱 효과음", accessibility.soundEnabled(), selected -> { accessibility = accessibility.withSoundEnabled(selected); scheduleStateSave(); });
-        CheckBox largeText = setting("큰 글자", accessibility.largeTextEnabled(), selected -> {
-            accessibility = accessibility.withLargeTextEnabled(selected);
-            toggleClass("large-text", selected);
-            scheduleStateSave();
-        });
-        CheckBox contrast = setting("고대비", accessibility.highContrastEnabled(), selected -> {
-            accessibility = accessibility.withHighContrastEnabled(selected);
-            toggleClass("high-contrast", selected);
-            scheduleStateSave();
-        });
-        List.of(tts, keyboard, reducedMotion, anomalySound, largeText, contrast)
-                .forEach(control -> control.getStyleClass().add("settings-switch"));
-        ComboBox<SpeechVoice> voice = new ComboBox<>();
-        SpeechVoice systemDefault = new SpeechVoice("", "시스템 기본 음성", "");
-        voice.getItems().add(systemDefault); voice.setValue(systemDefault);
-        voice.setConverter(new StringConverter<>() {
-            @Override public String toString(SpeechVoice value) {
-                if (value == null) return "";
-                return value.language().isBlank() ? value.displayName() : value.displayName() + " (" + value.language() + ")";
-            }
-            @Override public SpeechVoice fromString(String value) { return systemDefault; }
-        });
-        voice.valueProperty().addListener((obs, old, selected) -> {
-            if (selected == null || speechQueue.isClosed()) return;
-            speechQueue.setOptions(speechQueue.options().withVoiceName(selected.id().isBlank() ? null : selected.id()));
-            scheduleStateSave();
-        });
-        loadVoices(voice, systemDefault);
-
-        ComboBox<String> speed = new ComboBox<>(FXCollections.observableArrayList("0.8배", "1.0배", "1.2배", "1.5배"));
-        speed.setValue(String.format(java.util.Locale.ROOT, "%.1f배", speechQueue.options().rate()));
-        speed.valueProperty().addListener((obs, old, selected) -> {
-            if (selected != null && !speechQueue.isClosed()) {
-                double rate = Double.parseDouble(selected.replace("배", ""));
-                speechQueue.setOptions(speechQueue.options().withRate(rate));
-                scheduleStateSave();
-            }
-        });
-        Slider volume = new Slider(0, 100, speechQueue.options().volume()); volume.setShowTickLabels(true); volume.setMajorTickUnit(25);
-        volume.valueProperty().addListener((obs, old, selected) -> {
-            if (!speechQueue.isClosed()) {
-                speechQueue.setOptions(speechQueue.options().withVolume(selected.intValue())); scheduleStateSave();
-            }
-        });
-        ComboBox<String> density = new ComboBox<>(FXCollections.observableArrayList("좁게", "표준", "넓게"));
-        density.setValue(accessibility.informationDensity());
-        density.valueProperty().addListener((obs, old, selected) -> {
-            if (selected != null) { accessibility = accessibility.withInformationDensity(selected); applyInformationDensity(selected); scheduleStateSave(); }
-        });
-        GridPane voiceSettings = new GridPane(); voiceSettings.setHgap(16); voiceSettings.setVgap(10);
-        addField(voiceSettings, 0, "음성", voice);
-        addField(voiceSettings, 1, "속도", speed); addField(voiceSettings, 2, "음량", volume);
-        voiceSettings.getColumnConstraints().addAll(equalSettingsColumn(), equalSettingsColumn());
-        Button preview = new Button("설정 미리 듣기");
-        preview.setOnAction(event -> {
-            boolean before = accessibility.speechEnabled(); accessibility = accessibility.withSpeechEnabled(true);
-            announce("음성 설정 미리 듣기입니다. 현재 속도는 " + speed.getValue() + "이고 정보량은 " + density.getValue() + "입니다.",
-                    SpeechPriority.USER_REQUEST, "settings-preview"); accessibility = accessibility.withSpeechEnabled(before || tts.isSelected());
-        });
-        Button auditAccessibility = new Button("현재 화면 접근성 검사");
-        auditAccessibility.setOnAction(event -> {
-            List<AccessibilityAudit.Issue> issues = new AccessibilityAudit().audit(root);
-            if (issues.isEmpty()) {
-                showInformation("접근성 검사 통과", "현재 생성된 화면에서 접근 가능한 이름 누락을 찾지 못했습니다.");
-                return;
-            }
-            String details = issues.stream().limit(8).map(AccessibilityAudit.Issue::message)
-                    .reduce((left, right) -> left + "\n" + right).orElse("");
-            showInformation("접근성 검사 결과 " + issues.size() + "건", details);
-        });
-        VBox accessibilityToggles = settingsCard("화면 접근성",
-                tts, keyboard, reducedMotion, largeText, contrast);
-        VBox voiceCard = settingsCard("음성 설정", voiceSettings, wrappingRow(8, preview, auditAccessibility));
-        VBox accessibility = settingsTabContent(accessibilityToggles, voiceCard,
-                stateBanner("변경 사항은 선택 즉시 적용되고 자동 저장됩니다.", "success"));
-
-        Label settingsRealtime = new Label(); settingsRealtime.textProperty().bind(realtimeStatus.textProperty());
-        Label settingsAccount = new Label("조회 중");
-        CompletableFuture.supplyAsync(() -> tradingUseCase.account().maskedAccountNo())
-                .whenComplete((account, failure) -> Platform.runLater(() ->
-                        settingsAccount.setText(failure == null ? account : "연결 후 자동 조회")));
-        VBox connectionCard = settingsCard("키움 API 연결",
-                labeledControl("연결 상태", settingsRealtime),
-                informationRow("현재 공급원", marketDataSource),
-                informationRow("계좌", settingsAccount),
-                primaryButton("연결 설정 열기", () -> navigate(Screen.CONNECTION)));
-        VBox securityCard = settingsCard("개인정보·보안",
-                informationRow("비밀 저장 보호", secretStore.protectionLevel().displayName()),
-                informationRow("모의/실전 자격증명", "완전 분리"),
-                informationRow("로그 계좌번호", "마스킹"),
-                informationRow("토큰 평문 저장", "사용 안 함"),
-                new Label("App Secret과 토큰은 화면이나 일반 설정 파일에 표시·저장하지 않습니다."));
-        VBox connectionSecurity = settingsTabContent(connectionCard, securityCard);
-
-        Label confirm = stateBanner("모든 신규·취소 주문은 항상 재확인합니다.", "success");
-        CheckBox preventDuplicate = new CheckBox("같은 주문의 연속 입력 방지"); preventDuplicate.setSelected(preventDuplicateOrders);
-        preventDuplicate.getStyleClass().addAll("setting-toggle", "settings-switch");
-        preventDuplicate.selectedProperty().addListener((obs, old, value) -> {
-            preventDuplicateOrders = value; scheduleStateSave();
-        });
-        VBox tradingCard = settingsCard("거래 안전", confirm, preventDuplicate,
-                informationRow("주문 계좌", "키움 토큰에 연결된 계좌 자동 사용"));
-        GridPane densitySetting = new GridPane(); densitySetting.setHgap(16); densitySetting.setVgap(8);
-        addField(densitySetting, 0, "화면 밀도", density);
-        VBox advanced = settingsTabContent(settingsCard("화면 표시", densitySetting), tradingCard);
-
-        Label settingsSubscriptions = new Label(); settingsSubscriptions.textProperty().bind(subscriptionCount.textProperty());
-        Button openNotifications = primaryButton("알림 화면 열기", () -> navigate(Screen.NOTIFICATIONS));
-        VBox soundCard = settingsCard("소리 알림", anomalySound,
-                new Label("이상 감지 경고음과 주문 성공·오류 등 앱 효과음을 함께 켜거나 끕니다."));
-        VBox realtimeCard = settingsCard("실시간 알림 데이터",
-                labeledControl("현재 구독", settingsSubscriptions),
-                new Label("화면용 구독은 닫을 때 해제하고, 관심종목 이상 감시는 앱 실행 동안 유지합니다."),
-                openNotifications);
-        VBox notifications = settingsTabContent(soundCard, realtimeCard);
-
-        TabPane tabs = new TabPane(settingsTab("접근성", accessibility),
-                settingsTab("연결·보안", connectionSecurity), settingsTab("알림", notifications),
-                settingsTab("고급 설정", advanced));
-        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
-        tabs.setTabMinWidth(140);
-        tabs.setMinHeight(0);
-        tabs.setMaxHeight(Double.MAX_VALUE);
-        tabs.getStyleClass().add("settings-tabs");
-        Label settingsDescription = new Label("음성, 화면, 연결과 거래 안전 설정을 관리합니다.");
-        settingsDescription.getStyleClass().add("muted-text");
-        VBox titleBlock = new VBox(2, heading("설정"), settingsDescription);
-        VBox shell = new VBox(10, titleBlock, tabs);
-        shell.getStyleClass().add("settings-shell");
-        shell.setMaxWidth(1040);
-        VBox.setVgrow(tabs, Priority.ALWAYS);
-        StackPane centered = new StackPane(shell);
-        centered.setAlignment(Pos.TOP_CENTER);
-        VBox body = new VBox(centered);
-        body.getStyleClass().addAll("screen-content", "settings-screen");
-        body.setPadding(new Insets(12));
-        body.setMinSize(0, 0);
-        VBox.setVgrow(centered, Priority.ALWAYS);
-        return body;
+        SettingsScreenView.Context context = new SettingsScreenView.Context(
+                marketDataSource,
+                secretStore.protectionLevel().displayName(),
+                realtimeStatus.textProperty(),
+                subscriptionCount.textProperty(),
+                () -> tradingUseCase.account().maskedAccountNo(),
+                this::availableSpeechVoices);
+        SettingsScreenView.Actions actions = new SettingsScreenView.Actions(
+                this::applyAccessibility,
+                value -> {
+                    preventDuplicateOrders = value;
+                    scheduleStateSave();
+                },
+                this::previewSpeechSettings,
+                this::auditCurrentScreen,
+                this::navigate,
+                status::setText);
+        return new SettingsScreenView(accessibility, preventDuplicateOrders, context, actions)
+                .create();
     }
 
-    private ColumnConstraints equalSettingsColumn() {
-        ColumnConstraints column = new ColumnConstraints();
-        column.setPercentWidth(50);
-        column.setHgrow(Priority.ALWAYS);
-        column.setFillWidth(true);
-        return column;
+    /**
+     * 미리 듣기.
+     *
+     * <p>음성이 꺼져 있어도 들려준다. 끈 채로 설정을 만지는 동안 무엇이 바뀌는지 확인할
+     * 길이 없으면 설정 자체를 쓸 수 없다. 잠깐 켰다가 원래대로 돌린다.
+     */
+    private void previewSpeechSettings(String text) {
+        AccessibilityPreferences before = accessibility;
+        accessibility = accessibility.withSpeechEnabled(true);
+        announce(text, SpeechPriority.USER_REQUEST, "settings-preview");
+        accessibility = before;
     }
 
-    private VBox settingsCard(String title, Node... content) {
-        Label heading = new Label(title);
-        heading.getStyleClass().add("settings-card-heading");
-        VBox card = new VBox(9, heading);
-        card.getChildren().addAll(content);
-        card.getStyleClass().add("settings-card");
-        card.setMaxWidth(Double.MAX_VALUE);
-        return card;
+    /** 지금 만들어져 있는 화면에서 접근 가능한 이름이 빠진 곳을 찾는다. */
+    private void auditCurrentScreen() {
+        List<AccessibilityAudit.Issue> issues = new AccessibilityAudit().audit(root);
+        if (issues.isEmpty()) {
+            showInformation("접근성 검사 통과", "현재 생성된 화면에서 접근 가능한 이름 누락을 찾지 못했습니다.");
+            return;
+        }
+        String details = issues.stream().limit(8).map(AccessibilityAudit.Issue::message)
+                .reduce((left, right) -> left + "\n" + right).orElse("");
+        showInformation("접근성 검사 결과 " + issues.size() + "건", details);
     }
 
-    private VBox settingsTabContent(Node... content) {
-        VBox panel = new VBox(10, content);
-        panel.getStyleClass().add("settings-tab-content");
-        panel.setFillWidth(true);
-        return panel;
+    /** 합성기가 아는 음성 목록. 합성기가 목록을 못 주면 빈 목록이다. */
+    private List<SpeechVoice> availableSpeechVoices() {
+        return speechPort instanceof SpeechVoiceProvider provider
+                ? provider.availableVoices() : List.of();
     }
 
-    private Tab settingsTab(String title, Node content) {
-        ScrollPane scroll = new ScrollPane(content);
-        scroll.setFitToWidth(true);
-        scroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
-        scroll.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
-        scroll.getStyleClass().add("settings-tab-scroll");
-        return tab(title, scroll);
-    }
-
-    private void loadVoices(ComboBox<SpeechVoice> voiceBox, SpeechVoice systemDefault) {
-        if (!(speechPort instanceof SpeechVoiceProvider provider)) return;
-        CompletableFuture.supplyAsync(provider::availableVoices).whenComplete((voices, failure) ->
-                Platform.runLater(() -> {
-                    if (failure != null) {
-                        status.setText("음성 목록을 불러오지 못했습니다. 시스템 기본 음성을 사용합니다.");
-                        return;
-                    }
-                    String selectedVoice = speechQueue.options().voiceName();
-                    SpeechVoice selected = voices.stream()
-                            .filter(item -> java.util.Objects.equals(item.id(), selectedVoice))
-                            .findFirst().orElse(systemDefault);
-                    voiceBox.getItems().setAll(systemDefault);
-                    voiceBox.getItems().addAll(voices);
-                    voiceBox.setValue(selected);
-                }));
-    }
 
     private Button linkButton(String text, Screen screen) {
         Button button = new Button(text); button.getStyleClass().add("link-button");
@@ -2993,9 +2849,11 @@ public final class DesktopApplication extends Application {
             stockSearchViewModel.recentSearches().setAll(snapshot.recentSearches());
             preventDuplicateOrders = snapshot.preventDuplicateOrders();
         });
+        // 기동할 때도 같은 길을 쓴다. 여기서만 따로 적용하면 첫 실행과 이후가 갈라진다.
         accessibility = accessibilityPreferencesRepository.load();
-        String voice = accessibility.voiceName().isBlank() ? null : accessibility.voiceName();
-        speechQueue.setOptions(new SpeechOptions(accessibility.speechRate(), accessibility.speechVolume(), voice));
+        if (!speechQueue.isClosed()) {
+            speechQueue.setOptions(accessibility.speechOptions());
+        }
         sonificationPreferences = sonificationPreferencesRepository.load();
     }
 
@@ -3047,6 +2905,32 @@ public final class DesktopApplication extends Application {
         }
     }
     private void play(SoundCue cue) { if (accessibility.soundEnabled()) soundPort.play(cue); }
+    /**
+     * 바뀐 접근성 설정을 한 번에 적용하고 저장한다.
+     *
+     * <p>화면이 합성기를 직접 만지고 저장은 다른 곳에서 하면 한쪽만 도는 경우가 생긴다 —
+     * 소리는 바뀌었는데 다음 실행 때 되돌아가거나 그 반대다. 적용과 저장을 여기 한 곳에
+     * 묶어 둔다.
+     *
+     * <p>일곱 가지를 모두 다시 적용한다. 바뀐 것만 골라 적용하면 무엇이 바뀌었는지 화면이
+     * 알려 줘야 하고, 그 판단이 화면마다 갈라진다. 전부 다시 거는 편이 싸고 어긋나지 않는다.
+     */
+    private void applyAccessibility(AccessibilityPreferences updated) {
+        accessibility = updated;
+        if (!speechQueue.isClosed()) {
+            speechQueue.setOptions(updated.speechOptions());
+        }
+        if (!updated.speechEnabled()) {
+            speechQueue.clear();
+        }
+        applyKeyboardGuidance(updated.keyboardGuidanceEnabled());
+        toggleClass("reduced-motion", updated.reducedMotionEnabled());
+        toggleClass("large-text", updated.largeTextEnabled());
+        toggleClass("high-contrast", updated.highContrastEnabled());
+        applyInformationDensity(updated.informationDensity());
+        scheduleStateSave();
+    }
+
     private void applyKeyboardGuidance(boolean enabled) {
         toggleClass("keyboard-guidance-off", !enabled);
         if (root != null) {
