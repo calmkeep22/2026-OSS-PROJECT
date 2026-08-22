@@ -41,7 +41,9 @@ import org.ossproject.anomaly.StreamingAnomalyConfig;
 import org.ossproject.anomaly.StreamingAnomalyDetector;
 import org.ossproject.desktop.composition.DesktopServices;
 import org.ossproject.finance.model.*;
-import org.ossproject.desktop.ai.AiInsightCard;
+import org.ossproject.desktop.ai.AiInsightListPanel;
+
+import java.util.LinkedHashMap;
 import org.ossproject.desktop.viewmodel.AiInsightViewModel;
 import org.ossproject.desktop.view.screen.NewsScreenView;
 import org.ossproject.desktop.view.screen.SimilarScreenView;
@@ -119,6 +121,8 @@ public final class DesktopApplication extends Application {
     /** 지금 보고 있는 화면. 결과가 늦게 와도 그때 살아 있는 화면에만 넣는다. */
     private SimilarScreenView similarView;
     private NewsScreenView newsView;
+    /** 이상 감지 화면의 AI 분석 목록. 화면을 다시 만들면 새로 잡힌다. */
+    private AiInsightListPanel aiInsightListPanel;
     /**
      * 마지막으로 받은 분석.
      *
@@ -162,16 +166,6 @@ public final class DesktopApplication extends Application {
     private final DesktopStateRepository stateRepository;
     private final AccessibilityPreferencesRepository accessibilityPreferencesRepository;
     private final SonificationPreferencesRepository sonificationPreferencesRepository;
-    /**
-     * 고른 종목에 매인 화면.
-     *
-     * <p>상태를 보존하는 화면 중 종목별 내용을 담는 것만 적는다. 매번 새로 만드는 화면은
-     * 여기 넣을 필요가 없고, 관심종목처럼 종목과 무관한 화면은 넣으면 사용자가 맞춰 둔
-     * 스크롤과 선택이 이유 없이 사라진다.
-     */
-    private static final java.util.List<Screen> STOCK_BOUND_SCREENS =
-            java.util.List.of(Screen.ANOMALY);
-
     private DesktopScreenController screenController;
     private PauseTransition persistenceDelay;
     private final TextField globalSearch = new TextField();
@@ -1295,27 +1289,6 @@ public final class DesktopApplication extends Application {
         screenController.register(Screen.NEWS, this::createNewsScreen);
         screenController.register(Screen.RADIO, this::createAccessibleChartScreen);
         screenController.registerPreservingState(Screen.SETTINGS, this::createSettingsScreen);
-        invalidateStockBoundScreensOnSelectionChange();
-    }
-
-    /**
-     * 종목이 바뀌면 그 종목에 매인 화면을 다시 만들게 한다.
-     *
-     * <p>상태를 보존하는 화면은 노드를 캐시한다. 그래서 종목을 바꾸고 다시 들어가면 이전
-     * 종목의 내용이 그대로 남는다. 화면을 볼 수 있으면 종목명이 눈에 들어와 금방 알아채지만
-     * 스크린리더로는 문장을 끝까지 들어야 알 수 있다. 카카오를 보러 들어와서 삼성전자
-     * 분석을 듣게 된다.
-     */
-    private void invalidateStockBoundScreensOnSelectionChange() {
-        session.selectedStockProperty().addListener((observable, previous, selected) -> {
-            if (selected == null || previous == null
-                    || previous.securityId().equals(selected.securityId())) {
-                return;
-            }
-            for (Screen screen : STOCK_BOUND_SCREENS) {
-                screenController.invalidate(screen);
-            }
-        });
     }
 
     private VBox createDashboard() {
@@ -1962,39 +1935,74 @@ public final class DesktopApplication extends Application {
     }
 
     /**
-     * 지금 고른 종목의 AI 분석.
+     * 보유·관심 종목의 AI 분석.
      *
-     * <p>서비스가 스크린리더용으로 쓴 문장을 그대로 보여 준다. 화면이 문장을 새로 지어
-     * 내면 숫자를 앞에 두게 되고 신뢰도가 낮다는 사실이 빠진다.
+     * <p>이 화면은 종목 하나를 들여다보는 곳이 아니라 여러 종목을 훑는 곳이다. 한 종목짜리
+     * 카드를 맨 위에 두면 아래 목록과 아무 관계 없는 정보가 제일 먼저 읽힌다. 게다가 이
+     * 화면에는 종목 선택기가 없어서 사용자는 문안을 끝까지 들어야 어느 종목인지 알 수 있다.
      *
-     * <p>받지 못하면 빈 칸으로 두지 않고 이유를 적는다. 분석이 없는 것과 이상이 없는 것은
-     * 다른 뜻인데, 아무것도 없으면 사용자는 문제가 없다고 읽는다.
+     * <p>닮은 종목은 끄고 부른다. 종목당 몇 초가 더 드는데 목록에서 쓸 정보가 아니다.
+     * 그건 닮은 차트 화면에서 종목 하나를 골라 볼 때 켠다.
      */
     private javafx.scene.Node createAiInsightPanel() {
-        AiInsightCard card = new AiInsightCard(text -> requestSpeech(text, "ai-insight"));
-        loadAiInsight(card);
-        return card.root();
+        aiInsightListPanel = new AiInsightListPanel(text -> requestSpeech(text, "ai-insight"));
+        loadAiInsightList();
+        return aiInsightListPanel.root();
+    }
+
+    private void loadAiInsightList() {
+        AiInsightListPanel panel = aiInsightListPanel;
+        if (panel == null) {
+            return;
+        }
+        if (!aiInsightViewModel.available()) {
+            // 서버는 모델을 읽고 지수를 받은 뒤에야 포트를 연다. 그 사이의 연결 거부를
+            // 실패로 적으면 사용자는 고칠 수 없는 문제로 읽고 포기한다.
+            panel.unavailable(aiServiceProcess != null && aiServiceProcess.running()
+                    ? "AI 서버를 준비하고 있습니다. 10초쯤 걸립니다."
+                    : aiInsightViewModel.unavailableReason(), this::loadAiInsightList);
+            return;
+        }
+        panel.waiting();
+        // 계좌 조회가 끝나야 보유 종목을 안다. 화면 스레드를 막지 않는다.
+        CompletableFuture.supplyAsync(tradingUseCase::account)
+                .handle((account, failure) -> failure == null ? account : null)
+                .thenAccept(account -> Platform.runLater(() -> startAiInsightList(panel, account)));
     }
 
     /**
-     * 분석을 한 번 받아 본다.
+     * 감시 중인 종목을 모아 차례로 분석한다.
      *
-     * <p>서버는 모델을 읽고 지수를 받은 뒤에야 포트를 연다. 그 사이의 연결 거부를 실패로
-     * 적으면 사용자는 고칠 수 없는 문제로 읽고 포기한다. 앱이 서버를 띄웠고 아직 살아
-     * 있으면 준비 중이라고 적고 다시 시도할 길을 준다.
+     * <p>보유 종목을 먼저, 관심 종목을 뒤에 둔다. 돈이 들어가 있는 쪽이 먼저 읽혀야 한다.
+     * 같은 종목이 양쪽에 있으면 한 번만 넣는다.
      */
-    private void loadAiInsight(AiInsightCard card) {
-        if (!aiInsightViewModel.available()) {
-            if (aiServiceProcess != null && aiServiceProcess.running()) {
-                card.starting(() -> loadAiInsight(card));
-            } else {
-                card.unavailable(aiInsightViewModel.unavailableReason(), () -> loadAiInsight(card));
+    private void startAiInsightList(AiInsightListPanel panel, Account account) {
+        Map<String, String> names = new LinkedHashMap<>();
+        if (account != null) {
+            for (Position position : account.positions()) {
+                names.putIfAbsent(position.symbol(), position.name());
             }
+        }
+        for (WatchlistItem item : session.watchlistItems()) {
+            if (!item.needsIdentityRepair()) {
+                names.putIfAbsent(item.symbol(), item.securityName());
+            }
+        }
+        if (names.isEmpty()) {
+            panel.empty("보유 종목이나 관심 종목을 추가하면 AI 분석을 함께 보여 드립니다.");
             return;
         }
-        card.waiting();
-        aiInsightViewModel.analyze(session.selectedStock().securityId(), true,
-                card::show, reason -> card.unavailable(reason, () -> loadAiInsight(card)));
+
+        List<String> symbols = List.copyOf(names.keySet());
+        List<SecurityId> securities = new java.util.ArrayList<>();
+        for (String symbol : symbols) {
+            securities.add(SecurityId.of(symbol, "KRX"));
+        }
+        panel.starting(symbols, List.copyOf(names.values()));
+        aiInsightViewModel.analyzeAll(securities, false,
+                (security, insight) -> panel.show(security.symbol(), insight),
+                (security, reason) -> panel.failed(security.symbol(), reason),
+                panel::finished);
     }
 
     private ListView<String> anomalySignalList(FilteredList<String> items, String emptyText) {
