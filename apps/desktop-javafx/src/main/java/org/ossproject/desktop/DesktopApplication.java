@@ -1977,15 +1977,17 @@ public final class DesktopApplication extends Application {
      * 같은 종목이 양쪽에 있으면 한 번만 넣는다.
      */
     private void startAiInsightList(AiInsightListPanel panel, Account account) {
-        Map<String, String> names = new LinkedHashMap<>();
+        // 거래소를 함께 들고 다닌다. 종목 코드만 남기고 KRX 로 다시 만들면, 관심 목록에
+        // 담아 둔 미국 종목이 같은 코드의 국내 종목으로 조회된다.
+        Map<SecurityId, String> names = new LinkedHashMap<>();
         if (account != null) {
             for (Position position : account.positions()) {
-                names.putIfAbsent(position.symbol(), position.name());
+                names.putIfAbsent(SecurityId.of(position.symbol(), "KRX"), position.name());
             }
         }
         for (WatchlistItem item : session.watchlistItems()) {
             if (!item.needsIdentityRepair()) {
-                names.putIfAbsent(item.symbol(), item.securityName());
+                names.putIfAbsent(item.securityId(), item.securityName());
             }
         }
         if (names.isEmpty()) {
@@ -1993,12 +1995,12 @@ public final class DesktopApplication extends Application {
             return;
         }
 
-        List<String> symbols = List.copyOf(names.keySet());
-        List<SecurityId> securities = new java.util.ArrayList<>();
-        for (String symbol : symbols) {
-            securities.add(SecurityId.of(symbol, "KRX"));
+        List<SecurityId> securities = List.copyOf(names.keySet());
+        List<String> symbols = new java.util.ArrayList<>();
+        for (SecurityId security : securities) {
+            symbols.add(security.symbol());
         }
-        panel.starting(symbols, List.copyOf(names.values()));
+        panel.starting(List.copyOf(symbols), List.copyOf(names.values()));
         aiInsightViewModel.analyzeAll(securities, false,
                 (security, insight) -> panel.show(security.symbol(), insight),
                 (security, reason) -> panel.failed(security.symbol(), reason),
@@ -2839,6 +2841,8 @@ public final class DesktopApplication extends Application {
         CompletableFuture.supplyAsync(tradingUseCase::account).thenAccept(account -> {
             List<SecurityId> held = new java.util.ArrayList<>();
             for (Position position : account.positions()) {
+                // 계좌는 국내 모의투자라 보유 종목은 KRX 다. 관심 목록은 미국이 섞일 수
+                // 있어 저장해 둔 거래소를 그대로 쓴다.
                 held.add(SecurityId.of(position.symbol(), "KRX"));
             }
             newsViewModel.track(held);
