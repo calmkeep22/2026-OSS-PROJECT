@@ -45,6 +45,7 @@ import org.ossproject.desktop.ai.AiInsightListPanel;
 
 import java.util.LinkedHashMap;
 import org.ossproject.desktop.viewmodel.AiInsightViewModel;
+import org.ossproject.desktop.view.StockPicker;
 import org.ossproject.desktop.view.WatchlistToggle;
 import org.ossproject.desktop.view.screen.NewsScreenView;
 import org.ossproject.desktop.view.screen.SettingsScreenView;
@@ -125,6 +126,8 @@ public final class DesktopApplication extends Application {
     private NewsScreenView newsView;
     /** 이상 감지 화면의 AI 분석 목록. 화면을 다시 만들면 새로 잡힌다. */
     private AiInsightListPanel aiInsightListPanel;
+    /** 종목을 바꿔 다시 만든 화면. 고르개에 초점을 돌려 준다. */
+    private Screen pickerFocusScreen;
     /**
      * 마지막으로 받은 분석.
      *
@@ -1287,9 +1290,12 @@ public final class DesktopApplication extends Application {
         screenController.registerPreservingState(Screen.NOTIFICATIONS,
                 () -> new NotificationsScreenView(session.notifications(), status::setText,
                         this::scheduleStateSave, this::requestSpeech).create());
-        screenController.register(Screen.SIMILAR, this::createSimilarScreen);
-        screenController.register(Screen.NEWS, this::createNewsScreen);
-        screenController.register(Screen.RADIO, this::createAccessibleChartScreen);
+        screenController.register(Screen.SIMILAR,
+                () -> withStockPicker(Screen.SIMILAR, createSimilarScreen()));
+        screenController.register(Screen.NEWS,
+                () -> withStockPicker(Screen.NEWS, createNewsScreen()));
+        screenController.register(Screen.RADIO,
+                () -> withStockPicker(Screen.RADIO, createAccessibleChartScreen()));
         screenController.registerPreservingState(Screen.SETTINGS, this::createSettingsScreen);
     }
 
@@ -1707,6 +1713,55 @@ public final class DesktopApplication extends Application {
                 () -> startWatchlistSearch("미국"), status::setText)
                 .createUsPanel(selected -> status.setText(
                         "미국주식 주문은 아직 연동되지 않았습니다. 연동 예정: ust20000 매수, ust20001 매도"));
+    }
+
+    /**
+     * 분석 화면 위에 종목 고르개를 얹는다.
+     *
+     * <p>청각 차트와 닮은 차트와 뉴스는 모두 고른 종목 하나를 본다. 그런데 그 값을 바꾸는
+     * 길이 검색뿐이라, 종목 하나 바꾸는 데 화면을 두 번 옮겨야 했다. 화면에 고르개가 없어
+     * 지금 어느 종목을 보고 있는지도 제목으로만 알 수 있었다.
+     *
+     * <p>고르면 전역 선택 종목을 바꾼다. 화면마다 다른 종목을 들고 있으면 상세와 주문이
+     * 무엇을 가리키는지 알 수 없다. 주문은 제출 전에 종목 코드를 다시 보여 주므로, 여기서
+     * 바꾼 것이 곧바로 주문으로 이어지지 않는다.
+     */
+    private javafx.scene.Node withStockPicker(Screen screen, javafx.scene.Node content) {
+        StockPicker picker = new StockPicker(session.watchlistItems(), session.selectedStock(),
+                selected -> {
+                    session.selectStock(selected);
+                    // 고르개에 초점을 돌려 둔다. 화면을 다시 만들면 초점이 처음으로 가는데,
+                    // 종목을 여럿 견주는 동안 매번 탭으로 돌아오게 하면 못 쓴다.
+                    pickerFocusScreen = screen;
+                    screenController.invalidate(screen);
+                    screenController.show(screen);
+                });
+        loadHoldingsInto(picker);
+
+        VBox host = new VBox(10, picker.root(), content);
+        host.setFillWidth(true);
+        VBox.setVgrow(content, Priority.ALWAYS);
+        if (pickerFocusScreen == screen) {
+            pickerFocusScreen = null;
+            Platform.runLater(picker.root()::requestFocus);
+        }
+        return host;
+    }
+
+    /** 보유 종목은 계좌 조회가 끝나야 안다. 화면 스레드를 막지 않는다. */
+    private void loadHoldingsInto(StockPicker picker) {
+        CompletableFuture.supplyAsync(tradingUseCase::account)
+                .whenComplete((account, failure) -> Platform.runLater(() -> {
+                    if (failure != null) {
+                        return;
+                    }
+                    List<StockSelection> held = new java.util.ArrayList<>();
+                    for (Position position : account.positions()) {
+                        held.add(new StockSelection("국내", position.symbol(), position.name(),
+                                "KRX", "KRW"));
+                    }
+                    picker.setHoldings(held);
+                }));
     }
 
     /**
