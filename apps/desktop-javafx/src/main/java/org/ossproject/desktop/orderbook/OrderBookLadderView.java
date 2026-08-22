@@ -40,6 +40,13 @@ public final class OrderBookLadderView {
     /** 한 행 높이. CSS 의 {@code .order-book-panel .table-row-cell} 과 맞춘다. */
     private static final double ROW_HEIGHT = 34;
     private static final double HEADER_HEIGHT = 32;
+    /**
+     * 표 위에 놓인 요약·안내·벽 문구와 그 사이 간격이 차지하는 몫.
+     *
+     * <p>재서 구하지 않고 넉넉히 잡는다. 실제 높이는 문구가 몇 줄로 접히느냐에 따라 달라져
+     * 배치가 끝나야 알 수 있는데, 그때는 이미 잘린 뒤다. 조금 남는 편이 잘리는 것보다 낫다.
+     */
+    private static final double CHROME_HEIGHT = 126;
 
     private final ObservableList<PriceLadderRow> rows = FXCollections.observableArrayList();
     private final TableView<PriceLadderRow> table;
@@ -47,6 +54,8 @@ public final class OrderBookLadderView {
     private final Label announcement = new Label();
     private final Label walls = new Label();
     private final VBox root;
+    private final javafx.beans.property.ReadOnlyDoubleWrapper requiredHeight =
+            new javafx.beans.property.ReadOnlyDoubleWrapper(0);
     private boolean live = true;
     private boolean tradedCenter = true;
 
@@ -247,6 +256,21 @@ public final class OrderBookLadderView {
         table.setMinHeight(height);
         table.setPrefHeight(height);
         table.setMaxHeight(height);
+        // 표만 키워서는 부족하다. 바깥이 SplitPane 이면 자식의 pref 를 무시하고 제 기본
+        // 높이(400)를 쓰기 때문에 아래 단계가 잘린다. 필요한 높이를 알려 두면 담는 쪽이
+        // 최소 높이로 걸 수 있다.
+        // root 를 보지 않는다. 생성자가 root 를 만들기 전에 이 메서드를 부른다.
+        requiredHeight.set(height + CHROME_HEIGHT);
+    }
+
+    /**
+     * 이 칸이 잘리지 않으려면 몇 픽셀이 필요한지.
+     *
+     * <p>호가는 한눈에 보아야 판단이 된다. 담는 쪽이 이 값을 최소 높이로 걸어 주어야
+     * 아래 단계까지 닿는다.
+     */
+    public javafx.beans.property.ReadOnlyDoubleProperty requiredHeight() {
+        return requiredHeight.getReadOnlyProperty();
     }
 
     /** 잔량이 없으면 빈 칸으로 둔다. 0 을 늘어놓으면 표를 읽어 내려갈 때 소음이 된다. */

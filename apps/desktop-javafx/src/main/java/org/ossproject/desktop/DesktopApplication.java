@@ -71,6 +71,7 @@ import static org.ossproject.desktop.presentation.Formatters.assetsSource;
 import static org.ossproject.desktop.presentation.Formatters.orderTime;
 import static org.ossproject.desktop.presentation.Formatters.signedChangeRate;
 import static org.ossproject.desktop.presentation.Formatters.signedWon;
+import org.ossproject.desktop.navigation.NavigationIcons;
 import org.ossproject.desktop.navigation.OrderDraft;
 import org.ossproject.desktop.navigation.Screen;
 import org.ossproject.desktop.controller.DesktopScreenController;
@@ -448,26 +449,7 @@ public final class DesktopApplication extends Application {
     }
 
     private Node navigationIcon(Screen screen) {
-        String data = switch (screen) {
-            case DASHBOARD -> "M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3z";
-            case CONNECTION -> "M7.5 6h3v2h-3a4 4 0 0 0 0 8h3v2h-3a6 6 0 0 1 0-12h3v2h-3a4 4 0 0 0 0-8zm2.5 5h4v2h-4zm3.5-5h3a6 6 0 1 1 0 12h-3v-2h3a4 4 0 1 0 0-8h-3z";
-            case MARKET -> "M4 4h7v7H4zm9 0h7v7h-7zM4 13h7v7H4zm9 0h7v7h-7z";
-            case SEARCH, STOCK_DETAIL -> "M10 3a7 7 0 1 0 4.9 12l5.6 5.5 1.5-1.5-5.5-5.6A7 7 0 0 0 10 3zm0 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10z";
-            case WATCHLIST -> "M12 2.5l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3-5.8 3 1.1-6.5-4.7-4.6 6.5-.9z";
-            case SCANNER -> "M4 4h16v3H4zm0 6h11v3H4zm0 6h7v3H4z";
-            case CONDITION -> "M5 4h14v3H5zm2 6h10v3H7zm3 6h4v3h-4z";
-            case TRADING -> "M3 5h16a2 2 0 0 1 2 2v2h-5a3 3 0 0 0 0 0 6h5v2a2 2 0 0 1-2 2H3zm13 6h6v2h-6a1 1 0 0 1 0-2z";
-            case ACCOUNT -> "M4 4h16v16H4zm3 4v2h10V8zm0 4v2h10v-2zm0 4v2h6v-2z";
-            case US_MARKET -> "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm6.9 9h-3a15.8 15.8 0 0 0-1.2-5A8 8 0 0 1 18.9 11zM12 4c1.1 1.3 1.8 3.8 1.9 7h-3.8c.1-3.2.8-5.7 1.9-7zM9.3 6A15.8 15.8 0 0 0 8.1 11h-3A8 8 0 0 1 9.3 6zM5.1 13h3a15.8 15.8 0 0 0 1.2 5 8 8 0 0 1-4.2-5zM12 20c-1.1-1.3-1.8-3.8-1.9-7h3.8c-.1 3.2-.8 5.7-1.9 7zm2.7-2a15.8 15.8 0 0 0 1.2-5h3a8 8 0 0 1-4.2 5z";
-            // 겹친 물결 두 줄. 닮은 모양을 겹쳐 놓았다는 뜻이다.
-            case SIMILAR -> "M3 15c3-6 6-6 9 0s6 6 9 0v3c-3 6-6 6-9 0s-6-6-9 0zm0-8c3-6 6-6 9 0s6 6 9 0v3c-3 6-6 6-9 0s-6-6-9 0z";
-            // 접힌 신문.
-            case NEWS -> "M4 4h13v16H4zm2 3v2h9V7zm0 4v2h9v-2zm0 4v2h6v-2zm13-8h3v11a2 2 0 0 1-4 0V7z";
-            case ANOMALY -> "M12 2 1 21h22zm0 5.2-6.2 11.3h12.4zM11 10h2v4h-2zm0 5.5h2v2h-2z";
-            case NOTIFICATIONS -> "M12 22a2.5 2.5 0 0 0 2.4-2h-4.8A2.5 2.5 0 0 0 12 22zM20 17H4l2-2v-5a6 6 0 0 1 5-5.9V2h2v2.1A6 6 0 0 1 18 10v5z";
-            case RADIO -> "M9 4v12.2a3 3 0 1 0 2 2.8V8h7V4zm-3 16a1 1 0 1 1 0-2 1 1 0 0 1 0 2zm9-2a1 1 0 1 1 0-2 1 1 0 0 1 0 2z";
-            case SETTINGS -> "M19.4 13a7.7 7.7 0 0 0 .1-1l2-1.5-2-3.5-2.5 1a8 8 0 0 0-1.7-1L15 4h-4l-.4 3a8 8 0 0 0-1.7 1L6.5 7 4.5 10.5l2 1.5a7.7 7.7 0 0 0 0 2L4.5 15.5 6.5 19 9 18a8 8 0 0 0 1.7 1l.3 3h4l.4-3a8 8 0 0 0 1.7-1l2.5 1 2-3.5zM13 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8z";
-        };
+        String data = NavigationIcons.pathFor(screen);
         javafx.scene.shape.SVGPath icon = new javafx.scene.shape.SVGPath();
         icon.setContent(data);
         icon.getStyleClass().add("nav-rail-icon");
@@ -1130,6 +1112,9 @@ public final class DesktopApplication extends Application {
      * <p>공급원이 호가를 주지 않으면 호가창 대신 안내를 보여 준다. 빈 표를 띄우면 잔량이
      * 없는 것인지 연결이 안 된 것인지 구분할 수 없다.
      */
+    /** 탭 머리가 차지하는 높이. 호가 칸 최소 높이를 셈할 때 더한다. */
+    private static final double TAB_HEADER_HEIGHT = 44;
+
     private javafx.scene.Node createOrderBookPanel(String stockName) {
         OrderBookLadderView ladder = new OrderBookLadderView(stockName);
         DepthChartCanvas depth = new DepthChartCanvas();
@@ -1138,7 +1123,11 @@ public final class DesktopApplication extends Application {
         views.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
         // 높이를 고정하면 호가 표가 잘려 아래 단계에 아예 닿을 수 없다. 내용에 맞춰 늘어나게
         // 두고, 화면이 길어지면 바깥 스크롤로 닿는다.
-        views.setMinSize(0, 0);
+        //
+        // 다만 pref 만으로는 부족하다. 주문 화면에서는 이 칸이 SplitPane 안에 들어가는데,
+        // SplitPane 은 자식의 pref 를 무시하고 제 기본 높이를 쓴다. 그래서 실제로 아래
+        // 단계가 잘렸다. 사다리가 알려 주는 필요 높이를 최소 높이로 건다.
+        views.minHeightProperty().bind(ladder.requiredHeight().add(TAB_HEADER_HEIGHT));
         views.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
         views.getStyleClass().add("order-book-panel");
 
