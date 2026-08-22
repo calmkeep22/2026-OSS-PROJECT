@@ -49,6 +49,8 @@ import org.ossproject.desktop.view.StockPicker;
 import org.ossproject.desktop.view.WatchlistToggle;
 import org.ossproject.desktop.view.screen.NewsScreenView;
 import org.ossproject.desktop.view.screen.OrderFormView;
+import org.ossproject.desktop.view.screen.StockChartPanel;
+import org.ossproject.desktop.view.screen.StockScreenView;
 import org.ossproject.desktop.view.screen.SettingsScreenView;
 import org.ossproject.desktop.view.screen.SimilarScreenView;
 import org.ossproject.desktop.view.screen.StockComparisonDialog;
@@ -1520,15 +1522,17 @@ public final class DesktopApplication extends Application {
         return body;
     }
 
+    /**
+     * 종목 상세 화면.
+     *
+     * <p>여기서는 조립만 한다. 차트와 호가와 체결은 각자 클래스가 있고, 이 메서드는 그것을
+     * 만들어 넘긴다.
+     */
     private VBox createStockScreen() {
         StockDetail detail = stockDetailViewModel.detail();
-        var selection = stockDetailViewModel.selection();
+        StockSelection selection = stockDetailViewModel.selection();
         pendingOrderPrice = stockDetailViewModel.plainOrderPrice();
-        Label title = heading(detail.name());
-        title.getStyleClass().add("stock-detail-title");
-        Label symbol = new Label(detail.symbol() + " · " + selection.exchange());
-        symbol.getStyleClass().addAll("mode-badge", "stock-detail-symbol");
-        // 담긴 뒤에도 "추가" 라고 적혀 있으면 눌린 것인지 알 수 없다. 단추가 상태를 든다.
+
         Button favorite = new WatchlistToggle(session.watchlistItems(), detail.symbol(),
                 selection.exchange(), detail.name(),
                 () -> addToWatchlistBySymbol(detail.symbol(), detail.name()),
@@ -1537,118 +1541,25 @@ public final class DesktopApplication extends Application {
                     scheduleStateSave();
                 },
                 status::setText).button();
-        favorite.getStyleClass().add("stock-compact-action");
-        Button buy = primaryButton("매수", () -> openOrder(OrderSide.BUY));
-        buy.getStyleClass().add("stock-compact-action");
-        Button sell = new Button("매도"); sell.getStyleClass().addAll("sell-button", "stock-compact-action"); sell.setOnAction(event -> openOrder(OrderSide.SELL));
-        Region titleSpacer = new Region(); HBox.setHgrow(titleSpacer, Priority.ALWAYS);
-        HBox titleRow = new HBox(8, title, symbol, titleSpacer, favorite, sell, buy); titleRow.setAlignment(Pos.CENTER_LEFT);
-        String direction = detail.direction() == PriceDirection.UP ? "상승" : detail.direction() == PriceDirection.DOWN ? "하락" : "보합";
-        Label price = new Label(stockDetailViewModel.formatPrice(detail.currentPrice()) + " · " + direction + " "
-                + stockDetailViewModel.formatPrice(detail.changeAmount().abs()) + " · " + detail.changeRate().abs() + "%");
-        price.getStyleClass().add("stock-price");
-        Button listen = new Button("최신 정보 듣기");
-        listen.getStyleClass().add("stock-compact-action");
-        listen.setOnAction(event -> requestSpeech(detail.name() + " 현재가 "
-                + stockDetailViewModel.formatPrice(detail.currentPrice())
-                + ", 전일 대비 " + direction + " " + detail.changeRate().abs() + "퍼센트입니다.",
-                "stock-detail-" + detail.symbol()));
 
-        VBox openMetric = miniMetric("시가", stockDetailViewModel.formatPrice(detail.open()));
-        VBox highMetric = miniMetric("고가", stockDetailViewModel.formatPrice(detail.high()));
-        VBox lowMetric = miniMetric("저가", stockDetailViewModel.formatPrice(detail.low()));
-        // 시가총액과 외국인 소진률은 ka10001 이 함께 주지만 아직 도메인 모델에 담지
-        // 않았다. 값을 지어내지 않고 항목 자체를 빼 둔다.
-        VBox volumeMetric = miniMetric("거래량", String.format("%,d", detail.volume()));
-        List.of(openMetric, highMetric, lowMetric, volumeMetric).forEach(metric -> metric.setPrefWidth(108));
-        FlowPane quoteRow = wrappingRow(8, price, listen, openMetric, highMetric, lowMetric, volumeMetric);
-        quoteRow.getStyleClass().add("stock-quote-row");
-
-        HBox periods = new HBox(5);
-        periods.setAlignment(Pos.CENTER_LEFT);
-        periods.getStyleClass().add("stock-periods");
-        ToggleGroup periodGroup = new ToggleGroup();
-        Map<ToggleButton, StockDetailViewModel.ChartRange> periodButtons = new java.util.LinkedHashMap<>();
-        for (StockDetailViewModel.ChartRange range : StockDetailViewModel.ChartRange.values()) {
-            ToggleButton button = new ToggleButton(range.label()); button.setToggleGroup(periodGroup);
-            button.getStyleClass().add("stock-chart-toggle");
-            if (range == StockDetailViewModel.ChartRange.DAY) button.setSelected(true);
-            periodButtons.put(button, range); periods.getChildren().add(button);
-        }
-
-        List<PricePoint> chartPoints = stockDetailViewModel.history(StockDetailViewModel.ChartRange.DAY);
-        CandlestickChartView candleChart = new CandlestickChartView(chartPoints);
-        CheckBox movingAverage = new CheckBox("이동평균"); movingAverage.setSelected(true);
-        CheckBox bollinger = new CheckBox("Bollinger Band");
-        CheckBox rsi = new CheckBox("RSI");
-        CheckBox macd = new CheckBox("MACD");
-        movingAverage.selectedProperty().addListener((obs, old, value) -> candleChart.setShowMovingAverages(value));
-        bollinger.selectedProperty().addListener((obs, old, value) -> candleChart.setShowBollinger(value));
-        rsi.selectedProperty().addListener((obs, old, value) -> candleChart.setShowRsi(value));
-        macd.selectedProperty().addListener((obs, old, value) -> candleChart.setShowMacd(value));
-        HBox indicators = new HBox(8, movingAverage, bollinger, rsi, macd);
-        indicators.setAlignment(Pos.CENTER_LEFT);
-        indicators.getStyleClass().add("stock-indicators");
-
-        TableView<PricePoint> history = new TableView<>(FXCollections.observableArrayList(chartPoints));
-        history.setAccessibleText(detail.name() + " 최근 가격 흐름 표");
-        history.setAccessibleHelp("차트와 동일한 날짜별 시가, 고가, 저가, 종가와 거래량입니다.");
-        history.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
-        history.getColumns().add(priceColumn("날짜", point -> point.date().toString()));
-        history.getColumns().add(priceColumn("시가", point -> stockDetailViewModel.formatPrice(point.open())));
-        history.getColumns().add(priceColumn("고가", point -> stockDetailViewModel.formatPrice(point.high())));
-        history.getColumns().add(priceColumn("저가", point -> stockDetailViewModel.formatPrice(point.low())));
-        history.getColumns().add(priceColumn("종가", point -> stockDetailViewModel.formatPrice(point.close())));
-        history.getColumns().add(priceColumn("거래량", point -> Long.toString(point.volume())));
-        history.setPrefHeight(350);
-        periodButtons.forEach((button, range) -> button.setOnAction(event -> {
-            button.setDisable(true);
-            status.setText(detail.name() + " " + range.label() + " 차트를 조회하고 있습니다.");
-            stockDetailViewModel.loadHistory(range).whenComplete((updated, failure) -> {
-                button.setDisable(false);
-                if (failure != null || updated.isEmpty()) {
-                    status.setText(detail.name() + " 차트를 조회하지 못했습니다.");
-                    play(SoundCue.ERROR);
-                } else {
-                    candleChart.setPoints(updated);
-                    history.getItems().setAll(updated);
-                    startLiveChart(candleChart, history);
-                    status.setText(detail.name() + " " + range.label() + " 차트로 변경했습니다.");
-                }
-            });
-        }));
-        Button soundChart = new Button("이 차트를 소리로 탐색");
-        soundChart.getStyleClass().add("stock-compact-action");
-        soundChart.setOnAction(event -> navigate(Screen.RADIO));
-        FlowPane chartToolbar = new FlowPane(10, 6, periods, indicators, soundChart);
-        chartToolbar.setAlignment(Pos.CENTER_LEFT);
-        chartToolbar.setPrefWrapLength(1060);
-        chartToolbar.getStyleClass().add("stock-chart-toolbar");
-        TabPane chartRepresentations = new TabPane(tab("그래프", candleChart), tab("접근 가능한 표", history));
-        chartRepresentations.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
-        chartRepresentations.setMinHeight(0); chartRepresentations.setPrefHeight(440);
-        VBox chart = new VBox(7, chartToolbar, chartRepresentations); chart.setPadding(new Insets(6));
-        chart.setMinHeight(0); VBox.setVgrow(chartRepresentations, Priority.ALWAYS);
-        startLiveChart(candleChart, history);
+        StockChartPanel chartPanel = new StockChartPanel(detail.name(),
+                stockDetailViewModel::formatPrice,
+                stockDetailViewModel::loadHistory,
+                this::startLiveChart,
+                status::setText,
+                () -> play(SoundCue.ERROR),
+                () -> navigate(Screen.RADIO));
 
         // 호가와 체결은 키움 조회 뒤 실시간 스트림으로 이어 붙인다. 기업정보·거래원·
-        // 프로그램매매는 아직 실제 TR이 없으므로 완성된 기능처럼 탭을 노출하지 않는다.
-        javafx.scene.Node orderBook = createOrderBookPanel(detail.name());
-        javafx.scene.Node trades = createTradeTapePanel(detail.name());
-
-        TabPane tabs = new TabPane(tab("차트", chart), tab("호가", orderBook), tab("체결", trades));
-        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
-        tabs.setMinHeight(0); tabs.setPrefHeight(540); tabs.setMaxHeight(Double.MAX_VALUE);
-        tabs.getStyleClass().add("stock-detail-tabs");
-        VBox summary = new VBox(8, titleRow, quoteRow);
-        summary.getStyleClass().addAll("panel-card", "stock-detail-summary");
-        VBox body = new VBox(12, summary, tabs);
-        body.setPadding(new Insets(12));
-        body.setMinSize(0, 0); body.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
-        body.getStyleClass().add("screen-content");
-        body.setAccessibleText("종목 상세 " + detail.name());
-        VBox.setVgrow(tabs, Priority.ALWAYS);
-        return body;
+        // 프로그램매매는 아직 실제 TR 이 없으므로 완성된 기능처럼 탭을 노출하지 않는다.
+        return new StockScreenView(detail, selection.exchange(),
+                stockDetailViewModel::formatPrice, favorite,
+                () -> openOrder(OrderSide.BUY), () -> openOrder(OrderSide.SELL),
+                this::requestSpeech)
+                .create(chartPanel.create(
+                                stockDetailViewModel.history(StockDetailViewModel.ChartRange.DAY)),
+                        createOrderBookPanel(detail.name()),
+                        createTradeTapePanel(detail.name()));
     }
 
     private ScrollPane createMarketScreen() {
@@ -2206,10 +2117,6 @@ public final class DesktopApplication extends Application {
         return recent > 0 ? plain.substring(0, recent) : "이상 신호";
     }
 
-    private TableColumn<PricePoint, String> priceColumn(String title, java.util.function.Function<PricePoint, String> mapper) {
-        TableColumn<PricePoint, String> column = new TableColumn<>(title);
-        column.setCellValueFactory(data -> new SimpleStringProperty(mapper.apply(data.getValue()))); return column;
-    }
 
     private List<PricePoint> dailyPriceHistory(String symbol, int count) {
         return candleAdapter.getCandles(symbol, CandleInterval.DAY, count).stream()
