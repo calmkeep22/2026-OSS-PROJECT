@@ -9,9 +9,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.ossproject.desktop.state.WatchlistItem;
 import org.ossproject.desktop.testsupport.JavaFxToolkit;
 
-import java.util.ArrayList;
-import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -30,15 +27,25 @@ class WatchlistToggleTest {
         return FXCollections.observableArrayList();
     }
 
+    /** 담고 빼는 일이 곧바로 끝나는 단추. 대부분의 검사가 이것을 쓴다. */
+    private static Button toggle(ObservableList<WatchlistItem> watchlist) {
+        return new WatchlistToggle(watchlist, "005930", "KRX", "삼성전자",
+                () -> watchlist.add(item("005930", "KRX")),
+                () -> watchlist.removeIf(entry -> entry.symbol().equals("005930"))).button();
+    }
+
+    /** 담고 빼도 아무 일도 일어나지 않는 단추. 목록을 밖에서 바꿔 볼 때 쓴다. */
+    private static Button inertToggle(ObservableList<WatchlistItem> watchlist) {
+        return new WatchlistToggle(watchlist, "005930", "KRX", "삼성전자",
+                () -> { }, () -> { }).button();
+    }
+
     @Test
     @DisplayName("담기 전에는 추가, 담고 나면 취소로 바뀐다")
     void flipsAfterAdding() {
         JavaFxToolkit.onFxThread(() -> {
             ObservableList<WatchlistItem> watchlist = emptyList();
-            Button button = new WatchlistToggle(watchlist, "005930", "KRX", "삼성전자",
-                    () -> watchlist.add(item("005930", "KRX")),
-                    () -> watchlist.removeIf(entry -> entry.symbol().equals("005930")),
-                    text -> { }).button();
+            Button button = toggle(watchlist);
 
             assertEquals("관심종목 추가", button.getText());
             button.fire();
@@ -52,15 +59,60 @@ class WatchlistToggleTest {
         JavaFxToolkit.onFxThread(() -> {
             ObservableList<WatchlistItem> watchlist =
                     FXCollections.observableArrayList(item("005930", "KRX"));
-            Button button = new WatchlistToggle(watchlist, "005930", "KRX", "삼성전자",
-                    () -> watchlist.add(item("005930", "KRX")),
-                    () -> watchlist.removeIf(entry -> entry.symbol().equals("005930")),
-                    text -> { }).button();
+            Button button = toggle(watchlist);
 
             assertEquals("관심종목 취소", button.getText());
             button.fire();
             assertTrue(watchlist.isEmpty());
             assertEquals("관심종목 추가", button.getText());
+        });
+    }
+
+    /**
+     * 담았다 뺀 종목을 다시 담을 수 있어야 한다.
+     *
+     * <p>실제로 안 됐다. 단추가 담기의 결과를 기다렸는데 그 결과가 같은 화면 스레드에서
+     * 도착하는 바람에, 화면 스레드가 자기가 실행할 일을 기다리다 굳었다. 5초 뒤 시간
+     * 초과로 풀리고 담기는 실패로 끝났다.
+     */
+    @Test
+    @DisplayName("담았다 빼고 다시 담을 수 있다")
+    void canAddAgainAfterRemoving() {
+        JavaFxToolkit.onFxThread(() -> {
+            ObservableList<WatchlistItem> watchlist = emptyList();
+            Button button = toggle(watchlist);
+
+            button.fire();
+            assertEquals("관심종목 취소", button.getText());
+            button.fire();
+            assertEquals("관심종목 추가", button.getText());
+            button.fire();
+
+            assertEquals(1, watchlist.size(), "다시 담기지 않았습니다.");
+            assertEquals("관심종목 취소", button.getText());
+        });
+    }
+
+    /**
+     * 담기가 곧바로 끝나지 않아도 된다.
+     *
+     * <p>종목 식별 정보를 조회해야 하는 경우가 있다. 단추가 그것을 기다리면 화면이 멈춘다.
+     * 기다리지 않고 목록이 바뀌는 것을 본다.
+     */
+    @Test
+    @DisplayName("담기가 늦게 끝나도 목록이 바뀌면 따라간다")
+    void followsALateAdd() {
+        JavaFxToolkit.onFxThread(() -> {
+            ObservableList<WatchlistItem> watchlist = emptyList();
+            Button button = inertToggle(watchlist);
+
+            button.fire();
+            assertEquals("관심종목 추가", button.getText(),
+                    "아직 담기지 않았으므로 그대로여야 합니다.");
+
+            // 조회가 끝나 뒤늦게 목록에 들어온다.
+            watchlist.add(item("005930", "KRX"));
+            assertEquals("관심종목 취소", button.getText());
         });
     }
 
@@ -73,9 +125,7 @@ class WatchlistToggleTest {
     void accessibleNameCarriesTheState() {
         JavaFxToolkit.onFxThread(() -> {
             ObservableList<WatchlistItem> watchlist = emptyList();
-            Button button = new WatchlistToggle(watchlist, "005930", "KRX", "삼성전자",
-                    () -> watchlist.add(item("005930", "KRX")),
-                    () -> watchlist.clear(), text -> { }).button();
+            Button button = toggle(watchlist);
 
             assertTrue(button.getAccessibleText().contains("담겨 있지 않음"),
                     button.getAccessibleText());
@@ -91,8 +141,7 @@ class WatchlistToggleTest {
         JavaFxToolkit.onFxThread(() -> {
             ObservableList<WatchlistItem> watchlist =
                     FXCollections.observableArrayList(item("005930", "KRX"));
-            Button button = new WatchlistToggle(watchlist, "005930", "KRX", "삼성전자",
-                    () -> true, () -> { }, text -> { }).button();
+            Button button = inertToggle(watchlist);
 
             assertEquals("관심종목 취소", button.getText());
             watchlist.clear();
@@ -107,46 +156,9 @@ class WatchlistToggleTest {
         JavaFxToolkit.onFxThread(() -> {
             ObservableList<WatchlistItem> watchlist =
                     FXCollections.observableArrayList(item("005930", "NASDAQ"));
-            Button button = new WatchlistToggle(watchlist, "005930", "KRX", "삼성전자",
-                    () -> true, () -> { }, text -> { }).button();
+            Button button = inertToggle(watchlist);
 
             assertEquals("관심종목 추가", button.getText());
-        });
-    }
-
-    /** 담기가 거절될 수 있다. 목록이 그대로면 단추도 그대로여야 한다. */
-    @Test
-    @DisplayName("담기가 실패하면 취소로 바뀌지 않는다")
-    void staysPutWhenAddingFails() {
-        JavaFxToolkit.onFxThread(() -> {
-            List<String> said = new ArrayList<>();
-            ObservableList<WatchlistItem> watchlist = emptyList();
-            Button button = new WatchlistToggle(watchlist, "005930", "KRX", "삼성전자",
-                    () -> false, () -> { }, said::add).button();
-
-            button.fire();
-
-            assertEquals("관심종목 추가", button.getText());
-            assertTrue(said.get(0).contains("담지 못했습니다"), said.toString());
-        });
-    }
-
-    /** 상태 줄에도 알린다. 단추 글자를 못 본 사용자에게는 이쪽이 먼저 들린다. */
-    @Test
-    @DisplayName("담고 뺄 때 상태 줄에도 알린다")
-    void announcesBothWays() {
-        JavaFxToolkit.onFxThread(() -> {
-            List<String> said = new ArrayList<>();
-            ObservableList<WatchlistItem> watchlist = emptyList();
-            Button button = new WatchlistToggle(watchlist, "005930", "KRX", "삼성전자",
-                    () -> watchlist.add(item("005930", "KRX")),
-                    () -> watchlist.clear(), said::add).button();
-
-            button.fire();
-            button.fire();
-
-            assertTrue(said.get(0).contains("담았습니다"), said.toString());
-            assertTrue(said.get(1).contains("뺐습니다"), said.toString());
         });
     }
 }
