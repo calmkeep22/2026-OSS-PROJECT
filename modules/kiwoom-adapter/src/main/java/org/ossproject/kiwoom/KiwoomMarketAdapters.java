@@ -8,7 +8,7 @@ import org.ossproject.application.port.OrderBookQueryPort;
 import org.ossproject.application.port.TradeQueryPort;
 import org.ossproject.application.port.OrderLifecyclePort;
 import org.ossproject.application.port.StockQueryPort;
-import org.ossproject.broker.BrokerCredentials;
+import org.ossproject.broker.auth.BrokerCredentials;
 import org.ossproject.kiwoom.stream.KiwoomMarketDataStream;
 import org.ossproject.broker.resilience.CircuitBreaker;
 import org.ossproject.broker.resilience.ResilientExecutor;

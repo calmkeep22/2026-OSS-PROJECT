@@ -1,9 +1,9 @@
 package org.ossproject.kiwoom;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import org.ossproject.broker.AccessToken;
-import org.ossproject.broker.BrokerAuthException;
-import org.ossproject.broker.BrokerCredentials;
+import org.ossproject.broker.auth.AccessToken;
+import org.ossproject.broker.error.BrokerAuthException;
+import org.ossproject.broker.auth.BrokerCredentials;
 import org.ossproject.kiwoom.http.HttpTextRequest;
 import org.ossproject.kiwoom.http.HttpTextResponse;
 import org.ossproject.kiwoom.http.HttpTransport;

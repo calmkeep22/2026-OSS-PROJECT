@@ -1,7 +1,7 @@
 package org.ossproject.kiwoom.stream;
 
-import org.ossproject.broker.BrokerTransientException;
-import org.ossproject.broker.SensitiveDataMasker;
+import org.ossproject.broker.error.BrokerTransientException;
+import org.ossproject.broker.auth.SensitiveDataMasker;
 
 import java.net.URI;
 import java.net.http.HttpClient;

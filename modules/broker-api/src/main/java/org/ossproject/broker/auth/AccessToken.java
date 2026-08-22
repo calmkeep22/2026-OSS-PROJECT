@@ -1,4 +1,4 @@
-package org.ossproject.broker;
+package org.ossproject.broker.auth;
 
 import java.time.Clock;
 import java.time.Duration;

@@ -1,4 +1,4 @@
-package org.ossproject.broker;
+package org.ossproject.broker.auth;
 
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;

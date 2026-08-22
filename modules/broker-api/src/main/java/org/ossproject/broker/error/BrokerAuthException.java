@@ -1,4 +1,4 @@
-package org.ossproject.broker;
+package org.ossproject.broker.error;
 
 /**
  * 인증 실패. API 키가 틀렸거나 토큰이 만료된 경우.

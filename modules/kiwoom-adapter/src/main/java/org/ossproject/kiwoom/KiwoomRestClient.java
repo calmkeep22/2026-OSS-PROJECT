@@ -1,10 +1,10 @@
 package org.ossproject.kiwoom;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import org.ossproject.broker.BrokerAuthException;
+import org.ossproject.broker.error.BrokerAuthException;
 import org.ossproject.broker.BrokerClient;
-import org.ossproject.broker.BrokerException;
-import org.ossproject.broker.SensitiveDataMasker;
+import org.ossproject.broker.error.BrokerException;
+import org.ossproject.broker.auth.SensitiveDataMasker;
 import org.ossproject.broker.resilience.ResilientExecutor;
 import org.ossproject.finance.model.Account;
 import org.ossproject.finance.model.Candle;

@@ -9,7 +9,7 @@ import java.util.Map;
  * <p><b>중요:</b> {@link #placeholder()} 의 값은 검증된 스펙이 아니라 자리표시자다.
  * 실계좌나 모의투자 서버에 붙이기 전에 반드시 키움 공식 문서를 보고
  * {@link Builder} 로 실제 필드 이름을 채워야 한다. 값이 틀리면 파싱 단계에서
- * {@link org.ossproject.broker.BrokerException} 이 발생하므로, 잘못된 값이 조용히
+ * {@link org.ossproject.broker.error.BrokerException} 이 발생하므로, 잘못된 값이 조용히
  * 통과하지는 않는다.
  *
  * <p>필드 이름만 갈아 끼우면 되도록 설계했기 때문에, 스펙 확인은 이 클래스 하나만

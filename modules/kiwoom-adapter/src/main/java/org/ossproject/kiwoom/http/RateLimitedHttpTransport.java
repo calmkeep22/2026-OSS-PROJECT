@@ -63,7 +63,7 @@ public final class RateLimitedHttpTransport implements HttpTransport {
             Thread.sleep(waitNanos / 1_000_000L, (int) (waitNanos % 1_000_000L));
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
-            throw new org.ossproject.broker.BrokerTransientException(
+            throw new org.ossproject.broker.error.BrokerTransientException(
                     "증권사 요청 간격을 기다리는 중 작업이 중단되었습니다.", interrupted);
         }
     }

@@ -1,4 +1,4 @@
-package org.ossproject.broker;
+package org.ossproject.broker.error;
 
 /**
  * 일시적인 오류. 네트워크 단절, 타임아웃, 5xx 응답.

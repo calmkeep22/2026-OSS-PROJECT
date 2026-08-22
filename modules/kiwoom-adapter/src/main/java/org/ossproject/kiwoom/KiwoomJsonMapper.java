@@ -2,8 +2,8 @@ package org.ossproject.kiwoom;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.ossproject.broker.BrokerException;
-import org.ossproject.broker.SensitiveDataMasker;
+import org.ossproject.broker.error.BrokerException;
+import org.ossproject.broker.auth.SensitiveDataMasker;
 import org.ossproject.finance.model.Account;
 import org.ossproject.finance.model.Balance;
 import org.ossproject.finance.model.Trade;

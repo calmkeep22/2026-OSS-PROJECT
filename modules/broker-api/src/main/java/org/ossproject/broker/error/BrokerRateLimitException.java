@@ -1,4 +1,4 @@
-package org.ossproject.broker;
+package org.ossproject.broker.error;
 
 import java.time.Duration;
 import java.util.Optional;

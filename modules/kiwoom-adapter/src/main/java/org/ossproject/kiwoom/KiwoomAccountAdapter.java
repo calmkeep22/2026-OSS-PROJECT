@@ -2,7 +2,7 @@ package org.ossproject.kiwoom;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import org.ossproject.application.port.AccountPort;
-import org.ossproject.broker.BrokerException;
+import org.ossproject.broker.error.BrokerException;
 import org.ossproject.finance.model.Account;
 
 import java.util.Objects;
