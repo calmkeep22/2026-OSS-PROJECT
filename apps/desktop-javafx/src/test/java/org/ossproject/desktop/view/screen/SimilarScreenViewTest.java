@@ -41,7 +41,7 @@ class SimilarScreenViewTest {
     private static SimilarScreenView view(AtomicReference<String> spoken) {
         return new SimilarScreenView("A전자",
                 (text, channel) -> spoken.set(text),
-                (symbol, name) -> { },
+                (symbol, name) -> new javafx.scene.control.Button("관심종목 추가"),
                 (symbol, name) -> { },
                 retry -> { });
     }
@@ -192,7 +192,8 @@ class SimilarScreenViewTest {
         JavaFxToolkit.onFxThread(() -> {
             AtomicReference<String> compared = new AtomicReference<>();
             SimilarScreenView view = new SimilarScreenView("A전자",
-                    (text, channel) -> { }, (symbol, name) -> { },
+                    (text, channel) -> { },
+                    (symbol, name) -> new javafx.scene.control.Button("관심종목 추가"),
                     (symbol, name) -> compared.set(name), retry -> { });
             Node root = view.create();
             view.show(insight(Optional.empty(),
@@ -214,7 +215,8 @@ class SimilarScreenViewTest {
         JavaFxToolkit.onFxThread(() -> {
             AtomicReference<String> compared = new AtomicReference<>();
             SimilarScreenView view = new SimilarScreenView("A전자",
-                    (text, channel) -> { }, (symbol, name) -> { },
+                    (text, channel) -> { },
+                    (symbol, name) -> new javafx.scene.control.Button("관심종목 추가"),
                     (symbol, name) -> compared.set(name), retry -> { });
             Node root = view.create();
             view.show(insight(Optional.empty(),
@@ -237,7 +239,8 @@ class SimilarScreenViewTest {
         JavaFxToolkit.onFxThread(() -> {
             AtomicReference<String> compared = new AtomicReference<>();
             SimilarScreenView view = new SimilarScreenView("A전자",
-                    (text, channel) -> { }, (symbol, name) -> { },
+                    (text, channel) -> { },
+                    (symbol, name) -> new javafx.scene.control.Button("관심종목 추가"),
                     (symbol, name) -> compared.set(name), retry -> { });
             Node root = view.create();
             view.show(insight(Optional.empty(),

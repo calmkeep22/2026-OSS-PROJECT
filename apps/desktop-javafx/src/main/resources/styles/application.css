@@ -237,6 +237,9 @@
    있는지가 이 테두리 하나뿐이다. */
 .clickable-card:hover { -fx-border-color: #3d6aff; -fx-cursor: hand; }
 .clickable-card:focused { -fx-border-color: #3d6aff; -fx-border-width: 2; }
+/* 종목 고르개. 화면 맨 위에서 지금 무엇을 보고 있는지 알리는 자리라 눈에 띄어야 한다. */
+.stock-picker-row { -fx-padding: 4 0 0 0; }
+.stock-picker { -fx-min-width: 260; -fx-pref-width: 300; }
 .chat-bot { -fx-background-color: #f4f7ff; -fx-border-color: #c9d6ff; }
 .chat-user { -fx-background-color: #ffffff; -fx-border-color: #dfe3e8; }
 .state-preview { -fx-background-color: #ffffff; -fx-border-color: #d1d6db; -fx-border-radius: 12; -fx-background-radius: 12; -fx-padding: 18; }

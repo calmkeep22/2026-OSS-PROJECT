@@ -45,6 +45,8 @@ import org.ossproject.desktop.ai.AiInsightListPanel;
 
 import java.util.LinkedHashMap;
 import org.ossproject.desktop.viewmodel.AiInsightViewModel;
+import org.ossproject.desktop.view.StockPicker;
+import org.ossproject.desktop.view.WatchlistToggle;
 import org.ossproject.desktop.view.screen.NewsScreenView;
 import org.ossproject.desktop.view.screen.SettingsScreenView;
 import org.ossproject.desktop.view.screen.SimilarScreenView;
@@ -124,6 +126,8 @@ public final class DesktopApplication extends Application {
     private NewsScreenView newsView;
     /** 이상 감지 화면의 AI 분석 목록. 화면을 다시 만들면 새로 잡힌다. */
     private AiInsightListPanel aiInsightListPanel;
+    /** 종목을 바꿔 다시 만든 화면. 고르개에 초점을 돌려 준다. */
+    private Screen pickerFocusScreen;
     /**
      * 마지막으로 받은 분석.
      *
@@ -1286,9 +1290,12 @@ public final class DesktopApplication extends Application {
         screenController.registerPreservingState(Screen.NOTIFICATIONS,
                 () -> new NotificationsScreenView(session.notifications(), status::setText,
                         this::scheduleStateSave, this::requestSpeech).create());
-        screenController.register(Screen.SIMILAR, this::createSimilarScreen);
-        screenController.register(Screen.NEWS, this::createNewsScreen);
-        screenController.register(Screen.RADIO, this::createAccessibleChartScreen);
+        screenController.register(Screen.SIMILAR,
+                () -> withStockPicker(Screen.SIMILAR, createSimilarScreen()));
+        screenController.register(Screen.NEWS,
+                () -> withStockPicker(Screen.NEWS, createNewsScreen()));
+        screenController.register(Screen.RADIO,
+                () -> withStockPicker(Screen.RADIO, createAccessibleChartScreen()));
         screenController.registerPreservingState(Screen.SETTINGS, this::createSettingsScreen);
     }
 
@@ -1519,17 +1526,16 @@ public final class DesktopApplication extends Application {
         title.getStyleClass().add("stock-detail-title");
         Label symbol = new Label(detail.symbol() + " · " + selection.exchange());
         symbol.getStyleClass().addAll("mode-badge", "stock-detail-symbol");
-        Button favorite = new Button("관심종목 추가");
+        // 담긴 뒤에도 "추가" 라고 적혀 있으면 눌린 것인지 알 수 없다. 단추가 상태를 든다.
+        Button favorite = new WatchlistToggle(session.watchlistItems(), detail.symbol(),
+                selection.exchange(), detail.name(),
+                () -> addToWatchlistBySymbol(detail.symbol(), detail.name()),
+                () -> {
+                    stockSearchViewModel.removeFromWatchlist(detail.symbol(), selection.exchange());
+                    scheduleStateSave();
+                },
+                status::setText).button();
         favorite.getStyleClass().add("stock-compact-action");
-        favorite.setOnAction(event -> {
-            status.setText(detail.name() + " 종목을 확인하고 있습니다.");
-            stockSearchViewModel.findBestMatch(detail.symbol()).thenAccept(item -> {
-                if (item == null) status.setText(detail.name() + " 종목 정보를 찾지 못했습니다.");
-                else status.setText(stockSearchViewModel.addToWatchlist(item)
-                        ? detail.name() + "을 관심종목에 추가했습니다."
-                        : detail.name() + "은 이미 관심종목에 있습니다.");
-            });
-        });
         Button buy = primaryButton("매수", () -> openOrder(OrderSide.BUY));
         buy.getStyleClass().add("stock-compact-action");
         Button sell = new Button("매도"); sell.getStyleClass().addAll("sell-button", "stock-compact-action"); sell.setOnAction(event -> openOrder(OrderSide.SELL));
@@ -1710,6 +1716,55 @@ public final class DesktopApplication extends Application {
     }
 
     /**
+     * 분석 화면 위에 종목 고르개를 얹는다.
+     *
+     * <p>청각 차트와 닮은 차트와 뉴스는 모두 고른 종목 하나를 본다. 그런데 그 값을 바꾸는
+     * 길이 검색뿐이라, 종목 하나 바꾸는 데 화면을 두 번 옮겨야 했다. 화면에 고르개가 없어
+     * 지금 어느 종목을 보고 있는지도 제목으로만 알 수 있었다.
+     *
+     * <p>고르면 전역 선택 종목을 바꾼다. 화면마다 다른 종목을 들고 있으면 상세와 주문이
+     * 무엇을 가리키는지 알 수 없다. 주문은 제출 전에 종목 코드를 다시 보여 주므로, 여기서
+     * 바꾼 것이 곧바로 주문으로 이어지지 않는다.
+     */
+    private javafx.scene.Node withStockPicker(Screen screen, javafx.scene.Node content) {
+        StockPicker picker = new StockPicker(session.watchlistItems(), session.selectedStock(),
+                selected -> {
+                    session.selectStock(selected);
+                    // 고르개에 초점을 돌려 둔다. 화면을 다시 만들면 초점이 처음으로 가는데,
+                    // 종목을 여럿 견주는 동안 매번 탭으로 돌아오게 하면 못 쓴다.
+                    pickerFocusScreen = screen;
+                    screenController.invalidate(screen);
+                    screenController.show(screen);
+                });
+        loadHoldingsInto(picker);
+
+        VBox host = new VBox(10, picker.root(), content);
+        host.setFillWidth(true);
+        VBox.setVgrow(content, Priority.ALWAYS);
+        if (pickerFocusScreen == screen) {
+            pickerFocusScreen = null;
+            Platform.runLater(picker.root()::requestFocus);
+        }
+        return host;
+    }
+
+    /** 보유 종목은 계좌 조회가 끝나야 안다. 화면 스레드를 막지 않는다. */
+    private void loadHoldingsInto(StockPicker picker) {
+        CompletableFuture.supplyAsync(tradingUseCase::account)
+                .whenComplete((account, failure) -> Platform.runLater(() -> {
+                    if (failure != null) {
+                        return;
+                    }
+                    List<StockSelection> held = new java.util.ArrayList<>();
+                    for (Position position : account.positions()) {
+                        held.add(new StockSelection("국내", position.symbol(), position.name(),
+                                "KRX", "KRW"));
+                    }
+                    picker.setHoldings(held);
+                }));
+    }
+
+    /**
      * 닮은 차트 화면.
      *
      * <p>이 화면이 하는 말은 하나다 — 과거 어느 구간이 지금과 모양이 닮았다. 예측이
@@ -1719,7 +1774,7 @@ public final class DesktopApplication extends Application {
         StockSelection selected = session.selectedStock();
         similarView = new SimilarScreenView(selected.name(),
                 this::requestSpeech,
-                this::addSimilarToWatchlist,
+                this::watchlistToggleFor,
                 (symbol, name) -> compareWithSelected(selected, symbol, name),
                 ignored -> loadSimilar());
         javafx.scene.Node node = similarView.create();
@@ -1749,22 +1804,55 @@ public final class DesktopApplication extends Application {
                 view::unavailable);
     }
 
-    /** 닮은 종목을 관심 목록에 담는다. 이미 있으면 그 사실을 알린다. */
-    private void addSimilarToWatchlist(String symbol, String name) {
-        boolean exists = session.watchlistItems().stream()
-                .anyMatch(item -> item.symbol().equalsIgnoreCase(symbol));
-        if (exists) {
-            status.setText(name + "은 이미 관심 종목에 있습니다.");
-            return;
+    /**
+     * 관심종목 담기·빼기 단추를 만든다.
+     *
+     * <p>화면마다 담긴 상태를 따로 세면 한 곳이 어긋난다. 단추가 목록을 직접 지켜보므로
+     * 어느 화면에서 지워도 함께 바뀐다.
+     */
+    private Button watchlistToggleFor(String symbol, String name) {
+        return new WatchlistToggle(session.watchlistItems(), symbol, "", name,
+                () -> addToWatchlistBySymbol(symbol, name),
+                () -> {
+                    stockSearchViewModel.removeFromWatchlist(symbol, "");
+                    scheduleStateSave();
+                },
+                status::setText).button();
+    }
+
+    /**
+     * 종목 코드로 관심 목록에 담는다.
+     *
+     * <p>조회로 식별 정보를 채운 뒤 담는다. 코드와 이름만으로 만들면 시장과 통화를
+     * 추측하게 되고, 미국 종목을 국내로 담아 버린다.
+     *
+     * <p>조회는 시간이 걸린다. 결과를 기다리지 않고 참을 돌려주면 단추가 담긴 것처럼
+     * 바뀌었다가 되돌아간다. 그래서 여기서 기다린다.
+     */
+    private boolean addToWatchlistBySymbol(String symbol, String name) {
+        status.setText(name + " 종목을 확인하고 있습니다.");
+        try {
+            StockSearchItem item = stockSearchViewModel.findBestMatch(symbol)
+                    .toCompletableFuture().get(5, java.util.concurrent.TimeUnit.SECONDS);
+            if (item == null) {
+                status.setText(name + " 종목 정보를 찾지 못했습니다.");
+                return false;
+            }
+            boolean added = stockSearchViewModel.addToWatchlist(item);
+            if (added) {
+                scheduleStateSave();
+            }
+            return added;
+        } catch (java.util.concurrent.TimeoutException timeout) {
+            status.setText(name + " 종목 정보를 받는 데 시간이 걸립니다. 잠시 뒤 다시 시도해주세요.");
+            return false;
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (java.util.concurrent.ExecutionException failure) {
+            status.setText(name + " 종목 정보를 받지 못했습니다.");
+            return false;
         }
-        String group = "국내";
-        if (!session.watchlistGroups().contains(group)) {
-            session.watchlistGroups().add(group);
-        }
-        session.watchlistItems().add(
-                new WatchlistItem(group, group, symbol, name, "KRX", "KRW", "없음"));
-        scheduleStateSave();
-        status.setText(name + "을 관심 종목에 담았습니다.");
     }
 
     /**
@@ -1789,7 +1877,7 @@ public final class DesktopApplication extends Application {
                             similarFieldOf(symbol, SimilarStock::similarityPercent,
                                     java.math.BigDecimal.ZERO),
                             similarFieldOf(symbol, SimilarStock::explanation, ""),
-                            () -> addSimilarToWatchlist(symbol, name));
+                            () -> addToWatchlistBySymbol(symbol, name));
                 }));
     }
 
