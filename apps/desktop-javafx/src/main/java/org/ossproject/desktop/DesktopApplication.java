@@ -48,11 +48,13 @@ import org.ossproject.desktop.viewmodel.AiInsightViewModel;
 import org.ossproject.desktop.view.StockPicker;
 import org.ossproject.desktop.view.WatchlistToggle;
 import org.ossproject.desktop.view.screen.NewsScreenView;
+import org.ossproject.desktop.view.screen.OrderFormView;
 import org.ossproject.desktop.view.screen.SettingsScreenView;
 import org.ossproject.desktop.view.screen.SimilarScreenView;
 import org.ossproject.desktop.view.screen.StockComparisonDialog;
 import org.ossproject.ai.SimilarStock;
 import org.ossproject.desktop.viewmodel.NewsViewModel;
+import org.ossproject.desktop.viewmodel.OrderDraftViewModel;
 import org.ossproject.desktop.ai.AiServiceProcess;
 import org.ossproject.desktop.chart.AccessibleChartController;
 import org.ossproject.desktop.chart.AccessibleChartView;
@@ -2235,153 +2237,59 @@ public final class DesktopApplication extends Application {
         column.setCellValueFactory(data -> new SimpleStringProperty(mapper.apply(data.getValue()))); return column;
     }
 
+    /**
+     * 모의주문 폼.
+     *
+     * <p>초안과 수량 셈은 뷰모델이 맡는다. 화면 안에 두면 "10퍼센트를 눌렀을 때 몇 주인가"
+     * 를 검사할 수 없다. 주문은 되돌릴 수 없는 동작이라 그 셈이 틀리면 사용자가 의도하지
+     * 않은 수량으로 주문한다.
+     */
     private VBox createOrderForm() {
-        var selected = stockDetailViewModel.selection();
+        StockSelection selected = stockDetailViewModel.selection();
         OrderDraft draft = orderDraft == null
                 ? new OrderDraft(selected.symbol(), selected.name(), OrderSide.BUY,
-                OrderType.LIMIT, 1, pendingOrderPrice, Screen.DASHBOARD)
+                        OrderType.LIMIT, 1, pendingOrderPrice, Screen.DASHBOARD)
                 : orderDraft;
         orderDraft = draft;
-        TextField symbol = new TextField(draft.symbol()); TextField name = new TextField(draft.name());
-        symbol.setEditable(false); name.setEditable(false);
-        symbol.setAccessibleHelp("종목을 바꾸려면 종목검색에서 다른 종목을 선택해주세요.");
-        name.setAccessibleHelp(symbol.getAccessibleHelp());
-        ComboBox<OrderSide> side = new ComboBox<>(FXCollections.observableArrayList(OrderSide.values())); side.setValue(draft.side());
-        side.setConverter(new StringConverter<>() {
-            @Override public String toString(OrderSide value) { return value == null ? "" : value.displayName(); }
-            @Override public OrderSide fromString(String value) { return OrderSide.valueOf(value); }
-        });
-        ComboBox<OrderType> orderType = new ComboBox<>(FXCollections.observableArrayList(OrderType.values()));
-        orderType.setValue(draft.type());
-        orderType.setConverter(new StringConverter<>() {
-            @Override public String toString(OrderType value) { return value == null ? "" : value.displayName(); }
-            @Override public OrderType fromString(String value) { return OrderType.valueOf(value); }
-        });
-        Spinner<Integer> quantity = new Spinner<>(1, 1_000_000, draft.quantity()); quantity.setEditable(true);
-        TextField price = new TextField(draft.price());
-        price.setDisable(draft.type() == OrderType.MARKET);
-        side.valueProperty().addListener((obs, old, selectedSide) ->
-                updateOrderDraft(draft, selectedSide, orderType.getValue(), quantity.getValue(), price.getText()));
-        orderType.valueProperty().addListener((obs, old, selectedType) -> {
-            price.setDisable(selectedType == OrderType.MARKET);
-            updateOrderDraft(draft, side.getValue(), selectedType, quantity.getValue(), price.getText());
-        });
-        GridPane form = new GridPane(); form.setHgap(8); form.setVgap(6);
-        addCompactOrderField(form, 0, 0, "종목 코드", symbol);
-        addCompactOrderField(form, 2, 0, "종목명", name);
-        addCompactOrderField(form, 0, 1, "매수 / 매도", side);
-        addCompactOrderField(form, 2, 1, "주문 유형", orderType);
-        addCompactOrderField(form, 0, 2, "가격", price);
-        addCompactOrderField(form, 2, 2, "수량", quantity);
 
-        javafx.beans.property.ObjectProperty<Account> orderAccount =
-                new javafx.beans.property.SimpleObjectProperty<>();
-        Label availableAmount = new Label("모의계좌 조회 중");
-        List<Button> ratioButtons = new java.util.ArrayList<>();
-        HBox ratios = new HBox(8);
-        for (int ratio : List.of(10, 25, 50, 100)) {
-            Button button = new Button(ratio + "%");
-            button.setDisable(true);
-            button.setOnAction(event -> {
-                Account account = orderAccount.get();
-                if (account == null) return;
-                long maximum;
-                if (side.getValue() == OrderSide.SELL) {
-                    maximum = account.position(symbol.getText())
-                            .map(Position::availableQuantity).orElse(0L);
-                } else {
-                    try {
-                        BigDecimal unitPrice = orderType.getValue() == OrderType.MARKET
-                                ? stockDetailViewModel.detail().currentPrice()
-                                : new BigDecimal(price.getText().replace(",", "").trim());
-                        maximum = unitPrice.signum() <= 0 ? 0L
-                                : account.deposits().orderable().divideToIntegralValue(unitPrice).longValue();
-                    } catch (RuntimeException invalidPrice) {
-                        maximum = 0L;
-                    }
-                }
-                if (maximum < 1) {
-                    status.setText(side.getValue() == OrderSide.SELL
-                            ? "매도 가능한 보유수량이 없습니다."
-                            : "현재 가격으로 주문할 수 있는 수량이 없습니다.");
-                    return;
-                }
-                long calculated = Math.max(1L, maximum * ratio / 100L);
-                quantity.getValueFactory().setValue((int) Math.min(1_000_000L, calculated));
-            });
-            ratioButtons.add(button);
-            ratios.getChildren().add(button);
-        }
-        Label estimatedAmount = new Label();
-        Runnable updateEstimate = () -> {
-            try {
-                BigDecimal unitPrice = new BigDecimal(price.getText().replace(",", "").trim());
-                estimatedAmount.setText(stockDetailViewModel.formatPrice(unitPrice.multiply(BigDecimal.valueOf(quantity.getValue()))));
-            } catch (RuntimeException invalid) {
-                estimatedAmount.setText("가격을 확인하세요");
-            }
-        };
-        price.textProperty().addListener((obs, old, value) -> {
-            updateEstimate.run();
-            updateOrderDraft(draft, side.getValue(), orderType.getValue(), quantity.getValue(), value);
-        });
-        quantity.valueProperty().addListener((obs, old, value) -> {
-            updateEstimate.run();
-            updateOrderDraft(draft, side.getValue(), orderType.getValue(), value, price.getText());
-        });
-        updateEstimate.run();
-        VBox estimates = new VBox(4,
-                informationRow("주문 예상금액", estimatedAmount),
-                informationRow("주문 가능금액", availableAmount));
-        estimates.getStyleClass().add("estimate-box"); estimates.setPadding(new Insets(8));
-        Button preview = new Button("주문 내용 검토"); preview.getStyleClass().add("primary-button"); preview.setDefaultButton(true);
-        preview.setAccessibleHelp("주문을 제출하지 않고 재확인 창을 엽니다.");
-        preview.setOnAction(event -> {
-            if (preventDuplicateOrders) {
-                preview.setDisable(true);
-                PauseTransition unlock = new PauseTransition(Duration.millis(900));
-                unlock.setOnFinished(done -> preview.setDisable(false));
-                unlock.play();
-            }
-            previewOrder(symbol, name, side, orderType, quantity, price);
-        });
-        Label ratioLabel = new Label("주문 비율");
-        HBox ratioRow = new HBox(10, ratioLabel, ratios);
-        ratioRow.setAlignment(Pos.CENTER_LEFT);
-        VBox box = new VBox(8, sectionHeading("모의주문 준비"), form, ratioRow, estimates, preview);
-        box.getStyleClass().addAll("panel-card", "order-form-compact");
-        box.setPadding(new Insets(12));
-        box.setMaxHeight(Double.MAX_VALUE);
+        OrderDraftViewModel viewModel = new OrderDraftViewModel(draft, this::currentPriceIfKnown);
+        OrderFormView view = new OrderFormView(viewModel, preventDuplicateOrders,
+                stockDetailViewModel::formatPrice, this::previewOrder, status::setText,
+                this::rememberOrderDraft);
+        VBox form = view.create();
+
+        // 계좌 조회는 화면 스레드를 막지 않는다. 도착하면 비율 단추가 열린다.
         CompletableFuture.supplyAsync(tradingUseCase::account).whenComplete((account, failure) ->
                 Platform.runLater(() -> {
                     if (failure != null) {
-                        availableAmount.setText("계좌 조회 실패");
-                        ratioButtons.forEach(button -> button.setDisable(true));
+                        view.accountFailed();
                         return;
                     }
-                    orderAccount.set(account);
-                    availableAmount.setText(Formatters.won(account.deposits().orderable()));
-                    ratioButtons.forEach(button -> button.setDisable(false));
+                    viewModel.setAccount(account);
+                    view.accountLoaded();
                 }));
-        return box;
+        return form;
     }
 
-    private void addCompactOrderField(GridPane grid, int labelColumn, int row,
-                                      String labelText, Control control) {
-        Label label = new Label(labelText);
-        label.setLabelFor(control);
-        control.setMaxWidth(Double.MAX_VALUE);
-        grid.add(label, labelColumn, row);
-        grid.add(control, labelColumn + 1, row);
-        GridPane.setHgrow(control, Priority.ALWAYS);
+    /** 화면이 고친 초안을 앱도 든다. 주문 화면을 떠났다 돌아와도 값이 남는다. */
+    private void rememberOrderDraft(OrderDraft updated) {
+        orderDraft = updated;
+        pendingOrderPrice = updated.price();
     }
 
-    private void updateOrderDraft(OrderDraft initial, OrderSide side, OrderType type,
-                                  Integer quantity, String price) {
-        if (side == null || type == null || quantity == null || quantity <= 0
-                || price == null || price.isBlank()) return;
-        orderDraft = new OrderDraft(initial.symbol(), initial.name(), side, type, quantity, price, initial.origin());
-        pendingOrderPrice = orderDraft.price();
+    /**
+     * 지금 아는 현재가. 조회 전이거나 실패했으면 비어 있다.
+     *
+     * <p>모르면 모른다고 한다. 0 을 돌려주면 시장가 비율 단추가 "살 수 있는 수량이 없다"
+     * 가 아니라 엉뚱한 수량을 내놓는다.
+     */
+    private java.util.Optional<BigDecimal> currentPriceIfKnown() {
+        try {
+            return java.util.Optional.ofNullable(stockDetailViewModel.detail())
+                    .map(StockDetail::currentPrice);
+        } catch (RuntimeException notLoaded) {
+            return java.util.Optional.empty();
+        }
     }
 
     /**
@@ -2830,15 +2738,21 @@ public final class DesktopApplication extends Application {
 
     /** 손익 금액을 부호와 함께 표기한다. */
 
-    private void previewOrder(TextField symbol, TextField name, ComboBox<OrderSide> side,
-                              ComboBox<OrderType> orderType, Spinner<Integer> quantity, TextField price) {
+    /**
+     * 주문 재확인 창을 연다.
+     *
+     * <p>화면 컨트롤이 아니라 초안을 받는다. 컨트롤을 여섯 개 넘겨받으면 이 메서드가 폼의
+     * 생김새에 매여, 폼을 고칠 때마다 함께 고쳐야 한다.
+     */
+    private void previewOrder(OrderDraft draft) {
         try {
             BigDecimal referencePrice = stockDetailViewModel.detail().currentPrice();
-            OrderCommand request = orderType.getValue() == OrderType.MARKET
-                    ? OrderCommand.market(symbol.getText().trim(), name.getText().trim(), side.getValue(),
-                            quantity.getValue())
-                    : OrderCommand.limit(symbol.getText().trim(), name.getText().trim(), side.getValue(),
-                            quantity.getValue(), new BigDecimal(price.getText().replace(",", "").trim()));
+            OrderCommand request = draft.type() == OrderType.MARKET
+                    ? OrderCommand.market(draft.symbol(), draft.name(), draft.side(),
+                            draft.quantity())
+                    : OrderCommand.limit(draft.symbol(), draft.name(), draft.side(),
+                            draft.quantity(),
+                            new BigDecimal(draft.price().replace(",", "").trim()));
             status.setText("키움 모의계좌의 주문 가능 금액을 확인하고 있습니다.");
             CompletableFuture.supplyAsync(() -> tradingUseCase.preview(request, referencePrice))
                     .whenComplete((preview, failure) -> Platform.runLater(() -> {

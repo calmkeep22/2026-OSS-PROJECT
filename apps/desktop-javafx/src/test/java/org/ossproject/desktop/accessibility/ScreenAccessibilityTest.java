@@ -9,6 +9,7 @@ import org.ossproject.desktop.orderbook.OrderBookLadderView;
 import org.ossproject.application.port.MarketApplicationPort;
 import org.ossproject.application.usecase.MarketApplicationService;
 import org.ossproject.desktop.view.screen.ScannerScreenView;
+import org.ossproject.desktop.view.screen.OrderFormView;
 import org.ossproject.desktop.view.screen.SearchScreenView;
 import org.ossproject.desktop.view.screen.SettingsScreenView;
 import org.ossproject.desktop.view.screen.WatchlistScreenView;
@@ -291,5 +292,30 @@ class ScreenAccessibilityTest {
             }
         }
         return null;
+    }
+
+    /**
+     * 주문 폼은 되돌릴 수 없는 동작 직전의 화면이다.
+     *
+     * <p>여기서 조작 요소 이름이 빠지면 스크린리더 사용자는 무엇을 고르고 있는지 모른 채
+     * 주문을 낸다.
+     */
+    @Test
+    @DisplayName("주문 폼의 모든 조작 요소에 이름이 있다")
+    void orderFormNamesEverythingFocusable() {
+        JavaFxToolkit.onFxThread(() -> {
+            org.ossproject.desktop.navigation.OrderDraft draft =
+                    new org.ossproject.desktop.navigation.OrderDraft("005930", "삼성전자",
+                            org.ossproject.finance.model.OrderSide.BUY,
+                            org.ossproject.finance.model.OrderType.LIMIT, 1, "70000",
+                            org.ossproject.desktop.navigation.Screen.DASHBOARD);
+            org.ossproject.desktop.viewmodel.OrderDraftViewModel viewModel =
+                    new org.ossproject.desktop.viewmodel.OrderDraftViewModel(draft,
+                            java.util.Optional::empty);
+            OrderFormView view = new OrderFormView(viewModel, true,
+                    java.math.BigDecimal::toPlainString, order -> { }, text -> { }, order -> { });
+
+            assertNoMissingNames("주문 폼", view.create());
+        });
     }
 }
