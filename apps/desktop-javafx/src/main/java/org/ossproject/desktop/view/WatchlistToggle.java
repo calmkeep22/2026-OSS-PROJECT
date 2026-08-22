@@ -6,7 +6,6 @@ import javafx.scene.control.Button;
 import org.ossproject.desktop.state.WatchlistItem;
 
 import java.util.Objects;
-import java.util.function.Consumer;
 
 /**
  * 관심종목에 담고 빼는 단추.
@@ -17,6 +16,12 @@ import java.util.function.Consumer;
  *
  * <p>목록을 지켜본다. 관심종목 화면에서 지웠는데 이 단추가 "취소" 로 남아 있으면, 그
  * 단추는 거짓말을 하는 것이다.
+ *
+ * <p>담기가 끝났는지를 기다리지 않는다. 종목 식별 정보를 조회해야 하는 경우가 있어
+ * 곧바로 끝나지 않는데, 여기서 기다리면 화면 스레드가 멈춘다. 실제로 그렇게 만들었다가
+ * 조회 결과가 같은 화면 스레드에서 도착하는 바람에 서로를 기다려 굳었다.
+ *
+ * <p>대신 목록을 지켜보는 것으로 충분하다. 담기가 끝나면 목록이 바뀌고 단추가 따라간다.
  */
 public final class WatchlistToggle {
 
@@ -32,31 +37,25 @@ public final class WatchlistToggle {
     /**
      * @param exchange 거래소. 모르면 빈 문자열. 코스피와 나스닥에 같은 코드가 있을 수 있어
      *                 알 수 있으면 넘기는 편이 낫다
-     * @param onAdd    담기. 실제로 담겼으면 참을 돌려준다
+     * @param onAdd    담기. 곧바로 끝나지 않아도 된다. 끝나면 목록이 바뀌고 단추가 따라간다
      * @param onRemove 빼기
-     * @param onStatus 상태 줄에 적을 말. 단추 글자와 함께 두 번 알린다
      */
     public WatchlistToggle(ObservableList<WatchlistItem> watchlist, String symbol, String exchange,
-                           String name, java.util.function.BooleanSupplier onAdd,
-                           Runnable onRemove, Consumer<String> onStatus) {
+                           String name, Runnable onAdd, Runnable onRemove) {
         this.watchlist = Objects.requireNonNull(watchlist, "watchlist");
         this.symbol = Objects.requireNonNull(symbol, "symbol");
         this.exchange = exchange == null ? "" : exchange;
         this.name = name == null || name.isBlank() ? symbol : name;
         Objects.requireNonNull(onAdd, "onAdd");
         Objects.requireNonNull(onRemove, "onRemove");
-        Objects.requireNonNull(onStatus, "onStatus");
 
         button.getStyleClass().add("watchlist-toggle");
         button.setOnAction(event -> {
+            // 결과를 기다리지 않는다. 목록이 바뀌면 아래 지켜보기가 단추를 고친다.
             if (contains()) {
                 onRemove.run();
-                onStatus.accept(this.name + "을 관심종목에서 뺐습니다.");
-            } else if (onAdd.getAsBoolean()) {
-                onStatus.accept(this.name + "을 관심종목에 담았습니다.");
             } else {
-                // 담기가 거절됐다. 목록은 그대로이므로 단추도 그대로다. 이유는 앱이 적는다.
-                onStatus.accept(this.name + "을 담지 못했습니다.");
+                onAdd.run();
             }
             refresh();
         });

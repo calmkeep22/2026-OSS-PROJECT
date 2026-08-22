@@ -1540,11 +1540,8 @@ public final class DesktopApplication extends Application {
         Button favorite = new WatchlistToggle(session.watchlistItems(), detail.symbol(),
                 selection.exchange(), detail.name(),
                 () -> addToWatchlistBySymbol(detail.symbol(), detail.name()),
-                () -> {
-                    stockSearchViewModel.removeFromWatchlist(detail.symbol(), selection.exchange());
-                    scheduleStateSave();
-                },
-                status::setText).button();
+                () -> removeFromWatchlist(detail.symbol(), selection.exchange(), detail.name()))
+                .button();
 
         StockChartPanel chartPanel = new StockChartPanel(detail.name(),
                 stockDetailViewModel::formatPrice,
@@ -1730,11 +1727,15 @@ public final class DesktopApplication extends Application {
     private Button watchlistToggleFor(String symbol, String name) {
         return new WatchlistToggle(session.watchlistItems(), symbol, "", name,
                 () -> addToWatchlistBySymbol(symbol, name),
-                () -> {
-                    stockSearchViewModel.removeFromWatchlist(symbol, "");
-                    scheduleStateSave();
-                },
-                status::setText).button();
+                () -> removeFromWatchlist(symbol, "", name)).button();
+    }
+
+    /** 관심종목에서 뺀다. 빼기는 곧바로 끝나므로 그 자리에서 알린다. */
+    private void removeFromWatchlist(String symbol, String exchange, String name) {
+        if (stockSearchViewModel.removeFromWatchlist(symbol, exchange)) {
+            scheduleStateSave();
+            status.setText(name + "을 관심종목에서 뺐습니다.");
+        }
     }
 
     /**
@@ -1746,30 +1747,26 @@ public final class DesktopApplication extends Application {
      * <p>조회는 시간이 걸린다. 결과를 기다리지 않고 참을 돌려주면 단추가 담긴 것처럼
      * 바뀌었다가 되돌아간다. 그래서 여기서 기다린다.
      */
-    private boolean addToWatchlistBySymbol(String symbol, String name) {
+    private void addToWatchlistBySymbol(String symbol, String name) {
         status.setText(name + " 종목을 확인하고 있습니다.");
-        try {
-            StockSearchItem item = stockSearchViewModel.findBestMatch(symbol)
-                    .toCompletableFuture().get(5, java.util.concurrent.TimeUnit.SECONDS);
+        // 결과를 기다리지 않는다. findBestMatch 는 화면 스레드에서 완료되므로 여기서
+        // 기다리면 화면 스레드가 자기가 실행할 일을 기다리다 굳는다. 실제로 그렇게
+        // 만들었다가 담았다 뺀 종목을 다시 담을 수 없었다.
+        stockSearchViewModel.findBestMatch(symbol).thenAccept(item -> {
             if (item == null) {
                 status.setText(name + " 종목 정보를 찾지 못했습니다.");
-                return false;
+                return;
             }
-            boolean added = stockSearchViewModel.addToWatchlist(item);
-            if (added) {
+            if (stockSearchViewModel.addToWatchlist(item)) {
                 scheduleStateSave();
+                status.setText(name + "을 관심종목에 담았습니다.");
+            } else {
+                status.setText(name + "은 이미 관심종목에 있습니다.");
             }
-            return added;
-        } catch (java.util.concurrent.TimeoutException timeout) {
-            status.setText(name + " 종목 정보를 받는 데 시간이 걸립니다. 잠시 뒤 다시 시도해주세요.");
-            return false;
-        } catch (InterruptedException interrupted) {
-            Thread.currentThread().interrupt();
-            return false;
-        } catch (java.util.concurrent.ExecutionException failure) {
-            status.setText(name + " 종목 정보를 받지 못했습니다.");
-            return false;
-        }
+        }).exceptionally(failure -> {
+            Platform.runLater(() -> status.setText(name + " 종목 정보를 받지 못했습니다."));
+            return null;
+        });
     }
 
     /**
