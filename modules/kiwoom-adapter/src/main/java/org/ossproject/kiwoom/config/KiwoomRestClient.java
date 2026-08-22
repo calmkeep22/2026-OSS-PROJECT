@@ -1,4 +1,8 @@
-package org.ossproject.kiwoom;
+package org.ossproject.kiwoom.config;
+
+import org.ossproject.kiwoom.mapping.KiwoomErrorMapper;
+import org.ossproject.kiwoom.mapping.KiwoomJsonMapper;
+import org.ossproject.kiwoom.mapping.KiwoomTr;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import org.ossproject.broker.error.BrokerAuthException;

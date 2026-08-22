@@ -1,4 +1,6 @@
-package org.ossproject.kiwoom;
+package org.ossproject.kiwoom.mapping;
+
+import org.ossproject.kiwoom.mapping.KiwoomOrderBookParser;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;

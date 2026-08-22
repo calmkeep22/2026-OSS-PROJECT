@@ -1,4 +1,6 @@
-package org.ossproject.kiwoom;
+package org.ossproject.kiwoom.query;
+
+import org.ossproject.kiwoom.config.KiwoomRestClient;
 
 import org.ossproject.application.port.TradeQueryPort;
 import org.ossproject.finance.model.Trade;

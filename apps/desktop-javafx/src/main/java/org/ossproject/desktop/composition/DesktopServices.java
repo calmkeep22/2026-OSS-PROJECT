@@ -25,7 +25,7 @@ import org.ossproject.desktop.persistence.PropertiesAccessibilityPreferencesRepo
 import org.ossproject.desktop.persistence.PropertiesDesktopStateRepository;
 import org.ossproject.desktop.persistence.PropertiesSonificationPreferencesRepository;
 import org.ossproject.desktop.persistence.SonificationPreferencesRepository;
-import org.ossproject.kiwoom.KiwoomMarketAdapters;
+import org.ossproject.kiwoom.query.KiwoomMarketAdapters;
 import org.ossproject.sonification.javasound.PcmGraphSonificationAdapter;
 import org.ossproject.sonification.port.SonificationPort;
 import org.ossproject.secret.SecretStore;

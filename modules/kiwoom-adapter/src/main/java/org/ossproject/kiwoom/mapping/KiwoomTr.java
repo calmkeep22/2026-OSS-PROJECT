@@ -1,4 +1,4 @@
-package org.ossproject.kiwoom;
+package org.ossproject.kiwoom.mapping;
 
 /**
  * 키움 REST TR.

@@ -1,4 +1,8 @@
-package org.ossproject.kiwoom;
+package org.ossproject.kiwoom.config;
+
+import org.ossproject.kiwoom.mapping.KiwoomFieldMap;
+import org.ossproject.kiwoom.mapping.KiwoomJsonMapper;
+import org.ossproject.kiwoom.mapping.KiwoomTr;
 
 import java.net.URI;
 import java.time.Duration;

@@ -1,4 +1,4 @@
-package org.ossproject.kiwoom;
+package org.ossproject.kiwoom.mapping;
 
 /**
  * 키움 응답 JSON에서 읽어야 하는 논리 필드.

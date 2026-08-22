@@ -1,4 +1,4 @@
-package org.ossproject.kiwoom;
+package org.ossproject.kiwoom.mapping;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;

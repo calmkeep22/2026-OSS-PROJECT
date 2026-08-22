@@ -11,7 +11,7 @@ import org.ossproject.broker.resilience.RetryPolicy;
 import org.ossproject.finance.model.OrderBook;
 import org.ossproject.finance.model.Quote;
 import org.ossproject.finance.model.Trade;
-import org.ossproject.kiwoom.KiwoomProperties;
+import org.ossproject.kiwoom.config.KiwoomProperties;
 
 import java.net.URI;
 import java.time.Clock;

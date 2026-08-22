@@ -1,4 +1,7 @@
-package org.ossproject.kiwoom;
+package org.ossproject.kiwoom.query;
+
+import org.ossproject.kiwoom.config.KiwoomRestClient;
+import org.ossproject.kiwoom.mapping.KiwoomTr;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import org.ossproject.application.port.StockQueryPort;

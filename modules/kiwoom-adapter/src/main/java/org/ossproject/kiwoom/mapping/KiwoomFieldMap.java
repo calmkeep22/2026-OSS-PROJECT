@@ -1,4 +1,4 @@
-package org.ossproject.kiwoom;
+package org.ossproject.kiwoom.mapping;
 
 import java.util.EnumMap;
 import java.util.Map;

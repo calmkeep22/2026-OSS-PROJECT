@@ -10,7 +10,7 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import org.ossproject.finance.model.Quote;
-import org.ossproject.kiwoom.KiwoomOrderBookParser;
+import org.ossproject.kiwoom.mapping.KiwoomOrderBookParser;
 
 import java.math.BigDecimal;
 
