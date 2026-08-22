@@ -6,12 +6,33 @@
 
 ## 주요 기능
 
+**접근성**
+
 - JavaFX 기반 키보드 탐색, 큰 글자, 고대비, 스크린리더용 텍스트
 - 우선순위·중복 병합·중단 정책이 있는 TTS 큐
 - 가격 그래프의 추세와 변화를 연속 음높이로 표현하는 sonification
+- 모든 그래프에 같은 값을 담은 표를 함께 제공
+
+**시세와 주문**
+
+- 키움 REST·WebSocket 어댑터와 화면 개발용 가짜 어댑터
+- 호가창, 체결 목록, 캔들 차트와 보조지표
 - 주문 미리보기와 명시적 재확인, 주문 한도·중복 주문 안전장치
 - 잔고·주문·체결 생명주기를 처리하는 모의주문 엔진
-- 가짜 시세/캔들/실시간 스트림과 키움 REST·WebSocket 어댑터
+
+**AI 분석** — 파이썬 분석 서비스를 앱이 직접 띄워 붙입니다
+
+- 다음 거래일 변동성 예측과 이상 움직임 감지, 종목 위험도
+- 닮은 차트 종목과 그 구간 다음에 실제로 있었던 일
+- 뉴스 기사·사건 요약·감성 지수
+- 우리가 계산한 값만 근거로 답하는 질의응답(챗봇). 사고파는 판단과 미래 가격은 답하지 않습니다
+
+> 분석 결과에는 신뢰도와 단서가 값에서부터 따라붙습니다. 검증에서 우연과 구별되지
+> 않은 예측은 그 사실을 함께 알립니다. 값을 받지 못하면 빈 칸으로 두지 않고 받지
+> 못했다고 적습니다 — 화면을 볼 수 없는 사용자는 지어낸 값과 실제를 구별할 수 없습니다.
+
+**보안**
+
 - SQLite 금융 데이터와 Windows DPAPI 비밀 저장소
 - API 연결 화면에서 환경별 키움 자격증명 DPAPI 저장·재사용·삭제
 
@@ -19,7 +40,8 @@
 
 ```text
 ai-service
-  AI 파트 (파이썬). 이상감지 · 차트 유사도 · 다음날 예측
+  AI 파트 (파이썬). 이상감지 · 차트 유사도 · 다음날 예측 · 뉴스
+  server.py 가 라이브러리를 HTTP 로 감싸고, 앱이 자식 프로세스로 띄움
   연동은 ai-service/INTEGRATION.md, 결과는 ai-service/results/index.html
 
 apps/desktop-javafx
@@ -27,6 +49,7 @@ apps/desktop-javafx
 
 modules/finance-domain
   플랫폼 독립 금융 모델과 주문 상태 전이
+  market · order · account · orderbook 으로 나뉘고, 공유 식별 타입만 루트에 있음
 
 modules/application
   Use Case, Port, 주문 안전 정책, 공통 adapter contract test
@@ -35,13 +58,20 @@ modules/mock-trading
   OrderLifecyclePort/AccountPort 기반 모의주문 엔진
 
 modules/broker-api
-  증권사 공통 REST 계약과 오류·재시도 모델
+  증권사 공통 REST 계약과 오류·재시도 모델 (auth · error · resilience)
 
 modules/kiwoom-adapter
-  키움 REST/WebSocket 구현
+  키움 REST/WebSocket 구현 (query · mapping · config · http · stream)
 
 modules/fake-adapters
   화면 개발용 시세·캔들·실시간 스트림 구현
+
+modules/ai-insight-api
+  AI 분석 계약. 예측·이상감지·닮은 차트·뉴스·질의응답과
+  함께 전해야 하는 단서를 값에서 강제
+
+modules/ai-insight-http
+  ai-service 를 HTTP 로 부르는 어댑터
 
 modules/persistence-sqlite
   SQLite 영속화 구현
@@ -104,6 +134,28 @@ try (SecretStore secrets = SecretStoreFactory.create(secretDirectory)) {
 [`file-secret-store`](modules/file-secret-store/README.md),
 [`windows-secret-store`](modules/windows-secret-store/README.md) 문서를 참고하세요.
 
+### AI 분석 사용
+
+AI 기능은 **켜 두면 앱이 알아서 띄웁니다.** 저장소 안에서 `ai-service` 를 찾아 서버를
+자식 프로세스로 시작하고, 앱을 닫을 때 함께 내립니다. 터미널을 따로 열 일이 없습니다.
+
+한 번만 준비하면 됩니다.
+
+```powershell
+cd ai-service
+pip install -r requirements.txt
+```
+
+파이썬이 없거나 패키지가 빠져 있으면 **앱은 그대로 돌아가고 화면에 그 사실을 적습니다.**
+시세와 주문은 AI 없이도 동작합니다.
+
+서버는 `127.0.0.1` 에만 엽니다. 인증이 없고 같은 기계의 앱만 부르므로 바깥에 열 이유가
+없습니다. 포트를 바꿔야 하면 `OPENSTOCK_AI_PORT` 를 씁니다.
+
+> 뉴스는 구글 뉴스 RSS 를 씁니다. API 키가 필요 없는 대신 **최근 7일까지만** 줍니다.
+> 그래서 앱이 하루 한 번 보유·관심 종목 뉴스를 받아 `ai-service/data/` 에 쌓습니다.
+> 오늘 안 받으면 그날치는 영영 없습니다.
+
 ## 실행
 
 요구 사항: JDK 17. 별도의 전역 Gradle 설치는 필요하지 않습니다.
@@ -133,6 +185,9 @@ Windows 휴대용 앱 이미지:
 - API 키와 토큰은 SQLite나 설정 파일에 평문으로 저장하지 않습니다.
 - DPAPI를 사용할 수 없는 환경에서는 평문 저장으로 대체하지 않고 실패합니다.
 - 색상이나 소리만으로 정보를 전달하지 않고 동등한 텍스트를 제공합니다.
+- 값을 받지 못하면 빈 칸으로 두지 않고 받지 못했다고 적습니다. 빈 칸은 "이상 없음" 으로 읽힙니다.
+- AI 분석은 신뢰도와 단서를 값에서 강제합니다. 화면이 그중 무엇을 보여 줄지 고를 수 없습니다.
+- 질의응답은 계산한 값만 근거로 답합니다. 사고파는 판단과 미래 가격은 답하지 않습니다.
 
 현재 구현된 경계는 [모듈 아키텍처](docs/MODULE-ARCHITECTURE.md)를 기준으로 합니다. 팀 간 향후 계약은 [통합 계약](docs/A-B-INTEGRATION-CONTRACT.md), [인터페이스 명세](docs/A-B-INTERFACE-SPEC.md), [현재 구현 계획](docs/A-B-CURRENT-IMPLEMENTATION-PLAN.md)에서 관리합니다.
 
