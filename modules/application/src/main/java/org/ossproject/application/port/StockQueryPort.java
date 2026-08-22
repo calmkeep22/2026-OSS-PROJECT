@@ -1,8 +1,8 @@
 package org.ossproject.application.port;
 
-import org.ossproject.finance.model.SecuritySummary;
+import org.ossproject.finance.model.market.SecuritySummary;
 import org.ossproject.finance.model.SecurityId;
-import org.ossproject.finance.model.StockDetail;
+import org.ossproject.finance.model.market.StockDetail;
 
 import java.util.List;
 

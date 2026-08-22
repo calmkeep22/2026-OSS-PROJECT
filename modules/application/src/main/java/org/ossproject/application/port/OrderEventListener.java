@@ -1,7 +1,7 @@
 package org.ossproject.application.port;
 
-import org.ossproject.finance.model.Execution;
-import org.ossproject.finance.model.Order;
+import org.ossproject.finance.model.order.Execution;
+import org.ossproject.finance.model.order.Order;
 
 /**
  * 주문 상태 변화 수신자.

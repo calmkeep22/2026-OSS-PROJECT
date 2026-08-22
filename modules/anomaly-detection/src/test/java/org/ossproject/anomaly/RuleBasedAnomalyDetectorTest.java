@@ -1,7 +1,7 @@
 package org.ossproject.anomaly;
 
 import org.junit.jupiter.api.Test;
-import org.ossproject.finance.model.PricePoint;
+import org.ossproject.finance.model.market.PricePoint;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;

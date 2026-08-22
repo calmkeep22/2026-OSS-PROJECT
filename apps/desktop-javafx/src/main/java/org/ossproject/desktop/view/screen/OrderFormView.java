@@ -18,7 +18,7 @@ import javafx.util.StringConverter;
 import org.ossproject.desktop.navigation.OrderDraft;
 import org.ossproject.desktop.viewmodel.OrderDraftViewModel;
 import org.ossproject.finance.model.OrderSide;
-import org.ossproject.finance.model.OrderType;
+import org.ossproject.finance.model.order.OrderType;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;

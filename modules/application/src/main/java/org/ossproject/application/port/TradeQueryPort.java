@@ -1,6 +1,6 @@
 package org.ossproject.application.port;
 
-import org.ossproject.finance.model.Trade;
+import org.ossproject.finance.model.market.Trade;
 
 import java.util.List;
 

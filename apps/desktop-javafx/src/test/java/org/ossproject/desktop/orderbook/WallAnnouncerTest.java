@@ -1,8 +1,8 @@
 package org.ossproject.desktop.orderbook;
 
 import org.junit.jupiter.api.Test;
-import org.ossproject.finance.model.OrderBook;
-import org.ossproject.finance.model.OrderBookLevel;
+import org.ossproject.finance.model.orderbook.OrderBook;
+import org.ossproject.finance.model.orderbook.OrderBookLevel;
 
 import java.math.BigDecimal;
 import java.time.Instant;

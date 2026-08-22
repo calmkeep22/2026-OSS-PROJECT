@@ -2,7 +2,7 @@ package org.ossproject.desktop.state;
 
 import org.ossproject.desktop.viewmodel.StockSelection;
 import org.ossproject.finance.model.SecurityId;
-import org.ossproject.finance.model.SecuritySummary;
+import org.ossproject.finance.model.market.SecuritySummary;
 
 import java.util.Objects;
 

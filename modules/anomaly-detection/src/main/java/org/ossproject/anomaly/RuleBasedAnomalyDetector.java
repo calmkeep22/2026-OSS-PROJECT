@@ -1,6 +1,6 @@
 package org.ossproject.anomaly;
 
-import org.ossproject.finance.model.PricePoint;
+import org.ossproject.finance.model.market.PricePoint;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;

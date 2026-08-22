@@ -5,7 +5,7 @@ import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.layout.Region;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
-import org.ossproject.finance.model.DepthChartView;
+import org.ossproject.finance.model.orderbook.DepthChartView;
 
 import java.text.NumberFormat;
 import java.util.List;

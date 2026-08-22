@@ -1,6 +1,6 @@
 package org.ossproject.broker.resilience;
 
-import org.ossproject.broker.BrokerException;
+import org.ossproject.broker.error.BrokerException;
 
 /**
  * 회로가 열려 있어 호출을 보내지 않고 즉시 실패시켰을 때 던진다.

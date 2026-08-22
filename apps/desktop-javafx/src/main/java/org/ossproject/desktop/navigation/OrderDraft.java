@@ -1,7 +1,7 @@
 package org.ossproject.desktop.navigation;
 
 import org.ossproject.finance.model.OrderSide;
-import org.ossproject.finance.model.OrderType;
+import org.ossproject.finance.model.order.OrderType;
 
 import java.util.Objects;
 

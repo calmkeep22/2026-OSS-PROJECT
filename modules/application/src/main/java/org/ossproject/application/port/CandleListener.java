@@ -1,6 +1,6 @@
 package org.ossproject.application.port;
 
-import org.ossproject.finance.model.Candle;
+import org.ossproject.finance.model.market.Candle;
 
 /**
  * 실시간 봉 갱신 수신자.

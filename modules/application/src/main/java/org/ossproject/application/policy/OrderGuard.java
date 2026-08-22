@@ -1,6 +1,6 @@
 package org.ossproject.application.policy;
 
-import org.ossproject.finance.model.OrderCommand;
+import org.ossproject.finance.model.order.OrderCommand;
 
 import java.math.BigDecimal;
 import java.text.NumberFormat;

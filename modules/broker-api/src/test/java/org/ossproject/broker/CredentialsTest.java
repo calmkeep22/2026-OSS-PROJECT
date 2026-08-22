@@ -1,5 +1,8 @@
 package org.ossproject.broker;
 
+import org.ossproject.broker.auth.AccessToken;
+import org.ossproject.broker.auth.BrokerCredentials;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 

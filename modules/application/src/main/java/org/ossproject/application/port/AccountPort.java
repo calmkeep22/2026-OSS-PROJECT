@@ -1,6 +1,6 @@
 package org.ossproject.application.port;
 
-import org.ossproject.finance.model.Account;
+import org.ossproject.finance.model.account.Account;
 
 /** Supplies the account model shared by order processing and presentation. */
 public interface AccountPort {

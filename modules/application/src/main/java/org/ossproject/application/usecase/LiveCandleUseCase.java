@@ -4,10 +4,10 @@ import org.ossproject.application.port.CandleListener;
 import org.ossproject.application.port.CandleQueryPort;
 import org.ossproject.application.port.MarketDataStreamPort;
 import org.ossproject.application.port.QuoteListener;
-import org.ossproject.finance.model.Candle;
-import org.ossproject.finance.model.CandleAggregator;
-import org.ossproject.finance.model.CandleInterval;
-import org.ossproject.finance.model.Quote;
+import org.ossproject.finance.model.market.Candle;
+import org.ossproject.finance.model.market.CandleAggregator;
+import org.ossproject.finance.model.market.CandleInterval;
+import org.ossproject.finance.model.market.Quote;
 
 import java.time.Clock;
 import java.util.List;

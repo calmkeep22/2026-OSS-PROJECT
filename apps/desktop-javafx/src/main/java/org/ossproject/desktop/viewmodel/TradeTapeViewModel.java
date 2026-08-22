@@ -3,7 +3,7 @@ package org.ossproject.desktop.viewmodel;
 import org.ossproject.application.port.EventSubscription;
 import org.ossproject.application.port.MarketApplicationPort;
 import org.ossproject.finance.model.SecurityId;
-import org.ossproject.finance.model.Trade;
+import org.ossproject.finance.model.market.Trade;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;

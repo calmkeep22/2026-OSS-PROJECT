@@ -4,10 +4,10 @@ import org.ossproject.ai.AiInsight;
 import org.ossproject.ai.AiInsightPort;
 import org.ossproject.ai.AiUnavailableException;
 import org.ossproject.application.port.MarketApplicationPort;
-import org.ossproject.finance.model.CandleInterval;
+import org.ossproject.finance.model.market.CandleInterval;
 import org.ossproject.finance.model.SecurityId;
 
-import org.ossproject.finance.model.Candle;
+import org.ossproject.finance.model.market.Candle;
 
 import java.util.List;
 import java.util.Objects;

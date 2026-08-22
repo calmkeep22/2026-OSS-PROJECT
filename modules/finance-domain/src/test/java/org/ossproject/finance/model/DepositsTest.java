@@ -1,5 +1,12 @@
 package org.ossproject.finance.model;
 
+import org.ossproject.finance.model.account.Account;
+import org.ossproject.finance.model.account.Balance;
+import org.ossproject.finance.model.account.Deposits;
+import org.ossproject.finance.model.account.Position;
+import org.ossproject.finance.model.account.ReportedValuation;
+import org.ossproject.finance.model.market.Quote;
+
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;

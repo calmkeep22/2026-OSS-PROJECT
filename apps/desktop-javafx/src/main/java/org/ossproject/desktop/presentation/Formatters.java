@@ -1,9 +1,9 @@
 package org.ossproject.desktop.presentation;
 
-import org.ossproject.finance.model.Account;
-import org.ossproject.finance.model.Order;
+import org.ossproject.finance.model.account.Account;
+import org.ossproject.finance.model.order.Order;
 import org.ossproject.finance.model.PriceDirection;
-import org.ossproject.finance.model.StockDetail;
+import org.ossproject.finance.model.market.StockDetail;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;

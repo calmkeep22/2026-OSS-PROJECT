@@ -1,5 +1,7 @@
 package org.ossproject.broker;
 
+import org.ossproject.broker.auth.SensitiveDataMasker;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 

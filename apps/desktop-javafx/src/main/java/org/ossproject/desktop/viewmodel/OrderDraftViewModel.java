@@ -1,10 +1,10 @@
 package org.ossproject.desktop.viewmodel;
 
 import org.ossproject.desktop.navigation.OrderDraft;
-import org.ossproject.finance.model.Account;
+import org.ossproject.finance.model.account.Account;
 import org.ossproject.finance.model.OrderSide;
-import org.ossproject.finance.model.OrderType;
-import org.ossproject.finance.model.Position;
+import org.ossproject.finance.model.order.OrderType;
+import org.ossproject.finance.model.account.Position;
 
 import java.math.BigDecimal;
 import java.util.Objects;

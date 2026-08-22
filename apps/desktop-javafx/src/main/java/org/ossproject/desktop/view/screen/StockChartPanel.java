@@ -16,7 +16,7 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import org.ossproject.desktop.chart.CandlestickChartView;
 import org.ossproject.desktop.viewmodel.StockDetailViewModel.ChartRange;
-import org.ossproject.finance.model.PricePoint;
+import org.ossproject.finance.model.market.PricePoint;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;

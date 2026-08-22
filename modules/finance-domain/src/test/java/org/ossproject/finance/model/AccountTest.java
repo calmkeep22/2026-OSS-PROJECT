@@ -1,5 +1,10 @@
 package org.ossproject.finance.model;
 
+import org.ossproject.finance.model.account.Account;
+import org.ossproject.finance.model.account.Balance;
+import org.ossproject.finance.model.account.Position;
+import org.ossproject.finance.model.market.Quote;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 

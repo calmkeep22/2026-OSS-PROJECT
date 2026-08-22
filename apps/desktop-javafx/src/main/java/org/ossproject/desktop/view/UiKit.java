@@ -14,7 +14,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 /** 모든 화면이 공유하는 접근 가능한 JavaFX 컴포넌트 팩토리. */
-import org.ossproject.finance.model.Order;
+import org.ossproject.finance.model.order.Order;
 
 import static org.ossproject.desktop.presentation.Formatters.orderTime;
 

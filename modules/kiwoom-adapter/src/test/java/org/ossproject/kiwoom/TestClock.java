@@ -6,12 +6,12 @@ import java.time.Instant;
 import java.time.ZoneId;
 
 /** 테스트에서 시간을 임의로 밀 수 있는 시계. */
-final class TestClock extends Clock {
+public class TestClock extends Clock {
 
     private final ZoneId zone;
     private Instant now;
 
-    TestClock(Instant now) {
+    public TestClock(Instant now) {
         this(now, ZoneId.of("Asia/Seoul"));
     }
 
@@ -20,7 +20,7 @@ final class TestClock extends Clock {
         this.zone = zone;
     }
 
-    void advance(Duration duration) {
+    public void advance(Duration duration) {
         now = now.plus(duration);
     }
 

@@ -1,7 +1,7 @@
 package org.ossproject.application.port;
 
-import org.ossproject.finance.model.Order;
-import org.ossproject.finance.model.OrderCommand;
+import org.ossproject.finance.model.order.Order;
+import org.ossproject.finance.model.order.OrderCommand;
 
 import java.util.List;
 import java.util.Optional;

@@ -16,8 +16,8 @@ import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.layout.VBox;
 import org.ossproject.desktop.view.UiKit;
-import org.ossproject.finance.model.PriceLadderRow;
-import org.ossproject.finance.model.PriceLadderView;
+import org.ossproject.finance.model.orderbook.PriceLadderRow;
+import org.ossproject.finance.model.orderbook.PriceLadderView;
 
 import java.math.BigDecimal;
 import java.text.NumberFormat;

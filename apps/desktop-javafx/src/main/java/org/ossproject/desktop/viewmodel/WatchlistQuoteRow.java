@@ -1,7 +1,7 @@
 package org.ossproject.desktop.viewmodel;
 
 import org.ossproject.desktop.state.WatchlistItem;
-import org.ossproject.finance.model.StockDetail;
+import org.ossproject.finance.model.market.StockDetail;
 
 import java.math.RoundingMode;
 import java.util.Objects;

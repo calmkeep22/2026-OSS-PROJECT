@@ -3,14 +3,14 @@ package org.ossproject.kiwoom.stream;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.ossproject.finance.model.OrderSide;
-import org.ossproject.finance.model.Trade;
+import org.ossproject.finance.model.market.Trade;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import org.ossproject.finance.model.Quote;
-import org.ossproject.kiwoom.KiwoomOrderBookParser;
+import org.ossproject.finance.model.market.Quote;
+import org.ossproject.kiwoom.mapping.KiwoomOrderBookParser;
 
 import java.math.BigDecimal;
 

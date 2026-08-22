@@ -2,8 +2,8 @@ package org.ossproject.fake;
 
 import org.junit.jupiter.api.Test;
 import org.ossproject.application.port.ConnectionState;
-import org.ossproject.finance.model.CandleInterval;
-import org.ossproject.finance.model.Quote;
+import org.ossproject.finance.model.market.CandleInterval;
+import org.ossproject.finance.model.market.Quote;
 
 import java.math.BigDecimal;
 import java.time.Clock;

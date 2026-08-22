@@ -1,5 +1,11 @@
 package org.ossproject.finance.model;
 
+import org.ossproject.finance.model.order.FeeSchedule;
+import org.ossproject.finance.model.order.OrderCommand;
+import org.ossproject.finance.model.OrderSide;
+import org.ossproject.finance.model.order.TradeCosts;
+import org.ossproject.finance.model.order.TradePreview;
+
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;

@@ -8,8 +8,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.ossproject.ai.AiInsight;
 import org.ossproject.ai.Forecast;
-import org.ossproject.finance.model.Candle;
-import org.ossproject.finance.model.CandleInterval;
+import org.ossproject.finance.model.market.Candle;
+import org.ossproject.finance.model.market.CandleInterval;
 import org.ossproject.finance.model.SecurityId;
 
 import java.io.IOException;

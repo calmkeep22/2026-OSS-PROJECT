@@ -4,11 +4,11 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.ossproject.desktop.navigation.OrderDraft;
 import org.ossproject.desktop.navigation.Screen;
-import org.ossproject.finance.model.Account;
-import org.ossproject.finance.model.Balance;
+import org.ossproject.finance.model.account.Account;
+import org.ossproject.finance.model.account.Balance;
 import org.ossproject.finance.model.OrderSide;
-import org.ossproject.finance.model.OrderType;
-import org.ossproject.finance.model.Position;
+import org.ossproject.finance.model.order.OrderType;
+import org.ossproject.finance.model.account.Position;
 
 import java.math.BigDecimal;
 import java.util.List;

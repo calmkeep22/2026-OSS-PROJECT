@@ -1,6 +1,6 @@
 package org.ossproject.application.port;
 
-import org.ossproject.finance.model.OrderBook;
+import org.ossproject.finance.model.orderbook.OrderBook;
 
 /**
  * 호가창 단건 조회 포트.

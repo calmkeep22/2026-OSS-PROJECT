@@ -4,12 +4,12 @@ import org.junit.jupiter.api.Test;
 import org.ossproject.application.policy.OrderGuard;
 import org.ossproject.application.policy.OrderLimitPolicy;
 import org.ossproject.application.usecase.TradingUseCase;
-import org.ossproject.finance.model.Account;
-import org.ossproject.finance.model.Balance;
-import org.ossproject.finance.model.OrderCommand;
+import org.ossproject.finance.model.account.Account;
+import org.ossproject.finance.model.account.Balance;
+import org.ossproject.finance.model.order.OrderCommand;
 import org.ossproject.finance.model.OrderSide;
-import org.ossproject.finance.model.OrderStatus;
-import org.ossproject.finance.model.Position;
+import org.ossproject.finance.model.order.OrderStatus;
+import org.ossproject.finance.model.account.Position;
 
 import java.math.BigDecimal;
 import java.util.List;

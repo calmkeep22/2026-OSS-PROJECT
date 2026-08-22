@@ -1,8 +1,8 @@
 package org.ossproject.kiwoom.stream;
 
-import org.ossproject.finance.model.OrderBook;
-import org.ossproject.finance.model.Quote;
-import org.ossproject.finance.model.Trade;
+import org.ossproject.finance.model.orderbook.OrderBook;
+import org.ossproject.finance.model.market.Quote;
+import org.ossproject.finance.model.market.Trade;
 
 /**
  * 실시간 WebSocket 에서 올라온 사건.

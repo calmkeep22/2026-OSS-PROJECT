@@ -18,10 +18,10 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import org.ossproject.desktop.state.JournalEntry;
 import org.ossproject.desktop.viewmodel.AccountScreenData;
-import org.ossproject.finance.model.Account;
-import org.ossproject.finance.model.Deposits;
+import org.ossproject.finance.model.account.Account;
+import org.ossproject.finance.model.account.Deposits;
 import org.ossproject.finance.model.OrderSide;
-import org.ossproject.finance.model.Position;
+import org.ossproject.finance.model.account.Position;
 
 import java.util.Objects;
 import java.util.function.BiConsumer;

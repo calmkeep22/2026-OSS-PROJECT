@@ -1,11 +1,11 @@
 package org.ossproject.broker;
 
-import org.ossproject.finance.model.Account;
-import org.ossproject.finance.model.Candle;
-import org.ossproject.finance.model.CandleInterval;
-import org.ossproject.finance.model.Order;
-import org.ossproject.finance.model.OrderCommand;
-import org.ossproject.finance.model.Quote;
+import org.ossproject.finance.model.account.Account;
+import org.ossproject.finance.model.market.Candle;
+import org.ossproject.finance.model.market.CandleInterval;
+import org.ossproject.finance.model.order.Order;
+import org.ossproject.finance.model.order.OrderCommand;
+import org.ossproject.finance.model.market.Quote;
 
 import java.util.List;
 

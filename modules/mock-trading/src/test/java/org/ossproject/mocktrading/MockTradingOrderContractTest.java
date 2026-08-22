@@ -2,7 +2,7 @@ package org.ossproject.mocktrading;
 
 import org.ossproject.application.contract.OrderLifecyclePortContract;
 import org.ossproject.application.port.OrderLifecyclePort;
-import org.ossproject.finance.model.OrderCommand;
+import org.ossproject.finance.model.order.OrderCommand;
 import org.ossproject.finance.model.OrderSide;
 
 import java.math.BigDecimal;

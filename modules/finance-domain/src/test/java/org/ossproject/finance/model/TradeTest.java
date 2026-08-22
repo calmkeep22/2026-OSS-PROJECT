@@ -1,5 +1,8 @@
 package org.ossproject.finance.model;
 
+import org.ossproject.finance.model.market.Trade;
+import org.ossproject.finance.model.OrderSide;
+
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;

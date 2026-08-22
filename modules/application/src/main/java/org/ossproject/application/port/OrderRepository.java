@@ -1,6 +1,6 @@
 package org.ossproject.application.port;
 
-import org.ossproject.finance.model.Order;
+import org.ossproject.finance.model.order.Order;
 
 import java.time.Instant;
 import java.util.List;

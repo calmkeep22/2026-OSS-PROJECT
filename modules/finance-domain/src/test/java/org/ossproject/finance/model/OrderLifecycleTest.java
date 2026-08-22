@@ -1,5 +1,12 @@
 package org.ossproject.finance.model;
 
+import org.ossproject.finance.model.order.Execution;
+import org.ossproject.finance.model.order.Order;
+import org.ossproject.finance.model.order.OrderCommand;
+import org.ossproject.finance.model.OrderSide;
+import org.ossproject.finance.model.order.OrderStatus;
+import org.ossproject.finance.model.order.OrderType;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 

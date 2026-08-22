@@ -3,14 +3,14 @@ package org.ossproject.mocktrading;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.ossproject.application.port.OrderEventListener;
-import org.ossproject.finance.model.Account;
-import org.ossproject.finance.model.Execution;
-import org.ossproject.finance.model.Order;
-import org.ossproject.finance.model.OrderCommand;
+import org.ossproject.finance.model.account.Account;
+import org.ossproject.finance.model.order.Execution;
+import org.ossproject.finance.model.order.Order;
+import org.ossproject.finance.model.order.OrderCommand;
 import org.ossproject.finance.model.OrderSide;
-import org.ossproject.finance.model.OrderStatus;
-import org.ossproject.finance.model.Position;
-import org.ossproject.finance.model.Quote;
+import org.ossproject.finance.model.order.OrderStatus;
+import org.ossproject.finance.model.account.Position;
+import org.ossproject.finance.model.market.Quote;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -34,7 +34,7 @@ class MockTradingEngineTest {
 
     private MockTradingEngine engineHolding(String cash, long quantity, FillMode mode) {
         Account account = new Account("00000000001",
-                org.ossproject.finance.model.Balance.of(new BigDecimal(cash)),
+                org.ossproject.finance.model.account.Balance.of(new BigDecimal(cash)),
                 List.of(Position.of("005930", "삼성전자", quantity, new BigDecimal("70000"))));
         return new MockTradingEngine(account, mode, CLOCK);
     }

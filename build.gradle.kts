@@ -137,7 +137,28 @@ val verifyModuleBoundaries by tasks.registering {
         "apps/desktop-javafx" to listOf("org.sqlite", "com.sun.jna", "java.net.http")
     )
 
+    // 도메인 안에서도 방향을 지킨다. 시세와 주문은 서로를 모르고, 계좌와 호가만 시세를
+    // 본다. 이 방향이 뒤집히면 값 하나를 고칠 때 도메인 전체가 흔들린다.
+    //
+    // 모듈 규칙과 달리 소스 폴더를 그대로 가리킨다. 패키지 하나에 걸고 싶기 때문이다.
+    val financeModel = "modules/finance-domain/src/main/java/org/ossproject/finance/model"
+    val packageRules = mapOf(
+        "$financeModel/market" to listOf(
+            "finance.model.order.", "finance.model.account.", "finance.model.orderbook."
+        ),
+        "$financeModel/order" to listOf(
+            "finance.model.market.", "finance.model.account.", "finance.model.orderbook."
+        ),
+        "$financeModel/account" to listOf(
+            "finance.model.order.", "finance.model.orderbook."
+        ),
+        "$financeModel/orderbook" to listOf(
+            "finance.model.order.", "finance.model.account."
+        )
+    )
+
     inputs.files(rules.keys.map { fileTree("$it/src/main/java") { include("**/*.java") } })
+    inputs.files(packageRules.keys.map { fileTree(it) { include("**/*.java") } })
     doLast {
         val violations = mutableListOf<String>()
         rules.forEach { (module, forbidden) ->
@@ -145,6 +166,14 @@ val verifyModuleBoundaries by tasks.registering {
                 val text = source.readText(Charsets.UTF_8)
                 forbidden.filter(text::contains).forEach { dependency ->
                     violations += "${source.relativeTo(rootDir)} imports forbidden boundary $dependency"
+                }
+            }
+        }
+        packageRules.forEach { (directory, forbidden) ->
+            fileTree(directory) { include("**/*.java") }.forEach { source ->
+                val text = source.readText(Charsets.UTF_8)
+                forbidden.filter(text::contains).forEach { dependency ->
+                    violations += "${source.relativeTo(rootDir)} imports forbidden package $dependency"
                 }
             }
         }

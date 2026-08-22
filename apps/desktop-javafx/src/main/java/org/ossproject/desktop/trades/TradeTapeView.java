@@ -9,7 +9,7 @@ import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
 import javafx.scene.layout.VBox;
 import org.ossproject.desktop.view.UiKit;
-import org.ossproject.finance.model.Trade;
+import org.ossproject.finance.model.market.Trade;
 
 import java.text.NumberFormat;
 import java.util.List;

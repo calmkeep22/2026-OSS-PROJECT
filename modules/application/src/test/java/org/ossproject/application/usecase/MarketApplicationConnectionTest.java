@@ -11,10 +11,10 @@ import org.ossproject.application.port.StockQueryPort;
 import org.ossproject.application.port.MarketApplicationListener;
 import org.ossproject.finance.model.Exchange;
 import org.ossproject.finance.model.SecurityId;
-import org.ossproject.finance.model.Candle;
-import org.ossproject.finance.model.CandleInterval;
-import org.ossproject.finance.model.SecuritySummary;
-import org.ossproject.finance.model.StockDetail;
+import org.ossproject.finance.model.market.Candle;
+import org.ossproject.finance.model.market.CandleInterval;
+import org.ossproject.finance.model.market.SecuritySummary;
+import org.ossproject.finance.model.market.StockDetail;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -114,7 +114,7 @@ class MarketApplicationConnectionTest {
         EventSubscription chart = market.monitorCandles(samsung, CandleInterval.MINUTE_1,
                 List.of(), candle -> { });
         EventSubscription sound = market.monitor(samsung, new MarketApplicationListener() {
-            @Override public void onQuote(org.ossproject.finance.model.Quote quote) { }
+            @Override public void onQuote(org.ossproject.finance.model.market.Quote quote) { }
             @Override public void onConnectionChanged(ConnectionState state, String detail) { }
         });
         assertEquals(1, market.liveSubscriptionCount());

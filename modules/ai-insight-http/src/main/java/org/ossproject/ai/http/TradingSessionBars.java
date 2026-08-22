@@ -1,6 +1,6 @@
 package org.ossproject.ai.http;
 
-import org.ossproject.finance.model.Candle;
+import org.ossproject.finance.model.market.Candle;
 
 import java.time.Clock;
 import java.time.LocalDate;
