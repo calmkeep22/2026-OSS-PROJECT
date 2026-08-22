@@ -16,6 +16,7 @@ import org.ossproject.ai.SimilarStock;
 
 import java.util.Objects;
 import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 
 import static org.ossproject.desktop.view.UiKit.*;
@@ -35,8 +36,13 @@ public final class SimilarScreenView {
     private final String stockName;
     /** 한 종목을 읽어 준다. 음성 대기열은 앱이 관리한다. */
     private final BiConsumer<String, String> speak;
-    /** 관심 종목에 담는다. 이미 있으면 앱이 알아서 알린다. */
-    private final BiConsumer<String, String> addToWatchlist;
+    /**
+     * 관심종목 담기·빼기 단추를 앱에서 받아 온다.
+     *
+     * <p>이 화면이 목록을 직접 만지지 않는다. 담긴 상태를 화면마다 따로 세면 한 곳이
+     * 어긋나고, 어긋난 단추는 사용자에게 거짓말을 한다.
+     */
+    private final BiFunction<String, String, Button> watchlistToggle;
     /** 두 종목을 나란히 보여 준다. 코드와 이름을 넘긴다. */
     private final BiConsumer<String, String> compare;
     private final Consumer<Runnable> retry;
@@ -44,12 +50,12 @@ public final class SimilarScreenView {
     private final VBox body = new VBox(14);
 
     public SimilarScreenView(String stockName, BiConsumer<String, String> speak,
-                             BiConsumer<String, String> addToWatchlist,
+                             BiFunction<String, String, Button> watchlistToggle,
                              BiConsumer<String, String> compare,
                              Consumer<Runnable> retry) {
         this.stockName = stockName == null || stockName.isBlank() ? "선택한 종목" : stockName;
         this.speak = Objects.requireNonNull(speak, "speak");
-        this.addToWatchlist = Objects.requireNonNull(addToWatchlist, "addToWatchlist");
+        this.watchlistToggle = Objects.requireNonNull(watchlistToggle, "watchlistToggle");
         this.compare = Objects.requireNonNull(compare, "compare");
         this.retry = Objects.requireNonNull(retry, "retry");
     }
@@ -140,8 +146,7 @@ public final class SimilarScreenView {
 
         Button listen = new Button("같이 듣기");
         listen.setOnAction(event -> speak.accept(spokenOf(queryName, stock), "similar-stock"));
-        Button watch = new Button("관심 종목에 추가");
-        watch.setOnAction(event -> addToWatchlist.accept(stock.symbol(), stock.name()));
+        Button watch = watchlistToggle.apply(stock.symbol(), stock.name());
         Button compareButton = new Button("차트 비교 보기");
         compareButton.setOnAction(event -> compare.accept(stock.symbol(), stock.name()));
 

@@ -246,6 +246,37 @@ public final class StockSearchViewModel {
         return true;
     }
 
+    /**
+     * 관심종목에서 뺀다. 없었으면 {@code false}.
+     *
+     * <p>담는 길만 있고 빼는 길이 없으면 화면은 "추가" 버튼만 둘 수 있다. 그러면 이미
+     * 담긴 종목에서도 같은 버튼이 보여, 눌러 본 사용자가 담긴 것인지 아닌지 알 수 없다.
+     */
+    public boolean removeFromWatchlist(String symbol, String exchange) {
+        Objects.requireNonNull(symbol, "symbol");
+        return session.watchlistItems().removeIf(item -> matches(item, symbol, exchange));
+    }
+
+    /** 이미 담겨 있는지. 화면이 버튼 글자를 정할 때 쓴다. */
+    public boolean isInWatchlist(String symbol, String exchange) {
+        return symbol != null && session.watchlistItems().stream()
+                .anyMatch(item -> matches(item, symbol, exchange));
+    }
+
+    /**
+     * 같은 종목인지.
+     *
+     * <p>종목 코드만 보면 안 된다. 코스피와 나스닥에 같은 코드가 있을 수 있어, 한쪽을
+     * 담았는데 다른 쪽이 담긴 것으로 보인다. 거래소를 모르면 코드만으로 견준다 —
+     * 화면이 거래소를 모르는 자리가 아직 남아 있다.
+     */
+    private static boolean matches(WatchlistItem item, String symbol, String exchange) {
+        if (!item.symbol().equalsIgnoreCase(symbol)) {
+            return false;
+        }
+        return exchange == null || exchange.isBlank() || item.exchange().equalsIgnoreCase(exchange);
+    }
+
     private void executeStateChange(CompletableFuture<?> result, Runnable change) {
         try {
             stateExecutor.execute(() -> {
