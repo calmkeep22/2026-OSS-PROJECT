@@ -57,20 +57,37 @@ public final class ToneSoundAdapter implements SoundPort {
                 case WARNING -> { tone(440, 130); silence(60); tone(440, 130); }
                 case ERROR, CONNECTION_LOST, ORDER_REJECTED -> { tone(300, 180); silence(50); tone(220, 220); }
                 case ANOMALY_HIGH -> { tone(880, 100); silence(45); tone(880, 100); silence(45); tone(660, 150); }
+                // 마이크가 열렸다는 신호. 다른 것보다 크고 길게 낸다.
+                //
+                // 처음에는 다른 신호와 같은 세기로 짧게 냈더니 들리지 않는다는 말을
+                // 들었다. 이 소리는 "지금부터 말하라" 는 뜻이라 놓치면 사용자가 언제
+                // 말해야 할지 알 수 없고, 말이 빨라 앞부분이 잘린다. 놓치면 안 되는
+                // 신호다.
+                case LISTENING -> { tone(660, 110, LOUD); silence(30); tone(990, 150, LOUD); }
             }
         } catch (Exception ignored) {
             // The same state must remain available as visible text and speech.
         }
     }
 
+    /** 보통 신호음의 세기. 16비트 최대치의 18퍼센트쯤이다. */
+    private static final int NORMAL = 6_000;
+
+    /** 놓치면 안 되는 신호의 세기. */
+    private static final int LOUD = 13_000;
+
     private void tone(double frequency, int milliseconds) throws Exception {
+        tone(frequency, milliseconds, NORMAL);
+    }
+
+    private void tone(double frequency, int milliseconds, int amplitude) throws Exception {
         AudioFormat format = new AudioFormat(SAMPLE_RATE, 16, 1, true, false);
         int sampleCount = Math.round(SAMPLE_RATE * milliseconds / 1000f);
         byte[] bytes = new byte[sampleCount * 2];
         for (int i = 0; i < sampleCount; i++) {
             double envelope = Math.min(1, i / 160d) * Math.min(1, (sampleCount - i) / 160d);
             short sample = (short) (Math.sin(2 * Math.PI * frequency * i / SAMPLE_RATE)
-                    * 6_000 * envelope * volume);
+                    * amplitude * envelope * volume);
             bytes[i * 2] = (byte) sample;
             bytes[i * 2 + 1] = (byte) (sample >>> 8);
         }

@@ -16,7 +16,8 @@ class PropertiesAccessibilityPreferencesRepositoryTest {
         Path file = temporaryDirectory.resolve("accessibility.properties");
         var repository = new PropertiesAccessibilityPreferencesRepository(file);
         var preferences = new AccessibilityPreferences(
-                true, false, true, true, true, true, "넓게", "Microsoft Heami", 1.25, 75);
+                true, false, true, true, true, true, "넓게", "Microsoft Heami",
+                "마이크(Conexant HD Audio)", 1.25, 75);
 
         repository.save(preferences);
 

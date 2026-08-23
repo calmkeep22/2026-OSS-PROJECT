@@ -36,6 +36,7 @@ import org.ossproject.application.port.MarketApplicationPort;
 import org.ossproject.application.port.MarketApplicationListener;
 import org.ossproject.application.usecase.TradingUseCase;
 import org.ossproject.anomaly.AnomalyAlert;
+import org.ossproject.anomaly.AnomalyAlertRepository;
 import org.ossproject.anomaly.AnomalySeverity;
 import org.ossproject.anomaly.StreamingAnomalyConfig;
 import org.ossproject.anomaly.StreamingAnomalyDetector;
@@ -90,14 +91,11 @@ import org.ossproject.desktop.viewmodel.OrderBookViewModel;
 import org.ossproject.desktop.viewmodel.TradeTapeViewModel;
 import org.ossproject.desktop.viewmodel.StockDetailViewModel;
 import org.ossproject.desktop.viewmodel.StockSelection;
-import org.ossproject.desktop.viewmodel.ScannerViewModel;
 import org.ossproject.desktop.view.screen.SearchScreenView;
 import org.ossproject.desktop.view.screen.ConnectionScreenView;
 import org.ossproject.desktop.view.screen.AccountScreenView;
 import org.ossproject.desktop.view.screen.NotificationsScreenView;
-import org.ossproject.desktop.view.screen.UsMarketScreenView;
 import org.ossproject.desktop.view.screen.WatchlistScreenView;
-import org.ossproject.desktop.view.screen.ScannerScreenView;
 import org.ossproject.desktop.persistence.DesktopStateRepository;
 import org.ossproject.desktop.persistence.DesktopStateSnapshot;
 import org.ossproject.desktop.persistence.AccessibilityPreferencesRepository;
@@ -117,6 +115,7 @@ import java.util.concurrent.CompletableFuture;
 import static org.ossproject.desktop.view.UiKit.*;
 
 public final class DesktopApplication extends Application {
+    private static final System.Logger LOGGER = System.getLogger(DesktopApplication.class.getName());
     private final TradingUseCase tradingUseCase;
     private final MarketApplicationPort marketApplication;
     private final CandleQueryPort candleAdapter;
@@ -127,6 +126,8 @@ public final class DesktopApplication extends Application {
     private final SoundPort soundPort;
     private final SonificationPort sonificationPort;
     private final SecretStore secretStore;
+    private final AnomalyAlertRepository anomalyAlertRepository;
+    private final AutoCloseable persistence;
     private final AiInsightViewModel aiInsightViewModel;
     /** AI 서버를 앱이 띄웠으면 그 프로세스. 사용자가 직접 띄웠거나 못 띄웠으면 null. */
     private final NewsViewModel newsViewModel;
@@ -145,6 +146,14 @@ public final class DesktopApplication extends Application {
      */
     private org.ossproject.ai.AiInsight lastInsight;
     private final AiServiceProcess aiServiceProcess;
+    private final org.ossproject.voice.VoiceInputPort voiceInput;
+    private final org.ossproject.voice.AudioCapturePort microphone;
+    private org.ossproject.desktop.voice.VoiceCommandController voiceController;
+    private final Button voiceButton = new Button("음성 명령");
+    /** 마지막으로 읽어 준 말. "다시 말해줘" 가 이것을 되풀이한다. */
+    private String lastSpoken = "";
+    /** 말로 정한 주문 수량. 다음 주문 화면 하나에만 쓰이고 1 로 되돌아간다. */
+    private int pendingOrderQuantity = 1;
     private AccessibleChartController accessibleChartController;
     private final Label status = new Label("준비됨");
     private final Label lastDataTime = new Label("마지막 시세 --:--:--");
@@ -176,7 +185,6 @@ public final class DesktopApplication extends Application {
      * 너무 짧게 잡으면 멀쩡한 연결을 끊긴 것처럼 알리게 된다.
      */
     private static final java.time.Duration ORDER_BOOK_STALE_AFTER = java.time.Duration.ofSeconds(30);
-    private final ScannerViewModel scannerViewModel = new ScannerViewModel();
     private final DesktopStateRepository stateRepository;
     private final AccessibilityPreferencesRepository accessibilityPreferencesRepository;
     private final SonificationPreferencesRepository sonificationPreferencesRepository;
@@ -194,6 +202,15 @@ public final class DesktopApplication extends Application {
     private Label globalSearchKeyboardHelp;
     private boolean globalSearchSelectionInProgress;
     private boolean globalSearchPopupArmed;
+
+    /**
+     * 한글을 조합하는 중인가.
+     *
+     * <p>추천 팝업이 뜨면 포커스를 가져가고, 그 순간 조합 중이던 글자가 자모로 풀린다.
+     * "네이버" 를 치면 "ㄴㅔ이버" 가 되었다. 첫 글자만 깨지는 이유는 팝업이 한 번만
+     * 뜨기 때문이다. 조합이 끝날 때까지 팝업을 미룬다.
+     */
+    private boolean composingHangul;
     private final Button backButton = new Button("←");
     private final Button connectionButton = new Button("키움 실시간 · 확인 중");
     private final Label currentLocation = new Label("홈");
@@ -227,10 +244,14 @@ public final class DesktopApplication extends Application {
         this.soundPort = services.sounds();
         this.sonificationPort = services.sonification();
         this.secretStore = services.secrets();
+        this.anomalyAlertRepository = services.anomalyAlerts();
+        this.persistence = services.persistence();
         this.aiInsightViewModel = new AiInsightViewModel(
                 services.market(), services.aiInsight(), Platform::runLater);
         this.newsViewModel = new NewsViewModel(services.news(), Platform::runLater);
         this.aiServiceProcess = services.aiServiceProcess();
+        this.voiceInput = services.voice();
+        this.microphone = services.microphone();
         this.stateRepository = services.stateRepository();
         this.accessibilityPreferencesRepository = services.accessibilityPreferences();
         this.sonificationPreferencesRepository = services.sonificationPreferences();
@@ -252,7 +273,10 @@ public final class DesktopApplication extends Application {
         stockSearchViewModel.recentSearches().addListener(
                 (javafx.collections.ListChangeListener<String>) change -> scheduleStateSave());
         session.watchlistItems().addListener(
-                (javafx.collections.ListChangeListener<WatchlistItem>) change -> refreshAnomalyMonitoring());
+                (javafx.collections.ListChangeListener<WatchlistItem>) change -> {
+                    refreshAnomalyMonitoring();
+                    refreshVoiceVocabulary();
+                });
         root = new BorderPane();
         root.getStyleClass().add("app-root");
         if (accessibility.largeTextEnabled()) root.getStyleClass().add("large-text");
@@ -310,6 +334,8 @@ public final class DesktopApplication extends Application {
                 () -> navigate(Screen.RADIO));
         scene.getAccelerators().put(new KeyCodeCombination(KeyCode.O, KeyCombination.ALT_DOWN),
                 () -> openOrder(OrderSide.BUY));
+        scene.getAccelerators().put(new KeyCodeCombination(KeyCode.V, KeyCombination.ALT_DOWN),
+                this::startVoiceCommand);
         scene.getAccelerators().put(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.ALT_DOWN),
                 this::navigateBack);
         scene.getAccelerators().put(new KeyCodeCombination(KeyCode.COMMA, KeyCombination.CONTROL_DOWN),
@@ -480,7 +506,7 @@ public final class DesktopApplication extends Application {
         currentLocation.setAccessibleText("현재 화면 홈");
 
         globalSearch.setPromptText("종목명 또는 종목코드 검색");
-        globalSearch.setAccessibleText("국내와 미국 종목 통합 검색");
+        globalSearch.setAccessibleText("국내 종목 통합 검색");
         globalSearch.setAccessibleHelp("검색어를 입력하고 Enter 키를 누르면 종목 상세 화면을 엽니다.");
         globalSearch.setPrefWidth(360);
         globalSearch.setMinWidth(180);
@@ -523,13 +549,222 @@ public final class DesktopApplication extends Application {
         account.setAccessibleText("계좌 화면 열기");
         account.setOnAction(event -> navigate(Screen.ACCOUNT));
 
+        configureVoiceButton();
+
         HBox.setHgrow(search, Priority.ALWAYS);
-        HBox context = new HBox(10, backButton, currentLocation, search, market, alerts, account, connectionButton);
+        HBox context = new HBox(10, backButton, currentLocation, search, market,
+                voiceButton, alerts, account, connectionButton);
         context.setAlignment(Pos.CENTER_LEFT);
         VBox top = new VBox(context);
         top.getStyleClass().add("top-bar");
         top.setPadding(new Insets(9, 14, 9, 14));
         return top;
+    }
+
+    /**
+     * 말로 시킨 일을 실제 동작에 잇는다.
+     *
+     * <p>주문만 다르게 다룬다. 나머지는 바로 실행하고, 주문은 화면을 채워 두기만 한다.
+     * 음성용 확인 절차를 새로 만들지 않고 이미 있는 재확인 창을 그대로 거치게 한다 —
+     * 되돌릴 수 없는 일에 검증되지 않은 두 번째 길을 내지 않는다.
+     */
+    private org.ossproject.desktop.voice.VoiceActions createVoiceActions() {
+        return new org.ossproject.desktop.voice.VoiceActions() {
+
+            @Override public void navigate(Screen screen) {
+                DesktopApplication.this.navigate(screen);
+            }
+
+            @Override public void goBack() {
+                navigateBack();
+            }
+
+            @Override public void quote(org.ossproject.voice.KnownStock stock) {
+                openStockByQuery(stock.symbol());
+            }
+
+            @Override public void openNews(org.ossproject.voice.KnownStock stock) {
+                selectThen(stock, Screen.NEWS);
+            }
+
+            @Override public void openSimilar(org.ossproject.voice.KnownStock stock) {
+                selectThen(stock, Screen.SIMILAR);
+            }
+
+            @Override public void addToWatchlist(org.ossproject.voice.KnownStock stock) {
+                addToWatchlistBySymbol(stock.symbol(), stock.name());
+            }
+
+            @Override public void removeFromWatchlist(org.ossproject.voice.KnownStock stock) {
+                // 거래소는 담을 때 조회로 채워 둔 값을 쓴다. 여기서 추측하면 KRX 와
+                // NXT 종목을 잘못 골라 엉뚱한 것을 뺀다.
+                session.watchlistItems().stream()
+                        .filter(item -> item.symbol().equals(stock.symbol()))
+                        .findFirst()
+                        .ifPresentOrElse(
+                                item -> DesktopApplication.this.removeFromWatchlist(
+                                        item.symbol(), item.exchange(), item.securityName()),
+                                () -> tell(stock.name() + "은 관심종목에 없습니다."));
+            }
+
+            @Override public void readBalance() {
+                CompletableFuture.supplyAsync(tradingUseCase::account)
+                        .whenComplete((snapshot, failure) -> Platform.runLater(() -> {
+                            if (failure != null || snapshot == null) {
+                                tell("잔고를 조회하지 못했습니다. 연결 상태를 확인해주세요.");
+                                return;
+                            }
+                            tell("총 자산 " + Formatters.won(snapshot.totalAssets())
+                                    + ", 평가손익은 " + signedWon(snapshot.totalProfitLoss())
+                                    + ", 주문 가능 금액은 "
+                                    + Formatters.won(snapshot.deposits().orderable()) + " 입니다.");
+                        }));
+            }
+
+            @Override public void prepareOrder(org.ossproject.voice.KnownStock stock,
+                                               boolean buy, int quantity) {
+                selectStockByQuery(stock.symbol()).thenAccept(found -> {
+                    if (found) openOrder(buy ? OrderSide.BUY : OrderSide.SELL, quantity);
+                    else tell(stock.name() + " 종목 정보를 찾지 못해 주문 화면을 열지 못했습니다.");
+                });
+            }
+
+            @Override public void openPendingOrders() {
+                DesktopApplication.this.navigate(Screen.TRADING);
+            }
+
+            @Override public void findStock(String hint,
+                                            java.util.function.Consumer<
+                                                    org.ossproject.voice.KnownStock> andThen) {
+                // 등록명이 영문이어도 찾는다. 그 규칙은 도메인의 SecuritySummary 가
+                // 들고 있어서, 검색창으로 치든 말로 하든 같은 방식으로 맞는다.
+                stockSearchViewModel.findBestMatch(hint).thenAccept(item -> {
+                    if (item == null) {
+                        tell(hint + " 종목을 찾지 못했습니다. 종목명을 다시 말씀해주세요.");
+                        return;
+                    }
+                    // 찾은 종목을 골라 둔다. 이어지는 일이 이 종목을 대상으로 돈다.
+                    stockSearchViewModel.select(item);
+                    andThen.accept(new org.ossproject.voice.KnownStock(
+                            item.symbol(), item.name()));
+                }).exceptionally(failure -> {
+                    Platform.runLater(() -> tell(hint + " 종목을 조회하지 못했습니다."));
+                    return null;
+                });
+            }
+
+            @Override public void stopSpeech() {
+                speechQueue.clear();
+                speechPort.stop();
+                status.setText("안내를 멈췄습니다.");
+            }
+
+            @Override public void startedListening() {
+                // 읽던 것을 먼저 멈춘다. 안 멈추면 그 소리가 마이크로 다시 들어간다.
+                speechQueue.clear();
+                speechPort.stop();
+                voiceButton.setText("듣는 중");
+                status.setText("듣고 있습니다. 말씀해주세요.");
+                play(SoundCue.LISTENING);
+            }
+
+            @Override public void repeatLast() {
+                if (lastSpoken.isBlank()) {
+                    tell("다시 읽어 드릴 안내가 없습니다.");
+                    return;
+                }
+                requestSpeech(lastSpoken, "voice-repeat");
+            }
+
+            @Override public void adjustSpeechRate(boolean faster) {
+                double rate = Math.max(0.5, Math.min(2.0,
+                        accessibility.speechRate() + (faster ? 0.2 : -0.2)));
+                applyAccessibility(accessibility.withSpeechRate(rate));
+                tell("읽기 속도를 " + String.format("%.1f", rate) + "배로 맞췄습니다.");
+            }
+
+            @Override public void toggleLargeText() {
+                boolean on = !accessibility.largeTextEnabled();
+                applyAccessibility(accessibility.withLargeTextEnabled(on));
+                tell(on ? "큰 글씨를 켰습니다." : "큰 글씨를 껐습니다.");
+            }
+
+            @Override public void toggleHighContrast() {
+                boolean on = !accessibility.highContrastEnabled();
+                applyAccessibility(accessibility.withHighContrastEnabled(on));
+                tell(on ? "고대비를 켰습니다." : "고대비를 껐습니다.");
+            }
+
+            @Override public void help() {
+                tell("이렇게 말씀하실 수 있습니다. 관심종목 보여줘. 계좌. 청각 차트."
+                        + " 뒤로. 삼성전자 현재가. 카카오 뉴스. 삼성전자 관심종목에 담아줘."
+                        + " 예수금 알려줘. 그만. 다시 말해줘."
+                        + " 주문은 삼성전자 매수 열 주 처럼 말하면 주문 화면을 채워 드립니다."
+                        + " 실제 주문은 확인 단추를 눌러야 나갑니다.");
+            }
+
+            @Override public void tell(String message) {
+                voiceButton.setText("음성 명령");
+                status.setText(message);
+                requestSpeech(message, "voice-reply");
+            }
+        };
+    }
+
+    /** 종목을 고른 뒤 화면을 연다. 조회가 실패하면 화면을 옮기지 않는다. */
+    private void selectThen(org.ossproject.voice.KnownStock stock, Screen screen) {
+        selectStockByQuery(stock.symbol()).thenAccept(found -> {
+            if (found) navigate(screen);
+            else status.setText(stock.name() + " 종목 정보를 찾지 못했습니다.");
+        });
+    }
+
+    /**
+     * 마이크 단추를 준비한다.
+     *
+     * <p>단추를 눌러야 듣는다. 늘 듣고 있지 않는다 — 마이크를 계속 열어 두면 사용자가
+     * 언제 녹음되는지 알 수 없고, 그 사실을 화면으로 확인할 수도 없다.
+     */
+    private void configureVoiceButton() {
+        voiceButton.setAccessibleText("음성 명령 듣기");
+        voiceButton.setAccessibleHelp("Alt와 V 키로도 음성 명령을 시작할 수 있습니다."
+                + " 단추를 누른 뒤 말씀하시면 됩니다.");
+        voiceButton.setOnAction(event -> startVoiceCommand());
+    }
+
+    private void startVoiceCommand() {
+        if (voiceController == null) {
+            voiceController = new org.ossproject.desktop.voice.VoiceCommandController(
+                    voiceInput, java.util.concurrent.ForkJoinPool.commonPool(),
+                    Platform::runLater, createVoiceActions());
+            refreshVoiceVocabulary();
+        }
+        if (voiceController.listening()) return;
+        voiceButton.setText("듣는 중");
+        voiceController.listenOnce();
+        // 단추 글씨는 결과가 오면 tell 에서 되돌린다.
+    }
+
+    /**
+     * 인식기에 알아들을 종목을 알려 준다.
+     *
+     * <p>보유·관심 종목이 바뀌면 다시 부른다. 이것을 하지 않으면 인식기가 종목명을
+     * 통째로 놓친다 — 실측에서 "카카오" 가 "다가오" 로 나왔고 파서도 못 고쳤다.
+     */
+    private void refreshVoiceVocabulary() {
+        if (voiceController == null) return;
+        java.util.LinkedHashMap<String, org.ossproject.voice.KnownStock> known =
+                new java.util.LinkedHashMap<>();
+        for (WatchlistItem item : session.watchlistItems()) {
+            known.putIfAbsent(item.symbol(),
+                    new org.ossproject.voice.KnownStock(item.symbol(), item.securityName()));
+        }
+        var selected = session.selectedStock();
+        if (selected != null && selected.symbol() != null && !selected.symbol().isBlank()) {
+            known.putIfAbsent(selected.symbol(),
+                    new org.ossproject.voice.KnownStock(selected.symbol(), selected.name()));
+        }
+        voiceController.updateVocabulary(java.util.List.copyOf(known.values()));
     }
 
     /**
@@ -624,6 +859,20 @@ public final class DesktopApplication extends Application {
             showGlobalSearchMenu();
         });
         globalSearch.addEventFilter(KeyEvent.KEY_TYPED, event -> globalSearchPopupArmed = true);
+        // 조합이 시작되면 팝업을 미루고, 글자가 확정되면 다시 연다.
+        //
+        // 기본 처리를 덮어쓰지 않도록 setOn... 이 아니라 addEventHandler 를 쓴다.
+        // 덮어쓰면 한글 입력 자체가 동작하지 않는다.
+        globalSearch.addEventHandler(javafx.scene.input.InputMethodEvent.INPUT_METHOD_TEXT_CHANGED,
+                event -> {
+                    composingHangul = !event.getComposed().isEmpty();
+                    if (composingHangul) globalSearchDelay.stop();
+                    else if (globalSearchPopupArmed) globalSearchDelay.playFromStart();
+                });
+        // 조합 표시가 끼면 추천이 영영 안 뜬다. 칸을 벗어나면 반드시 푼다.
+        globalSearch.focusedProperty().addListener((observed, had, has) -> {
+            if (!has) composingHangul = false;
+        });
         globalSearch.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
             if (event.getCode() == KeyCode.DOWN && globalSearchMenu.isShowing()) {
                 if (globalSearch.getText() == null || globalSearch.getText().isBlank()) {
@@ -732,6 +981,8 @@ public final class DesktopApplication extends Application {
         if (globalSearch.getScene() == null || globalSearch.getScene().getWindow() == null
                 || !globalSearch.getScene().getWindow().isShowing() || !globalSearch.isFocused()
                 || !globalSearchPopupArmed) return;
+        // 조합 중에 띄우면 포커스를 뺏겨 글자가 자모로 풀린다.
+        if (composingHangul) return;
         updateGlobalSearchSections(globalSearch.getText() == null || globalSearch.getText().isBlank());
         globalSearchPanel.setPrefWidth(Math.max(460, globalSearch.getWidth()));
         if (!globalSearchMenu.isShowing()) globalSearchMenu.show(globalSearch, Side.BOTTOM, 0, 7);
@@ -925,7 +1176,7 @@ public final class DesktopApplication extends Application {
     }
 
     private void showScreen(Screen screen) {
-        if (screen == Screen.WATCHLIST || screen == Screen.US_MARKET) watchlistViewModel.refresh();
+        if (screen == Screen.WATCHLIST) watchlistViewModel.refresh();
         if (screen == Screen.STOCK_DETAIL || screen == Screen.TRADING) screenController.invalidate(screen);
         screenController.show(screen);
     }
@@ -1203,6 +1454,12 @@ public final class DesktopApplication extends Application {
     }
 
     private void openOrder(OrderSide side) {
+        openOrder(side, 1);
+    }
+
+    /** 수량까지 정해 주문 화면을 연다. 말로 주문할 때 쓴다. */
+    private void openOrder(OrderSide side, int quantity) {
+        pendingOrderQuantity = Math.max(1, quantity);
         if (!stockDetailViewModel.hasCurrentDetail()) {
             status.setText(session.selectedStock().name() + " 주문 기준가를 조회하고 있습니다.");
             stockDetailViewModel.loadDetail().whenComplete((detail, failure) -> {
@@ -1220,7 +1477,10 @@ public final class DesktopApplication extends Application {
         StockDetail detail = stockDetailViewModel.detail();
         Screen origin = screenController.currentScreen().orElse(Screen.DASHBOARD);
         orderDraft = new OrderDraft(detail.symbol(), detail.name(), side,
-                OrderType.LIMIT, 1, price, origin);
+                OrderType.LIMIT, pendingOrderQuantity, price, origin);
+        // 다음 주문이 지난번 수량을 물려받으면 안 된다. 말로 열 주를 주문한 뒤
+        // 단추로 연 주문 화면이 열 주로 차 있으면 사용자는 그것을 모른 채 누른다.
+        pendingOrderQuantity = 1;
         pendingOrderPrice = orderDraft.price();
         navigate(Screen.TRADING);
     }
@@ -1273,16 +1533,11 @@ public final class DesktopApplication extends Application {
         });
         screenController.register(Screen.DASHBOARD, this::createDashboard);
         screenController.register(Screen.CONNECTION, this::createConnectionScreen);
-        screenController.register(Screen.MARKET, this::createMarketScreen);
         screenController.registerPreservingState(Screen.SEARCH, this::createSearchScreen);
         screenController.register(Screen.STOCK_DETAIL, this::createStockScreen);
         screenController.registerPreservingState(Screen.WATCHLIST, this::createWatchlistScreen);
-        screenController.register(Screen.SCANNER, this::createScannerScreen);
-        screenController.register(Screen.CONDITION, this::createConditionScreen);
         screenController.register(Screen.TRADING, this::createTradingScreen);
         screenController.register(Screen.ACCOUNT, this::createAccountScreen);
-        screenController.register(Screen.US_MARKET,
-                () -> new UsMarketScreenView(this::createUsWatchlistPanel).create());
         screenController.registerPreservingState(Screen.ANOMALY, this::createAnomalyScreen);
         screenController.registerPreservingState(Screen.NOTIFICATIONS,
                 () -> new NotificationsScreenView(session.notifications(), status::setText,
@@ -1552,25 +1807,6 @@ public final class DesktopApplication extends Application {
                         createTradeTapePanel(detail.name()));
     }
 
-    private ScrollPane createMarketScreen() {
-        Label title = heading("국내 시장");
-        // 지수·순위·업종·테마·ETF·ELW·금현물은 모두 조회 TR 이 따로 있다. 연동 전까지는
-        // 예시 숫자를 채우지 않는다. 시장 화면의 숫자는 사용자가 종목을 고르는 근거가 되므로
-        // 지어낸 값이 특히 위험하다.
-        javafx.scene.Node domestic = notConnectedPanel("국내 지수와 순위",
-                "ka20003 전업종지수, ka10030 당일거래량상위, ka10032 거래대금상위");
-        javafx.scene.Node sectors = notConnectedPanel("업종 지수", "ka20001 업종현재가, ka20002 업종별주가");
-        javafx.scene.Node themes = notConnectedPanel("테마", "ka90001 테마그룹별, ka90002 테마구성종목");
-        javafx.scene.Node etf = notConnectedPanel("ETF", "ka40004 ETF전체시세, ka40002 ETF종목정보");
-        javafx.scene.Node elw = notConnectedPanel("ELW", "ka30005 ELW조건검색, ka30012 ELW종목상세정보");
-        javafx.scene.Node gold = notConnectedPanel("금현물", "ka50100 금현물 시세정보, ka50101 금현물 호가");
-        TabPane marketTabs = new TabPane(tab("국내시장", domestic), tab("업종", sectors), tab("테마", themes),
-                tab("ETF", etf), tab("ELW", elw), tab("금현물", gold), tab("신용거래", createCreditTradingPanel()));
-        marketTabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE); marketTabs.setPrefHeight(590);
-        VBox body = new VBox(20, title, marketTabs);
-        return scrollPage("국내 시장", body);
-    }
-
     private VBox createSearchScreen() {
         return new SearchScreenView(stockSearchViewModel, this::navigate, status::setText).create();
     }
@@ -1590,32 +1826,6 @@ public final class DesktopApplication extends Application {
         screenController.invalidate(Screen.SEARCH);
         navigate(Screen.SEARCH);
         status.setText("관심종목에 추가할 종목을 검색해주세요.");
-    }
-
-    private ScrollPane createScannerScreen() {
-        return new ScannerScreenView(scannerViewModel, status::setText, this::openStockByQuery).create();
-    }
-
-    /**
-     * 조건검색 화면.
-     *
-     * <p>조건식은 사용자가 키움 HTS 에서 만들어 둔 것을 불러와야 한다. 예전에는 조건식 이름과
-     * 검색 결과를 앱이 지어내 보여 주었는데, 사용자가 만들지도 않은 조건식이 자기 것처럼
-     * 보이면 실제 조건검색과 구분할 수 없다.
-     */
-    private ScrollPane createConditionScreen() {
-        Label title = heading("조건검색");
-        return scrollPage("조건검색", new VBox(20, title, notConnectedPanel("조건검색",
-                "ka10171 조건검색 목록조회, ka10172 조건검색 요청 일반, ka10173 조건검색 실시간")));
-    }
-
-    /** 미국주식 관심종목 패널. 사용자의 기록이라 실제 값을 보여 준다. */
-    private VBox createUsWatchlistPanel() {
-        // 다만 미국주식 주문은 아직 연동하지 않았으므로 주문할 수 있는 것처럼 보이게 하지 않는다.
-        return new WatchlistScreenView(watchlistViewModel, this::openWatchlistStock,
-                () -> startWatchlistSearch("미국"), status::setText)
-                .createUsPanel(selected -> status.setText(
-                        "미국주식 주문은 아직 연동되지 않았습니다. 연동 예정: ust20000 매수, ust20001 매도"));
     }
 
     /**
@@ -1730,8 +1940,8 @@ public final class DesktopApplication extends Application {
     /**
      * 종목 코드로 관심 목록에 담는다.
      *
-     * <p>조회로 식별 정보를 채운 뒤 담는다. 코드와 이름만으로 만들면 시장과 통화를
-     * 추측하게 되고, 미국 종목을 국내로 담아 버린다.
+     * <p>조회로 식별 정보를 채운 뒤 담는다. 코드와 이름만으로 만들면 거래소를
+     * 추측하게 되어 KRX와 NXT 종목을 잘못 구분할 수 있다.
      *
      * <p>조회는 시간이 걸린다. 결과를 기다리지 않고 참을 돌려주면 단추가 담긴 것처럼
      * 바뀌었다가 되돌아간다. 그래서 여기서 기다린다.
@@ -1969,8 +2179,7 @@ public final class DesktopApplication extends Application {
      * 같은 종목이 양쪽에 있으면 한 번만 넣는다.
      */
     private void startAiInsightList(AiInsightListPanel panel, Account account) {
-        // 거래소를 함께 들고 다닌다. 종목 코드만 남기고 KRX 로 다시 만들면, 관심 목록에
-        // 담아 둔 미국 종목이 같은 코드의 국내 종목으로 조회된다.
+        // KRX와 NXT의 동일 종목 코드를 구분할 수 있도록 거래소를 함께 들고 다닌다.
         Map<SecurityId, String> names = new LinkedHashMap<>();
         if (account != null) {
             for (Position position : account.positions()) {
@@ -2202,7 +2411,8 @@ public final class DesktopApplication extends Application {
                 realtimeStatus.textProperty(),
                 subscriptionCount.textProperty(),
                 () -> tradingUseCase.account().maskedAccountNo(),
-                this::availableSpeechVoices);
+                this::availableSpeechVoices,
+                microphone::devices);
         SettingsScreenView.Actions actions = new SettingsScreenView.Actions(
                 this::applyAccessibility,
                 value -> {
@@ -2590,8 +2800,7 @@ public final class DesktopApplication extends Application {
         CompletableFuture.supplyAsync(tradingUseCase::account).thenAccept(account -> {
             List<SecurityId> held = new java.util.ArrayList<>();
             for (Position position : account.positions()) {
-                // 계좌는 국내 모의투자라 보유 종목은 KRX 다. 관심 목록은 미국이 섞일 수
-                // 있어 저장해 둔 거래소를 그대로 쓴다.
+                // 계좌는 국내 모의투자라 보유 종목은 KRX다.
                 held.add(SecurityId.of(position.symbol(), "KRX"));
             }
             newsViewModel.track(held);
@@ -2625,6 +2834,13 @@ public final class DesktopApplication extends Application {
 
     private void publishAnomaly(AnomalyAlert alert) {
         String severity = alert.severity() == AnomalySeverity.HIGH ? "높음" : "주의";
+        try {
+            anomalyAlertRepository.save(alert);
+        } catch (RuntimeException persistenceFailure) {
+            // 알림을 디스크에 못 남겼다고 화면·음성 경고까지 잃어서는 안 된다.
+            LOGGER.log(System.Logger.Level.WARNING,
+                    "이상 감지 이력을 저장하지 못했습니다: {0}", persistenceFailure.getMessage());
+        }
         addNotification("이상 감지", severity + " · " + alert.explanation());
         status.setText("이상 감지: " + alert.explanation());
         announce(alert.explanation(), SpeechPriority.ALERT,
@@ -2748,12 +2964,40 @@ public final class DesktopApplication extends Application {
             stockSearchViewModel.recentSearches().setAll(snapshot.recentSearches());
             preventDuplicateOrders = snapshot.preventDuplicateOrders();
         });
+        restoreAnomalyHistory();
         // 기동할 때도 같은 길을 쓴다. 여기서만 따로 적용하면 첫 실행과 이후가 갈라진다.
         accessibility = accessibilityPreferencesRepository.load();
         if (!speechQueue.isClosed()) {
             speechQueue.setOptions(accessibility.speechOptions());
         }
+        // 저장해 둔 마이크를 기동할 때도 적용한다. 설정을 바꿀 때만 적용하면, 다음
+        // 실행에서는 다시 기본 장치로 돌아가 아무 소리도 들어오지 않는다.
+        microphone.useDevice(accessibility.microphoneName());
         sonificationPreferences = sonificationPreferencesRepository.load();
+    }
+
+    /** 이전 속성 파일의 이상 알림은 SQLite 원본으로 교체해 중복을 막는다. */
+    private void restoreAnomalyHistory() {
+        try {
+            session.notifications().removeIf(
+                    notification -> notification.contains(" · 이상 감지 · "));
+            List<String> history = anomalyAlertRepository.findRecent(50).stream()
+                    .map(DesktopApplication::anomalyHistoryNotification)
+                    .toList();
+            session.notifications().addAll(0, history);
+        } catch (RuntimeException persistenceFailure) {
+            LOGGER.log(System.Logger.Level.WARNING,
+                    "이상 감지 이력을 읽지 못했습니다: {0}", persistenceFailure.getMessage());
+        }
+    }
+
+    private static String anomalyHistoryNotification(AnomalyAlert alert) {
+        String stamp = java.time.LocalDateTime.ofInstant(
+                        alert.detectedAt(), java.time.ZoneId.systemDefault())
+                .format(java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm"));
+        String severity = alert.severity() == AnomalySeverity.HIGH ? "높음" : "주의";
+        return "이상 기록 · " + stamp + " · 이상 감지 · " + alert.stockName()
+                + " · " + severity + " · " + alert.explanation();
     }
 
     private void scheduleStateSave() {
@@ -2790,6 +3034,7 @@ public final class DesktopApplication extends Application {
 
     /** 사용자가 직접 누른 듣기 동작은 TTS가 꺼져 있어도 이유를 알려 준다. */
     private void requestSpeech(String text, String key) {
+        lastSpoken = text;
         if (!accessibility.speechEnabled() || speechQueue.isClosed()) {
             status.setText("음성 안내가 꺼져 있습니다. 설정에서 화면 읽기(TTS)를 켜주세요.");
             play(SoundCue.WARNING);
@@ -2822,6 +3067,7 @@ public final class DesktopApplication extends Application {
         if (!updated.speechEnabled()) {
             speechQueue.clear();
         }
+        microphone.useDevice(updated.microphoneName());
         applyKeyboardGuidance(updated.keyboardGuidanceEnabled());
         toggleClass("reduced-motion", updated.reducedMotionEnabled());
         toggleClass("large-text", updated.largeTextEnabled());
@@ -2891,6 +3137,12 @@ public final class DesktopApplication extends Application {
         speechQueue.close();
         soundPort.close();
         secretStore.close();
+        try {
+            persistence.close();
+        } catch (Exception closeFailure) {
+            LOGGER.log(System.Logger.Level.WARNING,
+                    "SQLite 저장소를 닫지 못했습니다: {0}", closeFailure.getMessage());
+        }
     }
     public static void main(String[] args) { launch(args); }
 }

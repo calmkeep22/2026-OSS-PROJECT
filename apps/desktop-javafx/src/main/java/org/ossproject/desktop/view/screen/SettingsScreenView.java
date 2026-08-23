@@ -61,7 +61,8 @@ public final class SettingsScreenView {
                           ReadOnlyStringProperty realtimeStatus,
                           ReadOnlyStringProperty subscriptionCount,
                           Supplier<String> maskedAccountNo,
-                          Supplier<List<SpeechVoice>> availableVoices) {
+                          Supplier<List<SpeechVoice>> availableVoices,
+                          Supplier<List<String>> availableMicrophones) {
     }
 
     /** 화면이 앱에 부탁하는 일들. */
@@ -155,6 +156,7 @@ public final class SettingsScreenView {
         addField(voiceSettings, 0, "음성", voice);
         addField(voiceSettings, 1, "속도", speed);
         addField(voiceSettings, 2, "음량", volume);
+        addField(voiceSettings, 3, "마이크", microphoneBox());
         voiceSettings.getColumnConstraints().addAll(equalColumn(), equalColumn());
 
         Button preview = new Button("설정 미리 듣기");
@@ -168,6 +170,38 @@ public final class SettingsScreenView {
                 settingsCard("화면 접근성", speech, keyboard, reducedMotion, largeText, contrast),
                 settingsCard("음성 설정", voiceSettings, wrappingRow(8, preview, audit)),
                 stateBanner("변경 사항은 선택 즉시 적용되고 자동 저장됩니다.", "success"));
+    }
+
+    /** 기본 장치를 뜻하는 항목. 빈 문자열을 그대로 보여 주면 무엇인지 알 수 없다. */
+    private static final String SYSTEM_MICROPHONE = "시스템 기본 장치";
+
+    /**
+     * 마이크 고르기.
+     *
+     * <p>기본 장치를 알아서 쓰면 될 것 같지만 그렇지 않다. 실측에서 자바가 고른 기본
+     * 장치는 소리가 하나도 들어오지 않는 "주 사운드 캡처 드라이버" 였고, 사용자가 실제로
+     * 쓰던 이어폰은 목록의 다른 자리에 있었다. 그래서 고를 수 있어야 한다.
+     *
+     * <p>블루투스 이어폰은 껐다 켰다 하므로 목록이 열 때마다 달라진다. 저장된 장치가
+     * 목록에 없으면 그것도 항목으로 넣어 둔다 — 빼 버리면 사용자가 고른 적 없는 장치로
+     * 조용히 바뀐 것처럼 보인다.
+     */
+    private ComboBox<String> microphoneBox() {
+        ComboBox<String> box = new ComboBox<>();
+        box.getItems().add(SYSTEM_MICROPHONE);
+        box.getItems().addAll(context.availableMicrophones().get());
+        String saved = current.microphoneName();
+        if (!saved.isBlank() && !box.getItems().contains(saved)) box.getItems().add(saved);
+        box.setValue(saved.isBlank() ? SYSTEM_MICROPHONE : saved);
+        box.setAccessibleText("음성 명령에 쓸 마이크");
+        box.setAccessibleHelp("소리가 들어오지 않으면 다른 장치를 골라 보세요.");
+        box.setMaxWidth(Double.MAX_VALUE);
+        box.setOnAction(event -> {
+            String picked = box.getValue();
+            change(current.withMicrophoneName(
+                    picked == null || SYSTEM_MICROPHONE.equals(picked) ? "" : picked));
+        });
+        return box;
     }
 
     /**
