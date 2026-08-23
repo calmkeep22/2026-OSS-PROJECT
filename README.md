@@ -14,6 +14,7 @@
 - 가짜 시세/캔들/실시간 스트림과 키움 REST·WebSocket 어댑터
 - Windows DPAPI 비밀 저장소와 주문·이상 감지 이력을 보존하는 SQLite 저장소
 - API 연결 화면에서 환경별 키움 자격증명 DPAPI 저장·재사용·삭제
+- 화면 이동·조회·주문 준비를 말로 시키는 음성 명령 (오프라인 인식, 주문은 사람 확인 필수)
 
 ## 모듈 구조
 
@@ -36,6 +37,16 @@ modules/mock-trading
 
 modules/broker-api
   증권사 공통 REST 계약과 오류·재시도 모델
+
+modules/voice-input-api
+  음성 명령 계약. 무엇을 시킬 수 있는지와 알아들은 말을 명령으로
+  바꾸는 규칙. 인식기를 갈아 끼워도 이 규칙은 그대로다
+
+modules/voice-input-java-sound
+  마이크에서 한마디를 받아 WAV 로 만든다. 말이 끝난 것을 알아채고 끊는다
+
+modules/voice-input-http
+  ai-service 의 /transcribe 를 부르는 어댑터
 
 modules/kiwoom-adapter
   키움 REST/WebSocket 구현
@@ -140,6 +151,44 @@ Windows 설치 프로그램(EXE, WiX Toolset 필요):
 
 ```powershell
 ./gradlew.bat :apps:desktop-javafx:packageWindowsInstaller
+```
+
+## 음성 명령 사용
+
+상단 **음성 명령** 단추 또는 **Alt+V** 로 엽니다. 신호음이 난 뒤에 말하면 됩니다.
+늘 듣고 있지 않습니다 — 마이크를 계속 열어 두면 언제 녹음되는지 알 수 없습니다.
+
+```text
+관심종목 보여줘      계좌        청각차트 열어줘     이상감지
+뒤로               그만        다시 말해줘        도움말
+천천히 / 빠르게      큰글씨       고대비            예수금 알려줘
+삼성전자 현재가      카카오 뉴스   삼성전자 관심종목에 담아줘
+삼성전자 매수 열 주   (주문 화면을 채우기만 하고, 확인 단추를 눌러야 나갑니다)
+```
+
+말이 인식기에 정확히 들어가지 않아도 됩니다. 아는 종목과 명령어에 가장 가까운 것을
+골라 붙입니다. 다만 매수·매도·종목명은 붙이는 기준을 빡빡하게 잡았습니다 — "매수" 와
+"매도" 는 한 글자 차이라, 헐겁게 붙이면 팔라는 말이 사라는 말이 됩니다.
+
+인식은 `ai-service` 안에서 돕니다. **AI 분석과 같은 서버**라 따로 준비할 것이 없고,
+`faster-whisper` 가 없으면 음성만 꺼지고 나머지는 그대로 돌아갑니다.
+
+### 마이크가 안 잡힐 때
+
+**설정 → 음성 설정 → 마이크** 에서 장치를 고르면 그 선택을 기억합니다. 자바가 고르는
+기본 장치가 운영체제의 기본을 따라가지 않아, 소리가 하나도 들어오지 않는 장치가
+잡히는 경우가 있습니다.
+
+어느 장치가 실제로 소리를 받는지는 이 도구로 눈으로 볼 수 있습니다.
+
+```powershell
+java tools\MicMeter.java
+```
+
+무엇으로 알아들었는지는 로그에 남습니다.
+
+```powershell
+Get-Content -Tail 20 "$env:LOCALAPPDATA\OpenStockAccess\ai-service.log"
 ```
 
 ## 안전 원칙
