@@ -1,6 +1,6 @@
 # Module architecture
 
-> Implemented baseline: 2026-08-14
+> Implemented baseline: 2026-08-22
 
 This document describes the code that exists now. The A/B interface documents may contain future broker-integration proposals; those proposals do not override the dependency rules below until their public contracts are merged.
 
@@ -13,7 +13,8 @@ desktop-javafx
   ├─ fake-adapters ─> application
   ├─ accessibility
   ├─ sonification
-  └─ sonification-java-sound ─> sonification
+  ├─ sonification-java-sound ─> sonification
+  └─ ai-insight-http ─> ai-insight-api ─> finance-domain
 
 kiwoom-adapter ──> broker-api ──> finance-domain
        └─────────> application
@@ -23,7 +24,36 @@ persistence-sqlite ─> application / finance-domain / anomaly-detection
 windows-secret-store ─> file-secret-store ─> secret-store-api
 ```
 
-Dependencies must point from UI/infrastructure toward ports and pure domain models. `finance-domain`, `application`, `broker-api`, `accessibility`, `sonification`, and `secret-store-api` must never import JavaFX or a concrete adapter. The `sonification` core also must not import Java Sound; `sonification-java-sound` is the replaceable output adapter. The root `verifyModuleBoundaries` task enforces these rules.
+Dependencies must point from UI/infrastructure toward ports and pure domain models. `finance-domain`, `application`, `broker-api`, `accessibility`, `sonification`, `ai-insight-api`, and `secret-store-api` must never import JavaFX or a concrete adapter. The `sonification` core also must not import Java Sound; `sonification-java-sound` is the replaceable output adapter. `ai-insight-api` must not import an HTTP client; `ai-insight-http` is the replaceable transport. The root `verifyModuleBoundaries` task enforces these rules.
+
+## Package layout inside modules
+
+Modules that outgrew a single package are split by role, following the `accessibility`
+precedent (`port` / `notification` / `infrastructure`).
+
+| Module | Packages |
+|---|---|
+| `finance-domain` | `market`, `order`, `account`, `orderbook`, plus shared identity types at the root |
+| `kiwoom-adapter` | `query`, `mapping`, `config`, `http`, `stream` |
+| `sonification` | `playback`, `analysis`, `timing`, `model`, `port` |
+| `broker-api` | `auth`, `error`, `resilience` |
+
+`finance-domain` keeps only types every area needs at the root: `SecurityId`, `Exchange`,
+`TradingEnvironment`, `PriceDirection`, `OrderSide`. `OrderSide` lives there rather than in
+`order` because an execution also has a side, so `market.Trade` needs it — putting it in
+`order` would make market data depend on ordering.
+
+The layering inside `finance-domain` is enforced, not merely intended:
+
+```text
+market     depends on nothing
+order      depends on nothing
+account    depends on market
+orderbook  depends on market
+```
+
+`verifyModuleBoundaries` carries a second rule map keyed by source directory rather than by
+module, so a single package can be constrained. Reversing one of these arrows fails the build.
 
 ## Canonical contracts
 
@@ -37,6 +67,8 @@ Dependencies must point from UI/infrastructure toward ports and pure domain mode
 | Historical prices | `CandleQueryPort` + `Candle` | duplicate history query |
 | Real-time prices | `MarketDataStreamPort` + `Quote` | adapter-specific stream interface |
 | Secret storage | `SecretStore` | platform-specific copies of the API |
+| AI analysis | `AiInsightPort` + `AiInsight` | screen-side assembly of forecast/anomaly/similarity |
+| News and Q&A | `NewsPort` + `NewsDigest`, `ChatAnswer` | folding news into the analysis port |
 
 ## Composition rule
 
@@ -68,6 +100,26 @@ The composition root owns and closes `SonificationPort`. `StreamingGraphSonifier
 exclusive port, removes its listener, and stops playback when closed. Asynchronous adapters must
 declare a `SonificationOverflowPolicy` and report discarded frames so the UI can provide an
 equivalent text state.
+
+## AI analysis
+
+- `ai-insight-api`: contracts only — `AiInsightPort`, `NewsPort`, and the values they carry.
+- `ai-insight-http`: calls the Python service over HTTP on loopback.
+- `ai-service/server.py`: wraps the Python library. The desktop composition root starts it as a
+  child process and stops it on exit.
+
+Analysis and news are **two ports, not one**. News goes out to a third party (Google News RSS),
+so it can fail on its own while forecasting and anomaly detection are healthy. A single port would
+make a news outage look like a total AI outage, and the two need different timeouts — news is
+tens of seconds on a cold fetch, analysis is under a second.
+
+Caveats are computed by the value, not chosen by the screen. `AiInsight.requiredCaveats()`
+returns everything that must be said alongside a result: low confidence, a direction forecast that
+validation could not distinguish from chance, and the fact that a similar chart is not a forecast.
+A screen cannot show the number without the caveat, because it never receives them separately.
+
+`Forecast.meaningful` carries whether validation cleared that specific prediction. Direction is
+false in practice — arbitrage erases it — and the value says so rather than the UI remembering to.
 
 ## Secret storage
 
