@@ -4,6 +4,7 @@ import javafx.geometry.VPos;
 import javafx.scene.AccessibleRole;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
+import javafx.scene.input.KeyCode;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.Region;
 import javafx.scene.paint.Color;
@@ -28,6 +29,16 @@ public final class CandlestickChartView extends Region {
     private final Canvas canvas = new Canvas();
     private List<PricePoint> points;
     private int visibleCount;
+    /**
+     * 보이는 구간의 첫 캔들 위치.
+     *
+     * <p>이 값이 없으면 언제나 마지막 캔들에 붙어 있게 되어 과거로 갈 방법이 없다.
+     * 확대는 되는데 그 안에서 움직일 수 없는 상태가 된다.
+     */
+    private int startIndex;
+    private Runnable viewportListener;
+    private double dragAnchorX = Double.NaN;
+    private int dragAnchorStart;
     private double crossX = -1;
     private double crossY = -1;
     private boolean showMa = true;
@@ -35,18 +46,24 @@ public final class CandlestickChartView extends Region {
     private boolean showRsi;
     private boolean showMacd;
 
+    /** 한 번에 늘리거나 줄이는 캔들 수. */
+    private static final int ZOOM_STEP = 4;
+    /** 화면에 남길 최소 캔들 수. 너무 적으면 추세를 읽을 수 없다. */
+    private static final int MIN_VISIBLE = 10;
+
     public CandlestickChartView(List<PricePoint> points) {
         if (points == null || points.isEmpty()) {
             throw new IllegalArgumentException("차트 데이터는 한 건 이상이어야 합니다.");
         }
         this.points = List.copyOf(points);
         this.visibleCount = Math.min(30, points.size());
+        this.startIndex = Math.max(0, points.size() - visibleCount);
         getChildren().add(canvas);
         setMinHeight(320);
         setPrefHeight(390);
         setAccessibleRole(AccessibleRole.IMAGE_VIEW);
         setAccessibleText(buildAccessibleSummary());
-        setAccessibleHelp("마우스 휠로 기간을 확대하거나 축소하고, 마우스를 움직이면 해당 날짜와 가격을 확인합니다. 표 탭에서 같은 데이터를 읽을 수 있습니다.");
+        setAccessibleHelp("마우스 휠로 확대하고 끌어서 좌우로 움직입니다. 방향키로 한 칸씩, Ctrl과 방향키로 빠르게 이동하며 Ctrl과 위아래 방향키로 확대합니다. Home은 가장 오래된 구간, End는 최신 구간입니다. 표 탭에서 같은 데이터를 읽을 수 있습니다.");
 
         canvas.addEventHandler(MouseEvent.MOUSE_MOVED, event -> {
             crossX = event.getX();
@@ -58,12 +75,150 @@ public final class CandlestickChartView extends Region {
             crossY = -1;
             draw();
         });
+        installInteractions();
+    }
+
+    // ------------------------------------------------------------------
+    // 조작
+    // ------------------------------------------------------------------
+
+    /**
+     * 확대와 이동을 등록한다.
+     *
+     * <p>널리 쓰이는 차트 도구와 같은 조작으로 맞췄다. 휠은 확대, 끌면 좌우로 움직이고,
+     * Shift 와 함께 굴리면 휠만 있는 마우스로도 이동할 수 있다. Ctrl 과 함께 굴리면
+     * 커서 아래 캔들이 제자리에 남은 채로 확대되어, 보던 구간을 놓치지 않는다.
+     *
+     * <p>마우스로만 되면 키보드 사용자가 쓸 수 없으므로 방향키로도 같은 조작을 할 수 있다.
+     */
+    private void installInteractions() {
+        setFocusTraversable(true);
+
         canvas.setOnScroll(event -> {
-            int change = event.getDeltaY() > 0 ? -4 : 4;
-            visibleCount = Math.max(10, Math.min(points.size(), visibleCount + change));
-            draw();
+            if (event.isShiftDown()) {
+                panBy(event.getDeltaY() > 0 ? -ZOOM_STEP : ZOOM_STEP);
+            } else if (event.isControlDown() || event.isMetaDown()) {
+                zoomAt(event.getDeltaY() > 0, event.getX());
+            } else {
+                zoomAt(event.getDeltaY() > 0, Double.NaN);
+            }
             event.consume();
         });
+
+        canvas.setOnMousePressed(event -> {
+            if (!event.isPrimaryButtonDown()) {
+                return;
+            }
+            requestFocus();
+            dragAnchorX = event.getX();
+            dragAnchorStart = startIndex;
+            event.consume();
+        });
+        canvas.setOnMouseDragged(event -> {
+            if (Double.isNaN(dragAnchorX)) {
+                return;
+            }
+            // 끌어당긴 거리를 캔들 수로 옮긴다. 오른쪽으로 끌면 과거가 보이도록
+            // 내용이 손을 따라오는 방향으로 맞춘다.
+            double slot = slotWidth();
+            if (slot <= 0) {
+                return;
+            }
+            int moved = (int) Math.round((dragAnchorX - event.getX()) / slot);
+            setStartIndex(dragAnchorStart + moved);
+            event.consume();
+        });
+        canvas.setOnMouseReleased(event -> dragAnchorX = Double.NaN);
+
+        setOnKeyPressed(event -> {
+            KeyCode code = event.getCode();
+            boolean fast = event.isControlDown() || event.isMetaDown();
+            if (code == KeyCode.LEFT) {
+                panBy(fast ? -visibleCount / 2 : -1);
+            } else if (code == KeyCode.RIGHT) {
+                panBy(fast ? visibleCount / 2 : 1);
+            } else if (fast && code == KeyCode.UP) {
+                zoomAt(true, Double.NaN);
+            } else if (fast && code == KeyCode.DOWN) {
+                zoomAt(false, Double.NaN);
+            } else if (code == KeyCode.HOME) {
+                setStartIndex(0);
+            } else if (code == KeyCode.END) {
+                scrollToLatest();
+            } else {
+                return;
+            }
+            event.consume();
+        });
+    }
+
+    /** 한 캔들이 차지하는 가로 폭. */
+    private double slotWidth() {
+        double plotRight = canvas.getWidth() - RIGHT;
+        return visibleCount <= 0 ? 0 : (plotRight - LEFT) / visibleCount;
+    }
+
+    private void panBy(int candles) {
+        setStartIndex(startIndex + candles);
+    }
+
+    /**
+     * 확대하거나 축소한다.
+     *
+     * @param anchorX 이 x 좌표 아래 캔들을 제자리에 유지한다. {@link Double#NaN} 이면
+     *                화면 가운데를 기준으로 삼는다
+     */
+    private void zoomAt(boolean zoomIn, double anchorX) {
+        int previousCount = visibleCount;
+        int updated = zoomIn ? visibleCount - ZOOM_STEP : visibleCount + ZOOM_STEP;
+        visibleCount = Math.max(MIN_VISIBLE, Math.min(points.size(), updated));
+        if (visibleCount == previousCount) {
+            return;
+        }
+
+        // 기준점이 가리키던 캔들이 확대 뒤에도 같은 자리에 오도록 시작 위치를 민다.
+        double plotRight = canvas.getWidth() - RIGHT;
+        double relative = 0.5;
+        if (!Double.isNaN(anchorX) && plotRight > LEFT) {
+            relative = Math.max(0, Math.min(1, (anchorX - LEFT) / (plotRight - LEFT)));
+        }
+        int anchorCandle = startIndex + (int) Math.round(relative * previousCount);
+        setStartIndex(anchorCandle - (int) Math.round(relative * visibleCount));
+    }
+
+    /** 최신 캔들이 오른쪽 끝에 오도록 되돌린다. */
+    public void scrollToLatest() {
+        setStartIndex(points.size() - visibleCount);
+    }
+
+    /** 지금 최신 구간을 보고 있는지 여부. 화면이 "최신으로" 단추를 감출지 판단한다. */
+    public boolean isAtLatest() {
+        return startIndex >= points.size() - visibleCount;
+    }
+
+    /** 시작 위치를 자료 범위 안에 가둔다. */
+    private void setStartIndex(int index) {
+        int maxStart = Math.max(0, points.size() - visibleCount);
+        int clamped = Math.max(0, Math.min(maxStart, index));
+        if (clamped == startIndex) {
+            return;
+        }
+        startIndex = clamped;
+        draw();
+        notifyViewportChanged();
+    }
+
+    /** 보이는 구간이 바뀔 때 화면에 알린다. */
+    private void notifyViewportChanged() {
+        setAccessibleText(buildAccessibleSummary());
+        if (viewportListener != null) {
+            viewportListener.run();
+        }
+    }
+
+    /** 보이는 구간이 바뀔 때 실행할 동작. "최신으로" 단추를 켜고 끄는 데 쓴다. */
+    public void setViewportListener(Runnable listener) {
+        this.viewportListener = listener;
     }
 
     public void setShowMovingAverages(boolean value) {
@@ -90,11 +245,18 @@ public final class CandlestickChartView extends Region {
         if (updatedPoints == null || updatedPoints.isEmpty()) {
             throw new IllegalArgumentException("차트 데이터는 한 건 이상이어야 합니다.");
         }
+        boolean wasAtLatest = isAtLatest();
         points = List.copyOf(updatedPoints);
         visibleCount = Math.min(30, points.size());
+        // 최신을 보고 있었다면 새 캔들을 따라가고, 과거를 살펴보던 중이었다면
+        // 보던 자리를 지킨다. 읽던 구간이 갑자기 끌려가면 다시 찾아야 한다.
+        startIndex = wasAtLatest
+                ? Math.max(0, points.size() - visibleCount)
+                : Math.max(0, Math.min(startIndex, points.size() - visibleCount));
         crossX = -1; crossY = -1;
         setAccessibleText(buildAccessibleSummary());
         draw();
+        notifyViewportChanged();
     }
 
     @Override
@@ -119,8 +281,8 @@ public final class CandlestickChartView extends Region {
         g.setFont(Font.font("Noto Sans KR", 11));
         g.setTextBaseline(VPos.CENTER);
 
-        int start = Math.max(0, points.size() - visibleCount);
-        List<PricePoint> visible = points.subList(start, points.size());
+        int start = Math.max(0, Math.min(startIndex, points.size() - visibleCount));
+        List<PricePoint> visible = points.subList(start, Math.min(points.size(), start + visibleCount));
         double plotRight = width - RIGHT;
         double usableHeight = Math.max(120, height - TOP - BOTTOM);
         double mainBottom = TOP + usableHeight * 0.72;
@@ -403,14 +565,23 @@ public final class CandlestickChartView extends Region {
         return bottom - (value - min) / Math.max(0.0001, max - min) * (bottom - top);
     }
 
+    /**
+     * 지금 보이는 구간을 설명한다.
+     *
+     * <p>전체 자료가 아니라 보이는 구간을 기준으로 삼는다. 그렇지 않으면 사용자가
+     * 좌우로 옮겨도 읽히는 내용이 그대로여서, 옮겼는지 알 수 없다.
+     */
     private String buildAccessibleSummary() {
-        PricePoint first = points.get(0);
-        PricePoint last = points.get(points.size() - 1);
+        int start = Math.max(0, Math.min(startIndex, points.size() - visibleCount));
+        List<PricePoint> visible = points.subList(start, Math.min(points.size(), start + visibleCount));
+        PricePoint first = visible.get(0);
+        PricePoint last = visible.get(visible.size() - 1);
         BigDecimal change = last.close().subtract(first.close());
         String direction = change.signum() > 0 ? "상승" : change.signum() < 0 ? "하락" : "보합";
-        return "캔들 차트. " + first.date() + "부터 " + last.date() + "까지, 시작 종가 "
-                + format(first.close()) + ", 마지막 종가 " + format(last.close()) + ", " + direction + " "
-                + format(change.abs()) + ".";
+        String position = isAtLatest() ? "최신 구간" : "과거 구간";
+        return "캔들 차트. " + position + " " + visible.size() + "개, " + first.date() + "부터 "
+                + last.date() + "까지, 시작 종가 " + format(first.close()) + ", 마지막 종가 "
+                + format(last.close()) + ", " + direction + " " + format(change.abs()) + ".";
     }
 
     private String format(BigDecimal value) {

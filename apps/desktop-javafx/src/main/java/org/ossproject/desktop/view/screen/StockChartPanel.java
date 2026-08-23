@@ -4,6 +4,7 @@ import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
@@ -78,7 +79,8 @@ public final class StockChartPanel {
         representations.setAccessibleText(stockName + " 차트, 그래프와 표 탭");
 
         FlowPane toolbar = new FlowPane(10, 6,
-                periodButtons(candles, history), indicators(candles), soundChartButton());
+                periodButtons(candles, history), indicators(candles),
+                latestButton(candles), soundChartButton());
         toolbar.setAlignment(Pos.CENTER_LEFT);
         toolbar.setPrefWrapLength(1060);
         toolbar.getStyleClass().add("stock-chart-toolbar");
@@ -104,6 +106,32 @@ public final class StockChartPanel {
         table.getColumns().add(column("거래량", point -> Long.toString(point.volume())));
         table.setPrefHeight(350);
         return table;
+    }
+
+    /**
+     * 최신 구간으로 돌아가는 단추.
+     *
+     * <p>과거를 보고 있을 때만 나타난다. 단추가 보이는 것 자체가 "지금 최신이 아니다"를
+     * 알려 준다. 화면을 훑기 어려운 사용자는 가격이 멈춘 이유를 알기 어렵기 때문이다.
+     */
+    private Button latestButton(CandlestickChartView candles) {
+        Button latest = new Button("최신으로");
+        latest.setAccessibleText("최신 구간으로 이동");
+        latest.setAccessibleHelp("차트를 가장 최근 캔들이 보이는 위치로 되돌립니다. End 키로도 됩니다.");
+        latest.setOnAction(event -> {
+            candles.scrollToLatest();
+            candles.requestFocus();
+            onStatus.accept(stockName + " 차트를 최신 구간으로 옮겼습니다.");
+        });
+
+        Runnable sync = () -> {
+            boolean atLatest = candles.isAtLatest();
+            latest.setVisible(!atLatest);
+            latest.setManaged(!atLatest);
+        };
+        candles.setViewportListener(sync);
+        sync.run();
+        return latest;
     }
 
     private HBox periodButtons(CandlestickChartView candles, TableView<PricePoint> history) {
