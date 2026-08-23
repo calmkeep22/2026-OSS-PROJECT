@@ -34,6 +34,14 @@ subprojects {
 
     tasks.withType<Test>().configureEach {
         useJUnitPlatform()
+        // 손으로 돌리는 확인용 설정을 테스트 JVM 까지 넘긴다. gradle 의 -D 는
+        // 기본적으로 gradle 자신에게만 붙어서, 넘기지 않으면 조용히 건너뛴다.
+        listOf("voice.live", "voice.wav", "voice.mic").forEach { key ->
+            System.getProperty(key)?.let {
+                systemProperty(key, it)
+                inputs.property(key, it)
+            }
+        }
         systemProperty("file.encoding", "UTF-8")
     }
 
@@ -95,6 +103,27 @@ val verifyModuleBoundaries by tasks.registering {
         "modules/secret-store-api" to listOf("javafx.", "com.sun.jna", "org.ossproject.secret.file"),
         "modules/file-secret-store" to listOf("javafx.", "com.sun.jna", "org.ossproject.secret.windows"),
         "modules/windows-secret-store" to listOf("javafx.", "org.ossproject.application", "org.ossproject.desktop", "org.ossproject.finance"),
+
+        // 음성 창구는 인식기도 화면도 모른다. 인식기를 갈아 끼워도 규칙이 흔들리지 않아야
+        // 하므로, 어느 인식기 구현도 여기서 보이면 안 된다.
+        // 마이크는 소리만 안다. 서버도 화면도 모른다.
+        "modules/voice-input-java-sound" to listOf(
+            "javafx.", "java.net.http", "org.ossproject.application",
+            "org.ossproject.desktop", "org.ossproject.finance", "org.ossproject.voice.http"
+        ),
+
+        // 인식 창구는 마이크 구현을 모른다. 포트 너머로만 받는다.
+        "modules/voice-input-http" to listOf(
+            "javafx.", "javax.sound.sampled", "org.ossproject.application",
+            "org.ossproject.desktop", "org.ossproject.finance",
+            "org.ossproject.ai", "org.ossproject.voice.javasound"
+        ),
+
+        "modules/voice-input-api" to listOf(
+            "javafx.", "javax.sound.sampled", "java.net.http",
+            "org.ossproject.application", "org.ossproject.desktop",
+            "org.ossproject.kiwoom", "org.ossproject.ai"
+        ),
 
         // 분석 모듈은 도메인만 본다. 어디서 값을 가져왔는지 알 필요가 없다.
         "modules/anomaly-detection" to listOf(
