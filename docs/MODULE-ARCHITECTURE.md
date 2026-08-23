@@ -11,6 +11,7 @@ desktop-javafx
   ├─ application ──> finance-domain
   ├─ mock-trading ─> application
   ├─ fake-adapters ─> application
+  ├─ persistence-sqlite ─> application / finance-domain / anomaly-detection
   ├─ accessibility
   ├─ sonification
   └─ sonification-java-sound ─> sonification
@@ -41,6 +42,11 @@ Dependencies must point from UI/infrastructure toward ports and pure domain mode
 ## Composition rule
 
 `DesktopApplication` must not construct concrete broker, fake, persistence, speech, sound, or sonification adapters. `desktop.composition.DesktopServices` is the single composition root and supplies ports/use cases to the JavaFX layer.
+
+The composition root wraps the broker `OrderLifecyclePort` with SQLite history persistence and
+supplies the anomaly repository to the UI. Broker responses remain authoritative: successful
+remote order results are cached, full history may fall back locally, and open orders never do.
+The application owns the SQLite lifecycle and closes it during shutdown.
 
 Switching mock/live modes therefore changes composition, not screens or view models.
 

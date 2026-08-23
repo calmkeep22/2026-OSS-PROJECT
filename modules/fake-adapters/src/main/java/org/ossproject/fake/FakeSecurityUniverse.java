@@ -47,10 +47,6 @@ final class FakeSecurityUniverse {
                 "205000", "206500", "207800", "204100", "-1460", "-0.71", 1_230_922L));
         put(map, new FakeSecurity("069500", "KODEX 200", "ETF", "KRX", "KRW",
                 "36120", "35760", "36340", "35690", "365", "1.02", 3_142_880L));
-        put(map, new FakeSecurity("AAPL", "Apple", "미국", "NASDAQ", "USD",
-                "228.40", "226.55", "229.80", "226.10", "1.88", "0.83", 42_381_210L));
-        put(map, new FakeSecurity("NVDA", "NVIDIA", "미국", "NASDAQ", "USD",
-                "142.65", "139.80", "143.20", "139.05", "3.26", "2.34", 51_204_770L));
         return Map.copyOf(map);
     }
 

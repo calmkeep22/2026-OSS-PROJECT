@@ -21,17 +21,13 @@ public final class NavigationIcons {
     static {
         PATHS.put(Screen.DASHBOARD, "M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3z");
         PATHS.put(Screen.CONNECTION, "M7.5 6h3v2h-3a4 4 0 0 0 0 8h3v2h-3a6 6 0 0 1 0-12h3v2h-3a4 4 0 0 0 0-8zm2.5 5h4v2h-4zm3.5-5h3a6 6 0 1 1 0 12h-3v-2h3a4 4 0 1 0 0-8h-3z");
-        PATHS.put(Screen.MARKET, "M4 4h7v7H4zm9 0h7v7h-7zM4 13h7v7H4zm9 0h7v7h-7z");
         PATHS.put(Screen.SEARCH, "M10 3a7 7 0 1 0 4.9 12l5.6 5.5 1.5-1.5-5.5-5.6A7 7 0 0 0 10 3zm0 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10z");
         PATHS.put(Screen.STOCK_DETAIL, "M10 3a7 7 0 1 0 4.9 12l5.6 5.5 1.5-1.5-5.5-5.6A7 7 0 0 0 10 3zm0 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10z");
         PATHS.put(Screen.WATCHLIST, "M12 2.5l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3-5.8 3 1.1-6.5-4.7-4.6 6.5-.9z");
-        PATHS.put(Screen.SCANNER, "M4 4h16v3H4zm0 6h11v3H4zm0 6h7v3H4z");
-        PATHS.put(Screen.CONDITION, "M5 4h14v3H5zm2 6h10v3H7zm3 6h4v3h-4z");
         // 지갑. 호 명령은 인자가 일곱 개여야 한다 — 예전 경로는 여덟 개라
         // 파싱에 실패해 아이콘이 통째로 비어 있었다.
         PATHS.put(Screen.TRADING, "M4 5h11a3 3 0 0 1 3 3v1h-3a3 3 0 0 0 0 6h3v1a3 3 0 0 1-3 3H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zm11 6h6v3h-6a1.5 1.5 0 0 1 0-3z");
         PATHS.put(Screen.ACCOUNT, "M4 4h16v16H4zm3 4v2h10V8zm0 4v2h10v-2zm0 4v2h6v-2z");
-        PATHS.put(Screen.US_MARKET, "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm6.9 9h-3a15.8 15.8 0 0 0-1.2-5A8 8 0 0 1 18.9 11zM12 4c1.1 1.3 1.8 3.8 1.9 7h-3.8c.1-3.2.8-5.7 1.9-7zM9.3 6A15.8 15.8 0 0 0 8.1 11h-3A8 8 0 0 1 9.3 6zM5.1 13h3a15.8 15.8 0 0 0 1.2 5 8 8 0 0 1-4.2-5zM12 20c-1.1-1.3-1.8-3.8-1.9-7h3.8c-.1 3.2-.8 5.7-1.9 7zm2.7-2a15.8 15.8 0 0 0 1.2-5h3a8 8 0 0 1-4.2 5z");
         // 겹친 물결 두 줄. 닮은 모양을 겹쳐 놓았다는 뜻이다.
         PATHS.put(Screen.SIMILAR, "M3 15c3-6 6-6 9 0s6 6 9 0v3c-3 6-6 6-9 0s-6-6-9 0zm0-8c3-6 6-6 9 0s6 6 9 0v3c-3 6-6 6-9 0s-6-6-9 0z");
         // 접힌 신문.

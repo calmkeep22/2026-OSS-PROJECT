@@ -8,7 +8,7 @@
 
 여기서 막는 것
 --------------
-    1. 네 지수 전 종목이 코드로 찾아지는가        (KOSDAQ GLOBAL 회귀 포함)
+    1. 국내 두 지수 전 종목이 코드로 찾아지는가  (KOSDAQ GLOBAL 회귀 포함)
     2. 키움이 줄 법한 봉 형식을 다 받아들이는가
     3. 넘긴 봉을 실제로 쓰는가 (캐시로 조용히 덮지 않는가)
     4. 자료가 짧은 종목이 거절이 아니라 저신뢰로 응답하는가
@@ -16,8 +16,7 @@
     6. 피처 순서가 저장된 순서와 일치하는가
     7. 장 마감 뒤에 캐시가 만료돼 두 함수가 같은 날을 말하는가
     8. `brief` 가 부분 실패를 전체 실패로 만들지 않는가
-    9. 이중 클래스 주식(BRKB·BFB)의 티커 표기 차이를 넘기는가
-   10. 조회 실패가 잡을 수 있는 예외로 떨어지는가
+    9. 조회 실패가 잡을 수 있는 예외로 떨어지는가
 
 실행
 ----
@@ -63,19 +62,19 @@ def _synthetic_bars(n: int = 400, seed: int = 0,
 
 
 # ==========================================================================
-def test_registry_covers_four_indices():
-    """네 지수가 모두 들어 있고, 대표 종목이 코드로 찾아진다."""
+def test_registry_covers_domestic_indices():
+    """코스피·코스닥이 모두 들어 있고, 대표 종목이 코드로 찾아진다."""
     tb = REG.table()
     idx = set(tb["index"].unique())
-    assert {"KOSPI", "KOSDAQ", "NASDAQ", "S&P500"} <= idx, idx
-    assert len(tb) > 5000, f"종목이 너무 적다 ({len(tb)})"
+    assert idx == {"KOSPI", "KOSDAQ"}, idx
+    assert len(tb) > 1500, f"종목이 너무 적다 ({len(tb)})"
 
     for q, want in [("005930", "KOSPI"), ("035720", "KOSPI"),
-                    ("NVDA", "S&P500")]:
+                    ("196170", "KOSDAQ")]:
         e = REG.resolve(q)
         assert e["index"] == want, (q, e["index"])
-        assert e["market"] in ("KR", "US")
-    print(f"  [1] 레지스트리 {len(tb):,}종목 · 네 지수 모두 존재")
+        assert e["market"] == "KR"
+    print(f"  [1] 레지스트리 {len(tb):,}종목 · 국내 두 지수 모두 존재")
 
 
 def test_kosdaq_global_not_dropped():
@@ -247,13 +246,13 @@ def test_cache_expires_at_market_close():
     now = time.time()
     # ⚠️ 만료 규칙은 **둘**이다 — 장 마감과 뉴스 아카이브 갱신.
     # 아카이브 규칙을 빼놓고 재면 검사가 엉뚱하게 실패한다. 실제로 그랬다:
-    # 미국 확정 시각(한국 새벽)보다 아카이브가 나중에 갱신돼 있어서
+    # 확정 시각보다 아카이브가 나중에 갱신돼 있어서
     # "마감 후 캐시"가 정당하게 만료됐는데 검사는 버그로 신고했다.
     # 여기서 보려는 건 **마감 규칙**이므로 아카이브 쪽은 고정해 둔다.
     arch = (N.NEWS_ARCHIVE.stat().st_mtime
             if N.NEWS_ARCHIVE.is_file() else 0.0)
 
-    for market in ("KR", "US"):
+    for market in ("KR",):
         settle = SV._last_settle_epoch(market)
         assert settle <= now, f"{market} 확정 시각이 미래다"
         assert now - settle < 3 * 86400, f"{market} 확정 시각이 너무 오래됐다"
@@ -275,10 +274,12 @@ def test_cache_expires_at_market_close():
         finally:
             p.unlink(missing_ok=True)
 
-    # 실제 응답에서 두 함수의 기준일이 같아야 한다
-    for q in ("005930", "NVDA"):
-        a = SV.predict(q, with_news=False)["기준일"]
-        b = SV.anomaly(q)["기준일"]
+    # 실제 응답에서 두 함수의 기준일이 같아야 한다. 네트워크 상태가 테스트 결과를
+    # 바꾸지 않도록 같은 합성 봉을 직접 넘긴다.
+    bars = _synthetic_bars(400, seed=31)
+    for q in ("005930", "035420"):
+        a = SV.predict(q, bars=bars, with_news=False)["기준일"]
+        b = SV.anomaly(q, bars=bars)["기준일"]
         assert a == b, f"{q}: predict {a} vs anomaly {b}"
     print("  [8] 캐시가 장 마감에 맞춰 만료 · predict/anomaly 기준일 일치")
 
@@ -321,28 +322,11 @@ def test_brief_survives_partial_failure():
     print("  [9] brief 합산 · 이름 중복 없음 · 부분 실패 격리 확인")
 
 
-def test_class_share_tickers_resolve():
-    """
-    ⚠️ 회귀 검사 — **이중 클래스 주식의 티커 표기 차이.**
-
-    FinanceDataReader 의 S&P500 목록은 버크셔 B 를 `BRKB`, 브라운포맨 B 를
-    `BFB` 로 주는데 야후는 `BRK-B` · `BF-B` 다. 그대로 물으면 빈 응답이 와서
-    세 기능이 전부 죽었다(스트레스 검사에서 RuntimeError 6건). 버크셔는
-    관심종목에 확실히 담길 종목이라 그냥 둘 수 없다.
-    """
-    for code in ("BRKB", "BFB"):
-        e = REG.resolve(code)
-        cand = REG.yahoo_candidates(code, e["index"])
-        assert cand[0] == code, cand
-        assert f"{code[:-1]}-{code[-1]}" in cand, cand
-    # 그대로 통하는 티커는 첫 후보에서 끝나야 한다 (추가 요청 없음)
-    for code in ("AAPL", "GOOGL", "NVDA"):
-        e = REG.resolve(code)
-        assert REG.yahoo_candidates(code, e["index"])[0] == code
-    # 국내는 접미사만 붙고 후보가 하나다
+def test_domestic_yahoo_tickers():
+    """국내 지수별 야후 파이낸스 접미사를 확인한다."""
     assert REG.yahoo_candidates("005930", "KOSPI") == ["005930.KS"]
     assert REG.yahoo_candidates("196170", "KOSDAQ") == ["196170.KQ"]
-    print("  [10] 클래스주 티커 후보 (BRKB→BRK-B · BFB→BF-B) 확인")
+    print("  [10] 국내 지수별 야후 티커 접미사 확인")
 
 
 def test_fetch_failure_is_typed():
@@ -385,12 +369,12 @@ def test_health_always_reports_verdict():
     assert "지수" not in 빠름, "네트워크를 건드리지 않기로 했는데 지수를 봤다"
 
 
-TESTS = [test_registry_covers_four_indices, test_kosdaq_global_not_dropped,
+TESTS = [test_registry_covers_domestic_indices, test_kosdaq_global_not_dropped,
          test_bars_normalization_is_liberal, test_supplied_bars_are_actually_used,
          test_short_history_degrades_not_fails, test_similar_excludes_itself,
          test_feature_order_is_pinned, test_cache_expires_at_market_close,
          test_brief_survives_partial_failure,
-         test_class_share_tickers_resolve, test_fetch_failure_is_typed,
+         test_domestic_yahoo_tickers, test_fetch_failure_is_typed,
          test_unknown_symbol_raises, test_health_always_reports_verdict]
 
 

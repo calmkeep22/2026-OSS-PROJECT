@@ -71,35 +71,6 @@ public final class WatchlistScreenView {
         return scrollPage("관심종목", new VBox(18, header, table, actions, help));
     }
 
-    public VBox createUsPanel(Consumer<WatchlistQuoteRow> orderAction) {
-        Objects.requireNonNull(orderAction, "orderAction");
-        FilteredList<WatchlistQuoteRow> usItems = new FilteredList<>(viewModel.quoteRows(), WatchlistQuoteRow::overseas);
-        TableView<WatchlistQuoteRow> table = watchlistTable("미국주식 관심종목", usItems);
-        table.setPrefHeight(390);
-        Button refresh = new Button("최신 시세 조회");
-        refresh.setOnAction(event -> refreshQuotes(refresh));
-        Button add = new Button("종목 검색해서 추가"); add.setOnAction(event -> findStock.run());
-        Button edit = new Button("선택 설정 수정"); edit.setOnAction(event -> editSelected(table));
-        Button remove = new Button("선택 삭제"); remove.setOnAction(event -> removeSelected(table));
-        Button alert = new Button("가격 알림"); alert.setOnAction(event -> editAlert(table));
-        Runnable orderSelected = () -> {
-            WatchlistQuoteRow selected = table.getSelectionModel().getSelectedItem();
-            if (selected == null) {
-                status.accept("주문할 미국주식 관심종목을 선택해주세요.");
-                table.requestFocus();
-            } else if (!selected.quoteAvailable()) {
-                status.accept(selected.securityName() + " 시세를 조회한 뒤 주문해주세요.");
-            } else orderAction.accept(selected);
-        };
-        Button order = primaryButton("선택 종목 주문", orderSelected);
-        Button open = new Button("선택 종목 상세"); open.setOnAction(event -> openSelected(table));
-        table.setOnMouseClicked(event -> { if (event.getClickCount() == 2) openSelected(table); });
-        table.setOnKeyPressed(event -> { if (event.getCode() == KeyCode.ENTER) openSelected(table); });
-        VBox panel = new VBox(12, table, wrappingRow(8, refresh, add, open, edit, remove, alert, order));
-        panel.setPadding(new Insets(12));
-        return panel;
-    }
-
     private void refreshQuotes(Button button) {
         button.setDisable(true);
         status.accept("관심종목 최신 시세를 조회하고 있습니다.");

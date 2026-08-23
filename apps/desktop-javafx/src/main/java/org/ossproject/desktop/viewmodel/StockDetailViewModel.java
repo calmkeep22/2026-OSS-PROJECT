@@ -233,12 +233,9 @@ public final class StockDetailViewModel {
                 .toList();
     }
 
-    /** 선택 종목의 통화에 맞춘 금액 표기. */
+    /** 국내 종목의 원화 금액 표기. */
     public String formatPrice(BigDecimal value) {
         Objects.requireNonNull(value, "value");
-        if (selection().overseas()) {
-            return "$" + value.setScale(2, RoundingMode.HALF_UP).toPlainString();
-        }
         return String.format("%,d원", value.setScale(0, RoundingMode.HALF_UP).longValue());
     }
 

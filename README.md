@@ -12,7 +12,7 @@
 - 주문 미리보기와 명시적 재확인, 주문 한도·중복 주문 안전장치
 - 잔고·주문·체결 생명주기를 처리하는 모의주문 엔진
 - 가짜 시세/캔들/실시간 스트림과 키움 REST·WebSocket 어댑터
-- SQLite 금융 데이터와 Windows DPAPI 비밀 저장소
+- Windows DPAPI 비밀 저장소와 주문·이상 감지 이력을 보존하는 SQLite 저장소
 - API 연결 화면에서 환경별 키움 자격증명 DPAPI 저장·재사용·삭제
 
 ## 모듈 구조
@@ -44,7 +44,7 @@ modules/fake-adapters
   화면 개발용 시세·캔들·실시간 스트림 구현
 
 modules/persistence-sqlite
-  SQLite 영속화 구현
+  주문·체결·이상 감지 이력 저장과 재시작 후 과거 주문 조회
 
 modules/secret-store-api
   비밀 저장소 공통 계약
@@ -124,6 +124,22 @@ Windows 휴대용 앱 이미지:
 
 ```powershell
 ./gradlew.bat :apps:desktop-javafx:packagePortable
+```
+
+위 배포 작업은 Java 런타임뿐 아니라 Python AI 서버와 모델도 함께 묶습니다. 빌드하는
+컴퓨터에는 JDK 17과 Python 3.12가 필요하지만, 생성된 앱을 사용하는 사람은 Java나
+Python을 따로 설치할 필요가 없습니다. 첫 빌드는 AI 의존성을 받기 때문에 인터넷 연결과
+충분한 디스크 공간이 필요합니다.
+
+앱을 처음 실행하면 `%LOCALAPPDATA%\OpenStockAccess\openstock.db`가 자동으로
+생성됩니다. 성공한 주문 응답과 이상 감지 이력을 여기에 저장하며, API 키·App Secret·
+Access Token은 SQLite에 저장하지 않습니다. 키움 서버가 주문 상태의 원본이고 SQLite는
+과거 이력 확인용이므로, 연결이 끊겼을 때 오래된 미체결 상태로 주문 가능 여부를 판단하지 않습니다.
+
+Windows 설치 프로그램(EXE, WiX Toolset 필요):
+
+```powershell
+./gradlew.bat :apps:desktop-javafx:packageWindowsInstaller
 ```
 
 ## 안전 원칙
