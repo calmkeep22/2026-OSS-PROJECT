@@ -13,15 +13,15 @@ class ScannerViewModelTest {
             new ScannerItem("KOSPI", "005930", "삼성전자", "72,500원", 2.12, 18_320_122, 2_100_000, "거래량 급증"),
             new ScannerItem("KOSPI", "035420", "NAVER", "205,000원", -0.71, 1_230_922, 254_000, "외국인 순매도"),
             new ScannerItem("KOSDAQ", "086520", "에코프로", "98,200원", -4.25, 4_220_104, 418_000, "신저가 근접"),
-            new ScannerItem("NASDAQ", "NVDA", "NVIDIA", "$142.65", 2.34, 42_381_210, 6_045_000, "52주 신고가"),
-            new ScannerItem("NASDAQ", "TSLA", "Tesla", "$216.10", -1.28, 51_200_000, 11_064_000, "거래량 급증"));
+            new ScannerItem("KOSPI", "000660", "SK하이닉스", "184,500원", 1.42, 5_821_330, 1_074_000, "52주 신고가"),
+            new ScannerItem("KOSPI", "005380", "현대차", "216,000원", -1.28, 5_120_000, 1_106_000, "거래량 급증"));
 
     private final ScannerViewModel viewModel = new ScannerViewModel(SAMPLE);
 
     @Test void filtersMarketAndMinimumVolume() {
-        var results = viewModel.filter("NASDAQ", "거래량", 40_000_000);
-        assertEquals(2, results.size());
-        assertTrue(results.stream().allMatch(item -> item.market().equals("NASDAQ") && item.volume() >= 40_000_000));
+        var results = viewModel.filter("KOSPI", "거래량", 5_000_000);
+        assertEquals(3, results.size());
+        assertTrue(results.stream().allMatch(item -> item.market().equals("KOSPI") && item.volume() >= 5_000_000));
     }
 
     @Test void sortsDeclinersFromLowestRate() {

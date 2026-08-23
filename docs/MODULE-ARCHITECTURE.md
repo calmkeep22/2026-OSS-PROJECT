@@ -1,6 +1,6 @@
 # Module architecture
 
-> Implemented baseline: 2026-08-14
+> Implemented baseline: 2026-08-22
 
 This document describes the code that exists now. The A/B interface documents may contain future broker-integration proposals; those proposals do not override the dependency rules below until their public contracts are merged.
 
@@ -11,9 +11,15 @@ desktop-javafx
   ├─ application ──> finance-domain
   ├─ mock-trading ─> application
   ├─ fake-adapters ─> application
+  ├─ persistence-sqlite ─> application / finance-domain / anomaly-detection
   ├─ accessibility
   ├─ sonification
-  └─ sonification-java-sound ─> sonification
+  ├─ sonification-java-sound ─> sonification
+  ├─ voice-input-java-sound ─> voice-input-api
+  ├─ voice-input-http ──────> voice-input-api
+  └─ ai-insight-http ─> ai-insight-api ─> finance-domain
+
+voice-input-api ──> finance-domain
 
 kiwoom-adapter ──> broker-api ──> finance-domain
        └─────────> application
@@ -23,8 +29,36 @@ persistence-sqlite ─> application / finance-domain / anomaly-detection
 windows-secret-store ─> file-secret-store ─> secret-store-api
 ```
 
-Dependencies must point from UI/infrastructure toward ports and pure domain models. `finance-domain`, `application`, `broker-api`, `accessibility`, `sonification`, and `secret-store-api` must never import JavaFX or a concrete adapter. The `sonification` core also must not import Java Sound; `sonification-java-sound` is the replaceable output adapter. The root `verifyModuleBoundaries` task enforces these rules.
+Dependencies must point from UI/infrastructure toward ports and pure domain models. `finance-domain`, `application`, `broker-api`, `accessibility`, `sonification`, `ai-insight-api`, `voice-input-api`, and `secret-store-api` must never import JavaFX or a concrete adapter. The `sonification` core also must not import Java Sound; `sonification-java-sound` is the replaceable output adapter. `ai-insight-api` must not import an HTTP client; `ai-insight-http` is the replaceable transport. The same split applies to voice: `voice-input-api` holds the command rules and must not import Java Sound, HTTP, or JavaFX, so the recogniser can be replaced without touching them. It may depend on `finance-domain` because reading a security name aloud is a domain rule, not a voice one — `KoreanReading` lives there so typed search and spoken commands match names the same way. The root `verifyModuleBoundaries` task enforces these rules.
 
+## Package layout inside modules
+
+Modules that outgrew a single package are split by role, following the `accessibility`
+precedent (`port` / `notification` / `infrastructure`).
+
+| Module | Packages |
+|---|---|
+| `finance-domain` | `market`, `order`, `account`, `orderbook`, plus shared identity types at the root |
+| `kiwoom-adapter` | `query`, `mapping`, `config`, `http`, `stream` |
+| `sonification` | `playback`, `analysis`, `timing`, `model`, `port` |
+| `broker-api` | `auth`, `error`, `resilience` |
+
+`finance-domain` keeps only types every area needs at the root: `SecurityId`, `Exchange`,
+`TradingEnvironment`, `PriceDirection`, `OrderSide`. `OrderSide` lives there rather than in
+`order` because an execution also has a side, so `market.Trade` needs it — putting it in
+`order` would make market data depend on ordering.
+
+The layering inside `finance-domain` is enforced, not merely intended:
+
+```text
+market     depends on nothing
+order      depends on nothing
+account    depends on market
+orderbook  depends on market
+```
+
+`verifyModuleBoundaries` carries a second rule map keyed by source directory rather than by
+module, so a single package can be constrained. Reversing one of these arrows fails the build.
 ## Canonical contracts
 
 | Concern | Canonical type or port | Removed duplicate |
@@ -37,10 +71,23 @@ Dependencies must point from UI/infrastructure toward ports and pure domain mode
 | Historical prices | `CandleQueryPort` + `Candle` | duplicate history query |
 | Real-time prices | `MarketDataStreamPort` + `Quote` | adapter-specific stream interface |
 | Secret storage | `SecretStore` | platform-specific copies of the API |
+| AI analysis | `AiInsightPort` + `AiInsight` | screen-side assembly of forecast/anomaly/similarity |
+| News and Q&A | `NewsPort` + `NewsDigest`, `ChatAnswer` | folding news into the analysis port |
 
 ## Composition rule
 
 `DesktopApplication` must not construct concrete broker, fake, persistence, speech, sound, or sonification adapters. `desktop.composition.DesktopServices` is the single composition root and supplies ports/use cases to the JavaFX layer.
+
+The composition root wraps the broker `OrderLifecyclePort` with SQLite history persistence and
+supplies the anomaly repository to the UI. Broker responses remain authoritative: successful
+remote order results are cached, full history may fall back locally, and open orders never do.
+The application owns the SQLite lifecycle and closes it during shutdown.
+
+The composition root also owns the voice ports. `VoiceInputPort` and `AudioCapturePort` are
+supplied separately because they fail for different reasons: a missing microphone and a missing
+recogniser need different things from the user, and one message for both tells them neither.
+When neither can be built the root supplies `VoiceInputPort.unavailable(reason)` rather than
+`null`, so every caller still has a reason to read aloud.
 
 Switching mock/live modes therefore changes composition, not screens or view models.
 
@@ -69,6 +116,26 @@ exclusive port, removes its listener, and stops playback when closed. Asynchrono
 declare a `SonificationOverflowPolicy` and report discarded frames so the UI can provide an
 equivalent text state.
 
+## AI analysis
+
+- `ai-insight-api`: contracts only — `AiInsightPort`, `NewsPort`, and the values they carry.
+- `ai-insight-http`: calls the Python service over HTTP on loopback.
+- `ai-service/server.py`: wraps the Python library. The desktop composition root starts it as a
+  child process and stops it on exit.
+
+Analysis and news are **two ports, not one**. News goes out to a third party (Google News RSS),
+so it can fail on its own while forecasting and anomaly detection are healthy. A single port would
+make a news outage look like a total AI outage, and the two need different timeouts — news is
+tens of seconds on a cold fetch, analysis is under a second.
+
+Caveats are computed by the value, not chosen by the screen. `AiInsight.requiredCaveats()`
+returns everything that must be said alongside a result: low confidence, a direction forecast that
+validation could not distinguish from chance, and the fact that a similar chart is not a forecast.
+A screen cannot show the number without the caveat, because it never receives them separately.
+
+`Forecast.meaningful` carries whether validation cleared that specific prediction. Direction is
+false in practice — arbitrage erases it — and the value says so rather than the UI remembering to.
+
 ## Secret storage
 
 - `secret-store-api`: public platform-independent contract and buffer wiping utilities.
@@ -90,6 +157,15 @@ Each module README lists supported entry points. Implementation helpers should b
 
 ```powershell
 ./gradlew.bat clean test verifyModuleBoundaries
+```
+
+Two checks need real hardware and are skipped unless asked for. They exist because the
+failures they catch are silent — a microphone that opens but delivers nothing, and a
+recogniser that answers but with the wrong words.
+
+```powershell
+./gradlew.bat :modules:voice-input-java-sound:test --tests "*MicrophoneProbe" "-Dvoice.mic=record"
+./gradlew.bat :modules:voice-input-http:test --tests "*LiveTranscribeProbe" "-Dvoice.live=8765" "-Dvoice.wav=<folder>"
 ```
 
 CI runs these checks on Windows and Linux. Java library modules also publish source and Javadoc artifacts to the local build repository through `publishAllPublicationsToLocalBuildRepository`.

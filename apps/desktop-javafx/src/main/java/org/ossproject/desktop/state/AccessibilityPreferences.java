@@ -10,11 +10,12 @@ public record AccessibilityPreferences(
         boolean highContrastEnabled,
         String informationDensity,
         String voiceName,
+        String microphoneName,
         double speechRate,
         int speechVolume
 ) {
     public static final AccessibilityPreferences DEFAULT = new AccessibilityPreferences(
-            false, true, true, true, true, false, "표준", "", 1.0, 100);
+            false, true, true, true, true, false, "표준", "", "", 1.0, 100);
 
     public AccessibilityPreferences {
         informationDensity = switch (informationDensity == null ? "" : informationDensity.trim()) {
@@ -24,6 +25,7 @@ public record AccessibilityPreferences(
             default -> "표준";
         };
         voiceName = voiceName == null ? "" : voiceName.trim();
+        microphoneName = microphoneName == null ? "" : microphoneName.trim();
         speechRate = Double.isFinite(speechRate) ? Math.max(0.5, Math.min(2.0, speechRate)) : 1.0;
         speechVolume = Math.max(0, Math.min(100, speechVolume));
     }
@@ -37,50 +39,50 @@ public record AccessibilityPreferences(
     public AccessibilityPreferences withSpeechEnabled(boolean value) {
         return new AccessibilityPreferences(value, soundEnabled, keyboardGuidanceEnabled,
                 reducedMotionEnabled, largeTextEnabled, highContrastEnabled,
-                informationDensity, voiceName, speechRate, speechVolume);
+                informationDensity, voiceName, microphoneName, speechRate, speechVolume);
     }
 
     public AccessibilityPreferences withSoundEnabled(boolean value) {
         return new AccessibilityPreferences(speechEnabled, value, keyboardGuidanceEnabled,
                 reducedMotionEnabled, largeTextEnabled, highContrastEnabled,
-                informationDensity, voiceName, speechRate, speechVolume);
+                informationDensity, voiceName, microphoneName, speechRate, speechVolume);
     }
 
     public AccessibilityPreferences withKeyboardGuidanceEnabled(boolean value) {
         return new AccessibilityPreferences(speechEnabled, soundEnabled, value,
                 reducedMotionEnabled, largeTextEnabled, highContrastEnabled,
-                informationDensity, voiceName, speechRate, speechVolume);
+                informationDensity, voiceName, microphoneName, speechRate, speechVolume);
     }
 
     public AccessibilityPreferences withReducedMotionEnabled(boolean value) {
         return new AccessibilityPreferences(speechEnabled, soundEnabled, keyboardGuidanceEnabled,
                 value, largeTextEnabled, highContrastEnabled,
-                informationDensity, voiceName, speechRate, speechVolume);
+                informationDensity, voiceName, microphoneName, speechRate, speechVolume);
     }
 
     public AccessibilityPreferences withLargeTextEnabled(boolean value) {
         return new AccessibilityPreferences(speechEnabled, soundEnabled, keyboardGuidanceEnabled,
                 reducedMotionEnabled, value, highContrastEnabled,
-                informationDensity, voiceName, speechRate, speechVolume);
+                informationDensity, voiceName, microphoneName, speechRate, speechVolume);
     }
 
     public AccessibilityPreferences withHighContrastEnabled(boolean value) {
         return new AccessibilityPreferences(speechEnabled, soundEnabled, keyboardGuidanceEnabled,
                 reducedMotionEnabled, largeTextEnabled, value,
-                informationDensity, voiceName, speechRate, speechVolume);
+                informationDensity, voiceName, microphoneName, speechRate, speechVolume);
     }
 
     public AccessibilityPreferences withInformationDensity(String value) {
         return new AccessibilityPreferences(speechEnabled, soundEnabled, keyboardGuidanceEnabled,
                 reducedMotionEnabled, largeTextEnabled, highContrastEnabled,
-                value, voiceName, speechRate, speechVolume);
+                value, voiceName, microphoneName, speechRate, speechVolume);
     }
 
     /** 음성 설정은 합성기에서 읽어 채운다. */
     public AccessibilityPreferences withVoice(String voice, double rate, int volume) {
         return new AccessibilityPreferences(speechEnabled, soundEnabled, keyboardGuidanceEnabled,
                 reducedMotionEnabled, largeTextEnabled, highContrastEnabled,
-                informationDensity, voice, rate, volume);
+                informationDensity, voice, microphoneName, rate, volume);
     }
 
     public AccessibilityPreferences withVoiceName(String value) {
@@ -93,6 +95,19 @@ public record AccessibilityPreferences(
 
     public AccessibilityPreferences withSpeechVolume(int value) {
         return withVoice(voiceName, speechRate, value);
+    }
+
+    /**
+     * 쓸 마이크를 정한다. 빈 값이면 기본 장치.
+     *
+     * <p>자바가 고르는 기본 장치가 운영체제의 기본을 따라가지 않는다. 실측에서 기본은
+     * 소리가 하나도 안 들어오는 장치였고, 사용자가 쓰던 이어폰은 목록의 다른 자리에
+     * 있었다. 그래서 고른 것을 기억해 둔다.
+     */
+    public AccessibilityPreferences withMicrophoneName(String value) {
+        return new AccessibilityPreferences(speechEnabled, soundEnabled, keyboardGuidanceEnabled,
+                reducedMotionEnabled, largeTextEnabled, highContrastEnabled,
+                informationDensity, voiceName, value, speechRate, speechVolume);
     }
 
     /**

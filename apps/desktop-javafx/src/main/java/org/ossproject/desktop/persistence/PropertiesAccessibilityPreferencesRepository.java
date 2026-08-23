@@ -42,6 +42,7 @@ public final class PropertiesAccessibilityPreferencesRepository implements Acces
         properties.setProperty("contrast.high", Boolean.toString(preferences.highContrastEnabled()));
         properties.setProperty("information.density", preferences.informationDensity());
         properties.setProperty("speech.voice", preferences.voiceName());
+        properties.setProperty("microphone.name", preferences.microphoneName());
         properties.setProperty("speech.rate", Double.toString(preferences.speechRate()));
         properties.setProperty("speech.volume", Integer.toString(preferences.speechVolume()));
         AtomicPropertiesFile.save(file, properties, "OpenStock Access accessibility preferences - no credentials");
@@ -58,6 +59,7 @@ public final class PropertiesAccessibilityPreferencesRepository implements Acces
                 bool(properties, "contrast.high", defaults.highContrastEnabled()),
                 properties.getProperty("information.density", defaults.informationDensity()),
                 properties.getProperty("speech.voice", defaults.voiceName()),
+                properties.getProperty("microphone.name", defaults.microphoneName()),
                 decimal(properties, "speech.rate", defaults.speechRate()),
                 integer(properties, "speech.volume", defaults.speechVolume()));
     }
@@ -73,6 +75,8 @@ public final class PropertiesAccessibilityPreferencesRepository implements Acces
                 bool(properties, "setting.highContrast", defaults.highContrastEnabled()),
                 properties.getProperty("setting.density", defaults.informationDensity()),
                 properties.getProperty("setting.voice", defaults.voiceName()),
+                // 옛 파일에는 마이크 항목이 없다. 기본 장치로 시작한다.
+                defaults.microphoneName(),
                 decimal(properties, "setting.speechRate", defaults.speechRate()),
                 integer(properties, "setting.speechVolume", defaults.speechVolume()));
     }

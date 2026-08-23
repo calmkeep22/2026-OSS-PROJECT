@@ -260,6 +260,7 @@ class ScreenAccessibilityTest {
                 new javafx.beans.property.SimpleStringProperty("연결됨"),
                 new javafx.beans.property.SimpleStringProperty("3개"),
                 () -> "1234****",
+                java.util.List::of,
                 java.util.List::of);
         SettingsScreenView.Actions actions = new SettingsScreenView.Actions(
                 onChanged, value -> { }, text -> { }, () -> { }, screen -> { }, text -> { });

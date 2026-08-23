@@ -15,7 +15,9 @@
 | [**차트 유사도**](results/02_similarity/) | 닮은 과거 구간을 문장으로 | "지금 모양이 과거 어느 때와 닮았나" |
 | [**다음날 예측**](results/03_forecast/) | 변동성·방향을 확률로 | "내일 조용할까, 크게 움직일까" |
 
-**6,228종목**(코스피·코스닥·나스닥·S&P500) 어디에나 그대로 쓴다.
+현재 앱의 서비스 경로는 **국내주식 전용**이며 코스피·코스닥 종목만 받는다.
+과거 미국시장 실험 코드는 모델 재현을 위한 연구 자료로만 보존하며 배포 기능으로
+노출하지 않는다.
 
 ---
 
@@ -29,7 +31,7 @@ pip install -r requirements.txt
 
 ```bash
 python cli.py serve anomaly 알테오젠   # 이상 움직임 + 위험도
-python cli.py serve similar NVDA     # 닮은 차트 종목
+python cli.py serve similar NAVER    # 닮은 차트 종목
 python cli.py serve predict 카카오    # 다음 거래일 예측
 ```
 

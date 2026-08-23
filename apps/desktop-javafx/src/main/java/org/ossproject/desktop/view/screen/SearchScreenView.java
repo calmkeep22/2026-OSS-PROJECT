@@ -35,10 +35,10 @@ public final class SearchScreenView {
         Label title = heading("종목검색");
         TextField query = new TextField();
         query.setText(viewModel.currentQuery());
-        query.setPromptText("삼성전자, 005930, AAPL처럼 검색");
-        query.setAccessibleText("국내와 미국 종목 검색어");
+        query.setPromptText("삼성전자 또는 005930처럼 검색");
+        query.setAccessibleText("국내 종목 검색어");
         ComboBox<String> market = new ComboBox<>(javafx.collections.FXCollections.observableArrayList(
-                "전체", "국내", "미국", "ETF", "ELW"));
+                "전체", "국내", "ETF", "ELW"));
         market.setValue(viewModel.currentMarket());
 
         TableView<StockSearchItem> results = createResultTable();

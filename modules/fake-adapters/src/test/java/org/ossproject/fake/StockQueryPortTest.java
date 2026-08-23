@@ -27,8 +27,8 @@ class StockQueryPortTest {
 
     @Test
     void returnsTheRequestedSecurityRatherThanAFixedOne() {
-        assertEquals("Apple", stocks.getDetail("AAPL").name());
-        assertEquals("NVIDIA", stocks.getDetail("NVDA").name());
+        assertEquals("삼성전자", stocks.getDetail("005930").name());
+        assertEquals("SK하이닉스", stocks.getDetail("000660").name());
         assertEquals("NAVER", stocks.getDetail("035420").name());
     }
 
@@ -42,7 +42,7 @@ class StockQueryPortTest {
     void searchMatchesSymbolAndName() {
         assertEquals(1, stocks.search("005930", 10).size());
         assertEquals("삼성전자", stocks.search("삼성", 10).get(0).name());
-        assertEquals("NVIDIA", stocks.search("nvda", 10).get(0).name());
+        assertEquals("NAVER", stocks.search("naver", 10).get(0).name());
         assertTrue(stocks.search("존재하지않는종목", 10).isEmpty());
     }
 
@@ -55,17 +55,17 @@ class StockQueryPortTest {
 
     @Test
     void searchCarriesExchangeAndCurrencySoScreensNeedNotGuess() {
-        SecuritySummary apple = stocks.search("AAPL", 1).get(0);
+        SecuritySummary samsung = stocks.search("005930", 1).get(0);
 
-        assertEquals("NASDAQ", apple.exchange());
-        assertEquals("USD", apple.currency());
-        assertFalse(apple.isKrw());
+        assertEquals("KRX", samsung.exchange());
+        assertEquals("KRW", samsung.currency());
+        assertTrue(samsung.isKrw());
         assertTrue(stocks.search("005930", 1).get(0).isKrw());
     }
 
     @Test
     void lastCandleClosesAtTheQuotedPrice() {
-        for (String symbol : List.of("005930", "AAPL", "NVDA", "035420", "069500", "000660")) {
+        for (String symbol : List.of("005930", "035420", "069500", "000660")) {
             List<Candle> series = candles.getCandles(symbol, CandleInterval.DAY, 30);
             assertEquals(stocks.getDetail(symbol).currentPrice(), series.get(series.size() - 1).close(),
                     symbol + " 의 마지막 종가가 현재가와 다릅니다.");

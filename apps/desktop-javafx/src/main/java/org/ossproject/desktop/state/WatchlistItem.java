@@ -36,9 +36,8 @@ public record WatchlistItem(
 
     /** 예전 저장 형식은 최초 조회 때 종목명으로 식별 정보를 복구한다. */
     public static WatchlistItem legacy(String group, String securityName, String displayPrice, String alertText) {
-        boolean usd = displayPrice != null && displayPrice.strip().startsWith("$");
-        return new WatchlistItem(group, usd ? "미국" : "국내", securityName, securityName,
-                UNKNOWN_EXCHANGE, usd ? "USD" : "KRW", alertText);
+        return new WatchlistItem(group, "국내", securityName, securityName,
+                UNKNOWN_EXCHANGE, "KRW", alertText);
     }
 
     public StockSelection toSelection() {
@@ -54,10 +53,6 @@ public record WatchlistItem(
             throw new IllegalStateException("예전 관심종목의 거래소 식별자를 먼저 복구해야 합니다.");
         }
         return SecurityId.of(symbol, exchange);
-    }
-
-    public boolean overseas() {
-        return !"KRW".equalsIgnoreCase(currency);
     }
 
     public WatchlistItem withGroup(String replacement) {

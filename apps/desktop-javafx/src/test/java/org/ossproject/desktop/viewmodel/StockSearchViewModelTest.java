@@ -29,12 +29,12 @@ class StockSearchViewModelTest {
         DesktopSession session = new DesktopSession();
         StockSearchViewModel viewModel = viewModel(session);
 
-        assertEquals(1, viewModel.filter("NVDA", "미국").toCompletableFuture().join().count());
+        assertEquals(1, viewModel.filter("NAVER", "국내").toCompletableFuture().join().count());
         StockSearchItem item = viewModel.items().get(0);
         viewModel.select(item);
 
-        assertEquals("NVDA", session.selectedStock().symbol());
-        assertEquals("NVIDIA · NVDA", viewModel.recentSearches().get(0));
+        assertEquals("035420", session.selectedStock().symbol());
+        assertEquals("NAVER · 035420", viewModel.recentSearches().get(0));
     }
 
     @Test void doesNotAddDuplicateWatchlistItem() {
@@ -81,7 +81,7 @@ class StockSearchViewModelTest {
         DesktopSession session = new DesktopSession();
         StockSearchViewModel viewModel = viewModel(session);
 
-        viewModel.filter("NV", "미국").toCompletableFuture().join();
+        viewModel.filter("NAV", "국내").toCompletableFuture().join();
         viewModel.select(viewModel.items().get(0));
         String recent = viewModel.recentSearches().get(0);
         viewModel.filter("삼성", "국내").toCompletableFuture().join();
@@ -89,7 +89,7 @@ class StockSearchViewModelTest {
         assertEquals("삼성", viewModel.currentQuery());
         assertEquals("국내", viewModel.currentMarket());
         assertTrue(viewModel.selectRecent(recent).toCompletableFuture().join());
-        assertEquals("NVDA", session.selectedStock().symbol());
+        assertEquals("035420", session.selectedStock().symbol());
 
         viewModel.removeRecent(recent);
         assertFalse(viewModel.recentSearches().contains(recent));

@@ -61,15 +61,14 @@ class PropertiesDesktopStateRepositoryTest {
     @Test void dropsStoredPricesFromOlderSelectionsAndKeepsIdentity() throws Exception {
         Path file = temporaryDirectory.resolve("ui-state.properties");
         String legacy = "format.version=2\n"
-                + "selected.stock=" + encoded("미국", "AAPL", "Apple", "NASDAQ", "$228.40", "+0.83%") + "\n";
+                + "selected.stock=" + encoded("국내", "035420", "NAVER", "KRX", "205,000원", "-0.71%") + "\n";
         Files.writeString(file, legacy, StandardCharsets.ISO_8859_1);
 
         StockSelection restored = new PropertiesDesktopStateRepository(file).load().orElseThrow().selectedStock();
 
-        assertEquals("AAPL", restored.symbol());
-        assertEquals("NASDAQ", restored.exchange());
-        assertEquals("USD", restored.currency());
-        assertTrue(restored.overseas());
+        assertEquals("035420", restored.symbol());
+        assertEquals("KRX", restored.exchange());
+        assertEquals("KRW", restored.currency());
     }
 
     @Test void skipsMalformedTypedRowsButKeepsValidRows() throws Exception {

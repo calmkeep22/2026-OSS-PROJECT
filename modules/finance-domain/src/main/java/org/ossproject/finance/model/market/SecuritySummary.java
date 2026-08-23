@@ -76,8 +76,15 @@ public record SecuritySummary(
             return true;
         }
         String normalized = query.strip().toLowerCase(java.util.Locale.ROOT);
-        return symbol.toLowerCase(java.util.Locale.ROOT).contains(normalized)
-                || name.toLowerCase(java.util.Locale.ROOT).contains(normalized);
+        if (symbol.toLowerCase(java.util.Locale.ROOT).contains(normalized)
+                || name.toLowerCase(java.util.Locale.ROOT).contains(normalized)) {
+            return true;
+        }
+        // 등록명이 영문인 종목이 많다. 사람은 "네이버" 라고 쓰고 말하지만 등록명은
+        // NAVER 라, 글자를 그대로 맞추면 영영 찾지 못한다. 실제로 검색창에서도 음성
+        // 명령에서도 같은 이유로 못 찾았다.
+        return KoreanReading.toHangul(name).toLowerCase(java.util.Locale.ROOT)
+                .contains(normalized);
     }
 
     private static String requireText(String value, String label) {

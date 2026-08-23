@@ -149,13 +149,13 @@ class WatchlistToggleTest {
         });
     }
 
-    /** 코스피와 나스닥에 같은 코드가 있을 수 있다. 한쪽을 담았는데 다른 쪽이 담겨 보이면 안 된다. */
+    /** KRX와 NXT에 같은 코드가 있을 수 있다. 한쪽을 담았는데 다른 쪽이 담겨 보이면 안 된다. */
     @Test
     @DisplayName("코드가 같아도 거래소가 다르면 담긴 것으로 보지 않는다")
     void doesNotConfuseTheSameCodeOnAnotherExchange() {
         JavaFxToolkit.onFxThread(() -> {
             ObservableList<WatchlistItem> watchlist =
-                    FXCollections.observableArrayList(item("005930", "NASDAQ"));
+                    FXCollections.observableArrayList(item("005930", "NXT"));
             Button button = inertToggle(watchlist);
 
             assertEquals("관심종목 추가", button.getText());
