@@ -36,12 +36,13 @@ from __future__ import annotations
 import argparse
 import logging
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from accessible_investor import serving as SV
 import chat as CHAT
 from news_cache import CACHE as NEWS_CACHE
+from transcribe import TRANSCRIBER, Unavailable as TranscribeUnavailable
 
 LOG = logging.getLogger("ai-service")
 
@@ -124,6 +125,7 @@ def health() -> dict:
     try:
         report = SV.health()
         report["서버"] = "정상"
+        report["음성인식"] = TRANSCRIBER.status()
         return report
     except Exception as error:
         return {
@@ -280,10 +282,51 @@ def news_track(request: TrackRequest) -> dict:
     return result
 
 
-@app.get("/news/status")
-def news_status() -> dict:
-    """적립이 실제로 돌고 있는지. 조용히 멈추면 예측만 서서히 무뎌진다."""
-    return NEWS_CACHE.status()
+class VocabularyRequest(BaseModel):
+    """앱이 아는 말. 종목명과 명령어를 그대로 넘겨 준다."""
+
+    phrases: list[str] = Field(default_factory=list)
+
+
+@app.post("/transcribe/vocabulary")
+def transcribe_vocabulary(request: VocabularyRequest) -> dict:
+    """
+    알아들을 말을 미리 받아 둔다.
+
+    소리와 함께 보내지 않고 따로 받는 이유는 바뀌는 주기가 다르기 때문이다.
+    어휘는 보유·관심 종목이 바뀔 때만 달라지는데, 소리는 한마디마다 온다.
+    매번 실어 보내면 같은 목록을 수백 번 나른다.
+    """
+    return TRANSCRIBER.use_vocabulary(request.phrases)
+
+
+@app.get("/transcribe/status")
+def transcribe_status() -> dict:
+    """쓸 수 있는지, 무엇으로 도는지. 앱이 마이크 단추를 켤지 정하는 데 쓴다."""
+    return TRANSCRIBER.status()
+
+
+@app.post("/transcribe")
+async def transcribe(request: Request) -> dict:
+    """
+    한마디를 글로 옮긴다. 본문은 WAV 바이트 그대로다.
+
+    멀티파트로 받지 않는다. 보내는 쪽이 자바의 HttpClient 하나뿐이고, 경계
+    문자열을 손으로 만들다 틀리면 소리가 조용히 깨져서 들어온다.
+
+    못 알아들으면 빈 말을 돌려준다. 오류가 아니다 — 사용자가 아무 말도 하지
+    않았거나 너무 작게 말한 것은 정상이고, 앱은 그때 다시 말해 달라고 한다.
+    """
+    audio = await request.body()
+    if not audio:
+        raise HTTPException(400, "소리가 비어 있습니다")
+    try:
+        return TRANSCRIBER.transcribe(audio)
+    except TranscribeUnavailable as missing:
+        # 503 은 "지금은 못 한다" 다. 앱이 이것을 보고 마이크 단추를 끈다.
+        raise HTTPException(503, str(missing))
+    except ValueError as bad:
+        raise HTTPException(400, str(bad))
 
 
 @app.post("/chat")
