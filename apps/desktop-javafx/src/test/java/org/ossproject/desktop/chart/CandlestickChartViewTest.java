@@ -149,6 +149,27 @@ class CandlestickChartViewTest {
     }
 
     @Test
+    @DisplayName("한 캔들보다 작게 끌어도 조금씩 움직인다")
+    void dragsSmoothlyBelowOneCandle() {
+        // 캔들 하나 폭보다 훨씬 작은 거리. 캔들 단위로 끊으면 아무 일도 일어나지 않는다.
+        drag(500, 505);
+
+        assertFalse(atLatest(), "작게 끌어도 흐르듯 움직여야 합니다");
+    }
+
+    @Test
+    @DisplayName("조금씩 여러 번 끌면 누적되어 한 캔들을 넘어간다")
+    void accumulatesSmallDrags() {
+        String before = summary();
+
+        for (int i = 0; i < 12; i++) {
+            drag(500, 505);
+        }
+
+        assertNotEquals(before, summary(), "조금씩 끈 것이 쌓여 구간이 바뀌어야 합니다");
+    }
+
+    @Test
     @DisplayName("최신 구간에서는 더 오른쪽으로 가지 않는다")
     void doesNotPanBeyondLatest() {
         String before = summary();
