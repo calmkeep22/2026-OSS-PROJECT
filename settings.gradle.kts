@@ -17,5 +17,8 @@ include(
     ":modules:persistence-sqlite",
     ":modules:secret-store-api",
     ":modules:file-secret-store",
-    ":modules:windows-secret-store"
+    ":modules:windows-secret-store",
+    ":modules:voice-input-api",
+    ":modules:voice-input-java-sound",
+    ":modules:voice-input-http"
 )
