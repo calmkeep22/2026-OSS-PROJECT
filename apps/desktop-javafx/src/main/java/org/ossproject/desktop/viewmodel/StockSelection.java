@@ -37,11 +37,6 @@ public record StockSelection(
                 summary.exchange(), summary.currency());
     }
 
-    /** 원화가 아닌 종목인지 여부. 금액 표기와 호가 단위를 고르는 데 쓴다. */
-    public boolean overseas() {
-        return !"KRW".equalsIgnoreCase(currency);
-    }
-
     public SecurityId securityId() {
         return SecurityId.of(symbol, exchange);
     }

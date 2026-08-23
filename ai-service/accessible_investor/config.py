@@ -7,16 +7,21 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 # --------------------------------------------------------------------------
 # 경로
 # --------------------------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = PROJECT_ROOT / "data"
+# 설치 프로그램에 포함된 AI 실행 파일은 Program Files 아래처럼 쓰기 금지인 곳에
+# 놓일 수 있다. 모델은 패키지에서 읽되, 내려받은 시세와 캐시는 사용자 데이터 폴더에
+# 쓴다. 개발 실행은 환경변수가 없으므로 기존 경로를 그대로 사용한다.
+_writable_root = os.getenv("OPENSTOCK_AI_DATA_DIR", "").strip()
+DATA_DIR = Path(_writable_root) if _writable_root else PROJECT_ROOT / "data"
 DAILY_DIR = DATA_DIR / "daily"
 INTRADAY_DIR = DATA_DIR / "intraday"
-OUTPUT_DIR = PROJECT_ROOT / "outputs"
+OUTPUT_DIR = DATA_DIR / "outputs" if _writable_root else PROJECT_ROOT / "outputs"
 CACHE_DIR = DATA_DIR / "cache"
 
 for _d in (DATA_DIR, DAILY_DIR, INTRADAY_DIR, OUTPUT_DIR, CACHE_DIR):

@@ -11,10 +11,15 @@ desktop-javafx
   ├─ application ──> finance-domain
   ├─ mock-trading ─> application
   ├─ fake-adapters ─> application
+  ├─ persistence-sqlite ─> application / finance-domain / anomaly-detection
   ├─ accessibility
   ├─ sonification
   ├─ sonification-java-sound ─> sonification
+  ├─ voice-input-java-sound ─> voice-input-api
+  ├─ voice-input-http ──────> voice-input-api
   └─ ai-insight-http ─> ai-insight-api ─> finance-domain
+
+voice-input-api ──> finance-domain
 
 kiwoom-adapter ──> broker-api ──> finance-domain
        └─────────> application
@@ -24,7 +29,7 @@ persistence-sqlite ─> application / finance-domain / anomaly-detection
 windows-secret-store ─> file-secret-store ─> secret-store-api
 ```
 
-Dependencies must point from UI/infrastructure toward ports and pure domain models. `finance-domain`, `application`, `broker-api`, `accessibility`, `sonification`, `ai-insight-api`, and `secret-store-api` must never import JavaFX or a concrete adapter. The `sonification` core also must not import Java Sound; `sonification-java-sound` is the replaceable output adapter. `ai-insight-api` must not import an HTTP client; `ai-insight-http` is the replaceable transport. The root `verifyModuleBoundaries` task enforces these rules.
+Dependencies must point from UI/infrastructure toward ports and pure domain models. `finance-domain`, `application`, `broker-api`, `accessibility`, `sonification`, `ai-insight-api`, `voice-input-api`, and `secret-store-api` must never import JavaFX or a concrete adapter. The `sonification` core also must not import Java Sound; `sonification-java-sound` is the replaceable output adapter. `ai-insight-api` must not import an HTTP client; `ai-insight-http` is the replaceable transport. The same split applies to voice: `voice-input-api` holds the command rules and must not import Java Sound, HTTP, or JavaFX, so the recogniser can be replaced without touching them. It may depend on `finance-domain` because reading a security name aloud is a domain rule, not a voice one — `KoreanReading` lives there so typed search and spoken commands match names the same way. The root `verifyModuleBoundaries` task enforces these rules.
 
 ## Package layout inside modules
 
@@ -54,7 +59,6 @@ orderbook  depends on market
 
 `verifyModuleBoundaries` carries a second rule map keyed by source directory rather than by
 module, so a single package can be constrained. Reversing one of these arrows fails the build.
-
 ## Canonical contracts
 
 | Concern | Canonical type or port | Removed duplicate |
@@ -73,6 +77,17 @@ module, so a single package can be constrained. Reversing one of these arrows fa
 ## Composition rule
 
 `DesktopApplication` must not construct concrete broker, fake, persistence, speech, sound, or sonification adapters. `desktop.composition.DesktopServices` is the single composition root and supplies ports/use cases to the JavaFX layer.
+
+The composition root wraps the broker `OrderLifecyclePort` with SQLite history persistence and
+supplies the anomaly repository to the UI. Broker responses remain authoritative: successful
+remote order results are cached, full history may fall back locally, and open orders never do.
+The application owns the SQLite lifecycle and closes it during shutdown.
+
+The composition root also owns the voice ports. `VoiceInputPort` and `AudioCapturePort` are
+supplied separately because they fail for different reasons: a missing microphone and a missing
+recogniser need different things from the user, and one message for both tells them neither.
+When neither can be built the root supplies `VoiceInputPort.unavailable(reason)` rather than
+`null`, so every caller still has a reason to read aloud.
 
 Switching mock/live modes therefore changes composition, not screens or view models.
 
@@ -142,6 +157,15 @@ Each module README lists supported entry points. Implementation helpers should b
 
 ```powershell
 ./gradlew.bat clean test verifyModuleBoundaries
+```
+
+Two checks need real hardware and are skipped unless asked for. They exist because the
+failures they catch are silent — a microphone that opens but delivers nothing, and a
+recogniser that answers but with the wrong words.
+
+```powershell
+./gradlew.bat :modules:voice-input-java-sound:test --tests "*MicrophoneProbe" "-Dvoice.mic=record"
+./gradlew.bat :modules:voice-input-http:test --tests "*LiveTranscribeProbe" "-Dvoice.live=8765" "-Dvoice.wav=<folder>"
 ```
 
 CI runs these checks on Windows and Linux. Java library modules also publish source and Javadoc artifacts to the local build repository through `publishAllPublicationsToLocalBuildRepository`.

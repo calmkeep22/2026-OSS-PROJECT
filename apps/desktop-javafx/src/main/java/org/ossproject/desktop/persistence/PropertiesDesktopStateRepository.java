@@ -133,14 +133,10 @@ public final class PropertiesDesktopStateRepository implements DesktopStateRepos
         }
         if (fields.size() == 6) {
             return safe(() -> new StockSelection(fields.get(0), fields.get(1), fields.get(2),
-                    fields.get(3), currencyOf(fields.get(0), fields.get(3))))
+                    fields.get(3), "KRW"))
                     .orElseGet(StockSelection::samsungElectronics);
         }
         return StockSelection.samsungElectronics();
     }
 
-    private static String currencyOf(String market, String exchange) {
-        return "미국".equals(market) || "NASDAQ".equalsIgnoreCase(exchange)
-                || "NYSE".equalsIgnoreCase(exchange) ? "USD" : "KRW";
-    }
 }

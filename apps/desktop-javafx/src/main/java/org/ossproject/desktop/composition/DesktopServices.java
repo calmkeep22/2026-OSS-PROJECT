@@ -16,6 +16,8 @@ import org.ossproject.application.port.OrderBookQueryPort;
 import org.ossproject.application.port.TradeQueryPort;
 import org.ossproject.application.port.OrderLifecyclePort;
 import org.ossproject.application.port.StockQueryPort;
+import org.ossproject.anomaly.AnomalyAlert;
+import org.ossproject.anomaly.AnomalyAlertRepository;
 import org.ossproject.application.usecase.MarketApplicationService;
 import org.ossproject.application.usecase.TradingUseCase;
 import org.ossproject.finance.model.order.FeeSchedule;
@@ -32,8 +34,15 @@ import org.ossproject.secret.SecretStore;
 import org.ossproject.secret.SecretStoreException;
 import org.ossproject.secret.SecretBytes;
 import org.ossproject.secret.windows.SecretStoreFactory;
+import org.ossproject.persistence.PersistentOrderLifecyclePort;
+import org.ossproject.persistence.SqliteAnomalyAlertRepository;
+import org.ossproject.persistence.SqliteDatabase;
+import org.ossproject.persistence.SqliteOrderRepository;
 
 import org.ossproject.ai.AiInsightPort;
+import org.ossproject.voice.VoiceInputPort;
+import org.ossproject.voice.javasound.MicrophoneCapture;
+import org.ossproject.voice.http.HttpVoiceInputAdapter;
 import org.ossproject.ai.http.HttpAiInsightAdapter;
 import org.ossproject.desktop.ai.AiServiceProcess;
 import java.net.URI;
@@ -61,9 +70,28 @@ public record DesktopServices(
         AiInsightPort aiInsight,
         org.ossproject.ai.NewsPort news,
         AiServiceProcess aiServiceProcess,
-        String marketDataSource
+        VoiceInputPort voice,
+        org.ossproject.voice.AudioCapturePort microphone,
+        String marketDataSource,
+        AnomalyAlertRepository anomalyAlerts,
+        AutoCloseable persistence
 ) {
     private static final System.Logger LOGGER = System.getLogger(DesktopServices.class.getName());
+
+    /** 테스트와 화면 갤러리에서 영속화 계층 없이 사용할 수 있는 호환 생성자. */
+    public DesktopServices(
+            TradingUseCase trading, MarketApplicationPort market, StockQueryPort stocks,
+            CandleQueryPort candles, SpeechPort speech, SpeechQueue speechQueue, SoundPort sounds,
+            SonificationPort sonification, SecretStore secrets, DesktopStateRepository stateRepository,
+            AccessibilityPreferencesRepository accessibilityPreferences,
+            SonificationPreferencesRepository sonificationPreferences, AiInsightPort aiInsight,
+            org.ossproject.ai.NewsPort news, AiServiceProcess aiServiceProcess, String marketDataSource) {
+        this(trading, market, stocks, candles, speech, speechQueue, sounds, sonification, secrets,
+                stateRepository, accessibilityPreferences, sonificationPreferences, aiInsight, news,
+                aiServiceProcess, VoiceInputPort.unavailable("음성 인식이 준비되지 않았습니다."),
+                new MicrophoneCapture(),
+                marketDataSource, unavailableAnomalyRepository(), () -> { });
+    }
 
     public static DesktopServices createDefault() {
         SpeechPort speech = SpeechAdapterFactory.create();
@@ -71,14 +99,15 @@ public record DesktopServices(
         Path legacyState = stateDirectory.resolve("ui-state.properties");
         SecretStore secrets = createSecretStore(stateDirectory.resolve("secrets"));
         MarketDataSource source = createMarketDataSource(secrets);
-        AiService ai = createAiService();
+        PersistenceServices persistence = createPersistence(stateDirectory, source.orders());
+        AiService ai = createAiService(stateDirectory);
         MarketApplicationPort market = new MarketApplicationService(
                 source.stocks(), source.candles(), source.orderBooks(), source.trades(),
                 source.stream(), ForkJoinPool.commonPool(), ForkJoinPool.commonPool(),
                 java.time.Clock.systemDefaultZone());
 
         return new DesktopServices(
-                new TradingUseCase(source.orders(), source.account(),
+                new TradingUseCase(persistence.orders(), source.account(),
                         new OrderGuard(OrderLimitPolicy.defaults()),
                         FeeSchedule.kiwoomMockDefaults()),
                 market,
@@ -94,8 +123,8 @@ public record DesktopServices(
                         stateDirectory.resolve("accessibility.properties"), legacyState),
                 new PropertiesSonificationPreferencesRepository(
                         stateDirectory.resolve("sonification.properties")),
-                ai.port(), ai.news(), ai.process(),
-                source.description());
+                ai.port(), ai.news(), ai.process(), ai.voice(), ai.microphone(),
+                source.description(), persistence.alerts(), persistence.closeable());
     }
 
     /**
@@ -111,7 +140,8 @@ public record DesktopServices(
      * 거치므로 예측·이상감지가 멀쩡해도 혼자 실패한다.
      */
     private record AiService(AiInsightPort port, org.ossproject.ai.NewsPort news,
-                             AiServiceProcess process) {
+                             AiServiceProcess process, VoiceInputPort voice,
+                             org.ossproject.voice.AudioCapturePort microphone) {
     }
 
     /**
@@ -124,26 +154,31 @@ public record DesktopServices(
      * 돌아간다. AI 는 부가 기능이고 시세와 주문은 이것 없이도 동작해야 한다. 어댑터는
      * 그대로 만들어 두고, 화면이 연결 상태를 물어 그 사실을 적는다.
      */
-    private static AiService createAiService() {
+    private static AiService createAiService(Path stateDirectory) {
         int port = aiPort();
         URI baseUri = URI.create("http://127.0.0.1:" + port);
         AiInsightPort adapter = new HttpAiInsightAdapter(
                 baseUri, java.time.Clock.systemDefaultZone());
         org.ossproject.ai.NewsPort news =
                 new org.ossproject.ai.http.HttpNewsAdapter(baseUri);
+        // 음성도 같은 서버를 쓴다. 마이크는 이 컴퓨터 것이다. 둘 중 하나만 없어도
+        // 어댑터는 그대로 만들어 두고, 왜 못 쓰는지는 화면이 물어서 읽어 준다.
+        MicrophoneCapture microphone = new MicrophoneCapture();
+        VoiceInputPort voice = new HttpVoiceInputAdapter(baseUri, microphone);
 
         Optional<Path> directory = AiServiceProcess.locateServiceDirectory();
         if (directory.isEmpty()) {
             LOGGER.log(System.Logger.Level.INFO, "ai-service 를 찾지 못했습니다. AI 기능은 꺼집니다.");
-            return new AiService(adapter, news, null);
+            return new AiService(adapter, news, null, voice, microphone);
         }
-        AiServiceProcess process = new AiServiceProcess(directory.get(), port);
+        AiServiceProcess process = new AiServiceProcess(directory.get(), port,
+                stateDirectory.resolve("ai-service.log"));
         if (!process.start()) {
             LOGGER.log(System.Logger.Level.INFO,
                     "AI 서버를 띄우지 못했습니다. ai-service 에서 pip install -r requirements.txt 를 실행해주세요.");
-            return new AiService(adapter, news, null);
+            return new AiService(adapter, news, null, voice, microphone);
         }
-        return new AiService(adapter, news, process);
+        return new AiService(adapter, news, process, voice, microphone);
     }
 
     /** 포트를 바꿔야 하는 환경을 위해 열어 둔다. */
@@ -168,6 +203,40 @@ public record DesktopServices(
             TradeQueryPort trades,
             MarketDataStreamPort stream,
             String description) {
+    }
+
+    private record PersistenceServices(
+            OrderLifecyclePort orders,
+            AnomalyAlertRepository alerts,
+            AutoCloseable closeable) {
+    }
+
+    private static PersistenceServices createPersistence(Path stateDirectory,
+                                                         OrderLifecyclePort remoteOrders) {
+        try {
+            SqliteDatabase database = SqliteDatabase.open(stateDirectory.resolve("openstock.db"));
+            SqliteOrderRepository orderRepository = new SqliteOrderRepository(database);
+            return new PersistenceServices(
+                    new PersistentOrderLifecyclePort(remoteOrders, orderRepository),
+                    new SqliteAnomalyAlertRepository(database), database);
+        } catch (RuntimeException unavailable) {
+            LOGGER.log(System.Logger.Level.WARNING,
+                    "SQLite 영속화를 준비하지 못했습니다: {0}", unavailable.getMessage());
+            return new PersistenceServices(remoteOrders, unavailableAnomalyRepository(), () -> { });
+        }
+    }
+
+    private static AnomalyAlertRepository unavailableAnomalyRepository() {
+        return new AnomalyAlertRepository() {
+            @Override public void save(AnomalyAlert alert) { }
+            @Override public java.util.List<AnomalyAlert> findRecent(int limit) {
+                return java.util.List.of();
+            }
+            @Override public java.util.List<AnomalyAlert> findBySymbol(String symbol, int limit) {
+                return java.util.List.of();
+            }
+            @Override public int deleteDetectedBefore(java.time.Instant cutoff) { return 0; }
+        };
     }
 
     /**

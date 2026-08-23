@@ -39,21 +39,21 @@ class StockDetailViewModelTest {
         return viewModel;
     }
 
-    private static StockSelection apple() {
-        return new StockSelection("미국", "AAPL", "Apple", "NASDAQ", "USD");
+    private static StockSelection naver() {
+        return new StockSelection("국내", "035420", "NAVER", "KRX", "KRW");
     }
 
-    @Test void selectedOverseasStockUsesItsOwnCurrencyAndPrice() {
-        StockDetailViewModel viewModel = loadedViewModel(apple());
+    @Test void selectedStockUsesItsOwnPrice() {
+        StockDetailViewModel viewModel = loadedViewModel(naver());
 
-        assertEquals("AAPL", viewModel.detail().symbol());
-        assertEquals("Apple", viewModel.detail().name());
-        assertEquals("$228.40", viewModel.formatPrice(viewModel.detail().currentPrice()));
+        assertEquals("035420", viewModel.detail().symbol());
+        assertEquals("NAVER", viewModel.detail().name());
+        assertEquals("205,000원", viewModel.formatPrice(viewModel.detail().currentPrice()));
     }
 
     @Test void reportsExactlyWhatTheQueryPortReturns() {
-        StockDetailViewModel viewModel = loadedViewModel(apple());
-        StockDetail reported = new FakeStockQueryAdapter().getDetail("AAPL");
+        StockDetailViewModel viewModel = loadedViewModel(naver());
+        StockDetail reported = new FakeStockQueryAdapter().getDetail("035420");
         StockDetail shown = viewModel.detail();
 
         // 화면이 시가·고가·저가·거래량을 현재가에서 만들어 내지 않는지 확인한다.
@@ -66,7 +66,7 @@ class StockDetailViewModelTest {
     }
 
     @Test void chartClosesAtTheQuotedPriceWithoutRescaling() {
-        StockDetailViewModel viewModel = loadedViewModel(apple());
+        StockDetailViewModel viewModel = loadedViewModel(naver());
 
         List<PricePoint> history = viewModel.history(StockDetailViewModel.ChartRange.DAY);
 
@@ -75,10 +75,10 @@ class StockDetailViewModelTest {
     }
 
     @Test void chartUsesTheCandlesAsReturnedByThePort() {
-        StockDetailViewModel viewModel = loadedViewModel(apple());
+        StockDetailViewModel viewModel = loadedViewModel(naver());
         List<PricePoint> shown = viewModel.history(StockDetailViewModel.ChartRange.DAY);
         List<PricePoint> reported = new FakeCandleQueryAdapter()
-                .getCandles("AAPL", StockDetailViewModel.ChartRange.DAY.interval(),
+                .getCandles("035420", StockDetailViewModel.ChartRange.DAY.interval(),
                         StockDetailViewModel.ChartRange.DAY.count()).stream()
                 .map(candle -> candle.toPricePoint(java.time.ZoneId.of("Asia/Seoul")))
                 .toList();
@@ -92,14 +92,14 @@ class StockDetailViewModelTest {
     }
 
     @Test void visualAndAccessibleChartsShareTheSameCandleSnapshot() {
-        StockDetailViewModel viewModel = viewModel(apple());
+        StockDetailViewModel viewModel = viewModel(naver());
 
         StockDetailViewModel.InitialData loaded = viewModel.loadInitial().toCompletableFuture().join();
 
         List<Candle> reported = new FakeCandleQueryAdapter(Clock.fixed(
                 loaded.candles().get(loaded.candles().size() - 1).timestamp(), ZoneOffset.UTC))
                 .getCandles(
-                apple().securityId(), StockDetailViewModel.ChartRange.DAY.interval(),
+                naver().securityId(), StockDetailViewModel.ChartRange.DAY.interval(),
                 StockDetailViewModel.ChartRange.DAY.count());
         assertEquals(reported, loaded.candles());
         assertEquals(loaded.candles(), viewModel.selectedCandles());
@@ -110,7 +110,7 @@ class StockDetailViewModelTest {
     }
 
     @Test void selectedChartRangeKeepsItsExactCandlesForAccessiblePlayback() {
-        StockDetailViewModel viewModel = loadedViewModel(apple());
+        StockDetailViewModel viewModel = loadedViewModel(naver());
 
         viewModel.loadHistory(StockDetailViewModel.ChartRange.MINUTE_5)
                 .toCompletableFuture().join();
@@ -119,7 +119,7 @@ class StockDetailViewModelTest {
         List<Candle> selected = viewModel.selectedCandles();
         assertEquals(new FakeCandleQueryAdapter(Clock.fixed(
                         selected.get(selected.size() - 1).timestamp(), ZoneOffset.UTC)).getCandles(
-                        apple().securityId(), StockDetailViewModel.ChartRange.MINUTE_5.interval(),
+                        naver().securityId(), StockDetailViewModel.ChartRange.MINUTE_5.interval(),
                         StockDetailViewModel.ChartRange.MINUTE_5.count()),
                 selected);
     }
@@ -147,18 +147,18 @@ class StockDetailViewModelTest {
      * 여기서는 스트림에서 화면까지 이어졌는지만 본다.
      */
     @Test void liveTradesReachTheChartThroughTheViewModel() {
-        StockDetailViewModel viewModel = loadedViewModel(apple());
+        StockDetailViewModel viewModel = loadedViewModel(naver());
         AtomicReference<List<PricePoint>> pushed = new AtomicReference<>();
 
         viewModel.startLiveChart(pushed::set);
-        assertTrue(stream.subscriptions().contains("AAPL"), "구독이 시작되어야 합니다");
+        assertTrue(stream.subscriptions().contains("035420"), "구독이 시작되어야 합니다");
 
-        stream.emit(new Quote("AAPL", new BigDecimal("999.00"), null, null, null,
+        stream.emit(new Quote("035420", new BigDecimal("210000"), null, null, null,
                 0L, 0L, 10L, Instant.now()));
 
         assertNotNull(pushed.get(), "화면이 갱신된 지점을 받아야 합니다");
         PricePoint last = pushed.get().get(pushed.get().size() - 1);
-        assertEquals(0, new BigDecimal("999.00").compareTo(last.close()),
+        assertEquals(0, new BigDecimal("210000").compareTo(last.close()),
                 "마지막 봉의 종가가 체결가여야 합니다");
         assertEquals(pushed.get(), viewModel.history(StockDetailViewModel.ChartRange.DAY),
                 "화면에 보낸 지점과 뷰모델 캐시가 같아야 합니다");
@@ -166,7 +166,7 @@ class StockDetailViewModelTest {
 
     /** 다른 종목의 체결이 지금 보고 있는 차트를 건드리면 안 된다. */
     @Test void ignoresTradesForAnotherSymbol() {
-        StockDetailViewModel viewModel = loadedViewModel(apple());
+        StockDetailViewModel viewModel = loadedViewModel(naver());
         AtomicInteger pushes = new AtomicInteger();
         viewModel.startLiveChart(points -> pushes.incrementAndGet());
 
@@ -178,24 +178,24 @@ class StockDetailViewModelTest {
 
     /** 구독을 놓지 않으면 보이지 않는 차트를 계속 갱신하게 된다. */
     @Test void stoppingReleasesTheSubscription() {
-        StockDetailViewModel viewModel = loadedViewModel(apple());
+        StockDetailViewModel viewModel = loadedViewModel(naver());
         viewModel.startLiveChart(points -> { });
 
         viewModel.stopLiveChart();
 
-        assertFalse(stream.subscriptions().contains("AAPL"));
+        assertFalse(stream.subscriptions().contains("035420"));
         assertDoesNotThrow(viewModel::stopLiveChart, "여러 번 불러도 안전해야 합니다");
     }
 
     /** 기간이나 종목을 바꿀 때마다 구독이 쌓이면 체결 한 건에 여러 번 다시 그리게 된다. */
     @Test void restartingDoesNotStackSubscriptions() {
-        StockDetailViewModel viewModel = loadedViewModel(apple());
+        StockDetailViewModel viewModel = loadedViewModel(naver());
         AtomicInteger pushes = new AtomicInteger();
 
         viewModel.startLiveChart(points -> pushes.incrementAndGet());
         viewModel.startLiveChart(points -> pushes.incrementAndGet());
 
-        stream.emit(new Quote("AAPL", new BigDecimal("999.00"), null, null, null,
+        stream.emit(new Quote("035420", new BigDecimal("210000"), null, null, null,
                 0L, 0L, 10L, Instant.now()));
 
         assertEquals(1, pushes.get(), "구독이 하나만 살아 있어야 합니다");

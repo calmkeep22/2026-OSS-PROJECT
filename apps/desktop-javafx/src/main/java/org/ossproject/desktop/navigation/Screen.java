@@ -9,15 +9,11 @@ package org.ossproject.desktop.navigation;
 public enum Screen {
     DASHBOARD("홈", true, NavigationGroup.OVERVIEW),
     CONNECTION("API 연결", true, NavigationGroup.OVERVIEW),
-    MARKET("시장", false, NavigationGroup.MARKET_EXPLORATION),
     SEARCH("종목검색", true, NavigationGroup.MARKET_EXPLORATION),
     STOCK_DETAIL("종목 상세", false, NavigationGroup.MARKET_EXPLORATION),
     WATCHLIST("관심종목", true, NavigationGroup.MARKET_EXPLORATION),
-    SCANNER("랭킹 · 스캐너", false, NavigationGroup.MARKET_EXPLORATION),
-    CONDITION("조건검색", false, NavigationGroup.MARKET_EXPLORATION),
     TRADING("주문", true, NavigationGroup.TRADING_ASSETS),
     ACCOUNT("계좌", true, NavigationGroup.TRADING_ASSETS),
-    US_MARKET("미국주식", false, NavigationGroup.OVERSEAS),
     SIMILAR("닮은 차트", true, NavigationGroup.MARKET_EXPLORATION),
     NEWS("뉴스 · 챗봇", true, NavigationGroup.MARKET_EXPLORATION),
     ANOMALY("이상 감지", true, NavigationGroup.ACCESSIBILITY_TOOLS),
@@ -29,7 +25,6 @@ public enum Screen {
         OVERVIEW("개요와 연결"),
         MARKET_EXPLORATION("시장 탐색"),
         TRADING_ASSETS("거래와 자산"),
-        OVERSEAS("해외 시장"),
         ACCESSIBILITY_TOOLS("알림과 접근성"),
         SETTINGS("환경 설정");
 

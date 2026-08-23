@@ -34,7 +34,7 @@ public final class ScannerScreenView {
 
     public ScrollPane create() {
         Label title = heading("랭킹 · Market Scanner");
-        ComboBox<String> market = new ComboBox<>(FXCollections.observableArrayList("국내 전체", "KOSPI", "KOSDAQ", "NASDAQ", "NYSE"));
+        ComboBox<String> market = new ComboBox<>(FXCollections.observableArrayList("국내 전체", "KOSPI", "KOSDAQ"));
         market.setValue("국내 전체");
         ComboBox<String> criterion = new ComboBox<>(FXCollections.observableArrayList(
                 "거래량", "거래대금", "상승률", "하락률", "거래량 급증", "신고가", "신저가", "VI", "외국인", "기관"));

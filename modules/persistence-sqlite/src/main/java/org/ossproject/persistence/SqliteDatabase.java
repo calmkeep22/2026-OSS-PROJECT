@@ -1,6 +1,8 @@
 package org.ossproject.persistence;
 
 import java.nio.file.Path;
+import java.nio.file.Files;
+import java.io.IOException;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
@@ -28,7 +30,14 @@ public final class SqliteDatabase implements AutoCloseable {
         if (file == null) {
             throw new IllegalArgumentException("데이터베이스 경로는 필수입니다.");
         }
-        return openUrl("jdbc:sqlite:" + file.toAbsolutePath());
+        Path absolute = file.toAbsolutePath().normalize();
+        try {
+            Path parent = absolute.getParent();
+            if (parent != null) Files.createDirectories(parent);
+        } catch (IOException e) {
+            throw new PersistenceException("데이터베이스 폴더를 만들지 못했습니다.", e);
+        }
+        return openUrl("jdbc:sqlite:" + absolute);
     }
 
     /** 메모리 데이터베이스를 연다. 테스트용이다. */

@@ -1,5 +1,32 @@
 # 서드파티 고지
 
+## 데스크톱 배포물의 실행 구성요소
+
+아래 표는 `packagePortable` 및 `packageWindowsInstaller`가 묶는 직접 실행
+의존성을 기준으로 한다. 각 패키지에 포함된 원문 라이선스와 저작권 고지가 이
+문서보다 우선한다.
+
+| 구성요소 | 라이선스 |
+|---|---|
+| OpenJDK 런타임, OpenJFX 17 | GPL-2.0 with Classpath Exception |
+| Jackson 2.18 | Apache-2.0 |
+| JNA 5.15 | Apache-2.0 또는 LGPL-2.1-or-later |
+| Xerial SQLite JDBC 3.47 | Apache-2.0 (번들 SQLite는 Public Domain) |
+| NumPy, pandas, SciPy, scikit-learn, joblib | BSD-3-Clause 계열 |
+| PyArrow | Apache-2.0 |
+| FinanceDataReader | MIT |
+| yfinance, Requests | Apache-2.0 |
+| FastAPI | MIT |
+| Uvicorn | BSD-3-Clause |
+| PyInstaller 부트로더 | GPL-2.0-or-later with Bootloader Exception |
+
+NumPy·SciPy·PyArrow 등 바이너리 휠은 OpenBLAS, LAPACK, 컴파일러 런타임 같은
+추가 구성요소를 포함할 수 있다. 실제 배포 전에 생성된 패키지 내부 라이선스 파일을
+함께 보존하고 최종 산출물 기준으로 다시 점검해야 한다.
+
+`yfinance`의 소프트웨어 라이선스와 Yahoo 금융 데이터의 이용 조건은 별개다.
+앱은 키움 봉 데이터를 우선 사용하며 yfinance는 국내 시세 폴백 경로에만 사용한다.
+
 이 프로젝트가 쓰는 외부 구성요소와 각각의 라이선스 조건이다.
 **GitHub 공개·배포 전에 이 문서를 확인할 것.**
 

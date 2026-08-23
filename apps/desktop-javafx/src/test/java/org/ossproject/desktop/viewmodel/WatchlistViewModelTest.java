@@ -56,23 +56,23 @@ class WatchlistViewModelTest {
     @Test void addsEditsMovesAlertsRemovesAndRefreshesTypedItems() {
         DesktopSession session = sessionWith(
                 new WatchlistItem("반도체", "국내", "005930", "삼성전자", "KRX", "KRW", "없음"));
-        session.watchlistGroups().addAll("미국 기술주", "AI");
+        session.watchlistGroups().addAll("인터넷", "대형주");
         WatchlistViewModel viewModel = viewModel(session);
         WatchlistItem added = new WatchlistItem(
-                "미국 기술주", "미국", "AAPL", "Apple", "NASDAQ", "USD", "없음");
+                "인터넷", "국내", "035420", "NAVER", "KRX", "KRW", "없음");
 
         viewModel.save(null, added);
         assertTrue(viewModel.items().contains(added));
 
-        WatchlistItem alerted = viewModel.setAlert(added, "$240");
-        assertEquals("$240", alerted.alertText());
+        WatchlistItem alerted = viewModel.setAlert(added, "210,000원");
+        assertEquals("210,000원", alerted.alertText());
         assertTrue(viewModel.move(alerted, -1));
 
-        WatchlistItem edited = alerted.withGroup("AI");
+        WatchlistItem edited = alerted.withGroup("대형주");
         viewModel.save(alerted, edited);
         assertTrue(viewModel.items().contains(edited));
-        assertTrue(viewModel.quoteRows().stream().anyMatch(row -> row.symbol().equals("AAPL")
-                && row.displayPrice().equals("$228.40")));
+        assertTrue(viewModel.quoteRows().stream().anyMatch(row -> row.symbol().equals("035420")
+                && row.displayPrice().equals("205,000원")));
 
         viewModel.remove(edited);
         assertFalse(viewModel.items().contains(edited));

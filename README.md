@@ -20,6 +20,16 @@
 - 주문 미리보기와 명시적 재확인, 주문 한도·중복 주문 안전장치
 - 잔고·주문·체결 생명주기를 처리하는 모의주문 엔진
 
+**음성 명령** — 마이크 단추 또는 Alt+V
+
+- 화면 이동·현재가·뉴스·잔고 조회, 관심종목 담기·빼기, 읽기 속도·큰 글씨·고대비
+- 읽던 안내 멈추기와 다시 듣기 — 소리로만 받는 사용자는 놓친 안내를 되돌려 볼 수 없습니다
+- 인식은 앱이 띄우는 파이썬 서비스 안에서 돕니다. 소리를 바깥으로 보내지 않습니다
+
+> 주문은 말로 확정되지 않습니다. "삼성전자 매수 열 주" 는 주문 화면을 채우기만 하고,
+> 실제 발주는 기존 재확인 창을 거칩니다. 잘못 알아들은 한 번이 그대로 체결로 나가면
+> 안 되고, 화면을 볼 수 없는 사용자는 그것을 눈으로 확인할 수도 없습니다.
+
 **AI 분석** — 파이썬 분석 서비스를 앱이 직접 띄워 붙입니다
 
 - 다음 거래일 변동성 예측과 이상 움직임 감지, 종목 위험도
@@ -60,6 +70,16 @@ modules/mock-trading
 modules/broker-api
   증권사 공통 REST 계약과 오류·재시도 모델 (auth · error · resilience)
 
+modules/voice-input-api
+  음성 명령 계약. 무엇을 시킬 수 있는지와 알아들은 말을 명령으로
+  바꾸는 규칙. 인식기를 갈아 끼워도 이 규칙은 그대로다
+
+modules/voice-input-java-sound
+  마이크에서 한마디를 받아 WAV 로 만든다. 말이 끝난 것을 알아채고 끊는다
+
+modules/voice-input-http
+  ai-service 의 /transcribe 를 부르는 어댑터
+
 modules/kiwoom-adapter
   키움 REST/WebSocket 구현 (query · mapping · config · http · stream)
 
@@ -74,7 +94,7 @@ modules/ai-insight-http
   ai-service 를 HTTP 로 부르는 어댑터
 
 modules/persistence-sqlite
-  SQLite 영속화 구현
+  주문·체결·이상 감지 이력 저장과 재시작 후 과거 주문 조회
 
 modules/secret-store-api
   비밀 저장소 공통 계약
@@ -176,6 +196,60 @@ Windows 휴대용 앱 이미지:
 
 ```powershell
 ./gradlew.bat :apps:desktop-javafx:packagePortable
+```
+
+위 배포 작업은 Java 런타임뿐 아니라 Python AI 서버와 모델도 함께 묶습니다. 빌드하는
+컴퓨터에는 JDK 17과 Python 3.12가 필요하지만, 생성된 앱을 사용하는 사람은 Java나
+Python을 따로 설치할 필요가 없습니다. 첫 빌드는 AI 의존성을 받기 때문에 인터넷 연결과
+충분한 디스크 공간이 필요합니다.
+
+앱을 처음 실행하면 `%LOCALAPPDATA%\OpenStockAccess\openstock.db`가 자동으로
+생성됩니다. 성공한 주문 응답과 이상 감지 이력을 여기에 저장하며, API 키·App Secret·
+Access Token은 SQLite에 저장하지 않습니다. 키움 서버가 주문 상태의 원본이고 SQLite는
+과거 이력 확인용이므로, 연결이 끊겼을 때 오래된 미체결 상태로 주문 가능 여부를 판단하지 않습니다.
+
+Windows 설치 프로그램(EXE, WiX Toolset 필요):
+
+```powershell
+./gradlew.bat :apps:desktop-javafx:packageWindowsInstaller
+```
+
+## 음성 명령 사용
+
+상단 **음성 명령** 단추 또는 **Alt+V** 로 엽니다. 신호음이 난 뒤에 말하면 됩니다.
+늘 듣고 있지 않습니다 — 마이크를 계속 열어 두면 언제 녹음되는지 알 수 없습니다.
+
+```text
+관심종목 보여줘      계좌        청각차트 열어줘     이상감지
+뒤로               그만        다시 말해줘        도움말
+천천히 / 빠르게      큰글씨       고대비            예수금 알려줘
+삼성전자 현재가      카카오 뉴스   삼성전자 관심종목에 담아줘
+삼성전자 매수 열 주   (주문 화면을 채우기만 하고, 확인 단추를 눌러야 나갑니다)
+```
+
+말이 인식기에 정확히 들어가지 않아도 됩니다. 아는 종목과 명령어에 가장 가까운 것을
+골라 붙입니다. 다만 매수·매도·종목명은 붙이는 기준을 빡빡하게 잡았습니다 — "매수" 와
+"매도" 는 한 글자 차이라, 헐겁게 붙이면 팔라는 말이 사라는 말이 됩니다.
+
+인식은 `ai-service` 안에서 돕니다. **AI 분석과 같은 서버**라 따로 준비할 것이 없고,
+`faster-whisper` 가 없으면 음성만 꺼지고 나머지는 그대로 돌아갑니다.
+
+### 마이크가 안 잡힐 때
+
+**설정 → 음성 설정 → 마이크** 에서 장치를 고르면 그 선택을 기억합니다. 자바가 고르는
+기본 장치가 운영체제의 기본을 따라가지 않아, 소리가 하나도 들어오지 않는 장치가
+잡히는 경우가 있습니다.
+
+어느 장치가 실제로 소리를 받는지는 이 도구로 눈으로 볼 수 있습니다.
+
+```powershell
+java tools\MicMeter.java
+```
+
+무엇으로 알아들었는지는 로그에 남습니다.
+
+```powershell
+Get-Content -Tail 20 "$env:LOCALAPPDATA\OpenStockAccess\ai-service.log"
 ```
 
 ## 안전 원칙

@@ -24,9 +24,8 @@ public record WatchlistQuoteRow(
 
     public static WatchlistQuoteRow available(WatchlistItem item, StockDetail detail) {
         Objects.requireNonNull(detail, "detail");
-        String price = item.overseas()
-                ? "$" + detail.currentPrice().setScale(2, RoundingMode.HALF_UP).toPlainString()
-                : String.format("%,d원", detail.currentPrice().setScale(0, RoundingMode.HALF_UP).longValue());
+        String price = String.format("%,d원",
+                detail.currentPrice().setScale(0, RoundingMode.HALF_UP).longValue());
         var rate = detail.changeRate().setScale(2, RoundingMode.HALF_UP);
         String change = (rate.signum() > 0 ? "+" : "") + rate.toPlainString() + "%";
         return new WatchlistQuoteRow(item, price, change, String.format("%,d", detail.volume()), "조회됨");
@@ -40,7 +39,6 @@ public record WatchlistQuoteRow(
     public String symbol() { return item.symbol(); }
     public String securityName() { return item.securityName(); }
     public String alertText() { return item.alertText(); }
-    public boolean overseas() { return item.overseas(); }
     public boolean quoteAvailable() { return "조회됨".equals(quoteStatus); }
 
     public String accessibleDescription() {
