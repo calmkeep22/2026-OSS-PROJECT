@@ -21,6 +21,30 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class PcmGraphSonificationAdapter implements SonificationPort {
     private static final System.Logger LOGGER = System.getLogger(PcmGraphSonificationAdapter.class.getName());
     private static final float SAMPLE_RATE = 16_000f;
+
+    /**
+     * 출력 버퍼 크기.
+     *
+     * <p>소리가 이만큼 쌓였다가 나가므로, 이 값이 곧 눈과 귀의 시차다. 16kHz · 16비트 ·
+     * 모노에서 한 밀리초는 32바이트다. 150밀리초로 잡으면 사람이 어긋남을 느끼기 어려운
+     * 범위이면서, 밑돌아 소리가 끊길 만큼 빠듯하지도 않다.
+     *
+     * <p>더 줄이면 시차는 작아지지만 버퍼가 비어 소리가 끊기기 시작한다. 끊기는 소리는
+     * 조금 늦는 소리보다 훨씬 나쁘다 — 이 화면에서 소리는 곧 데이터다.
+     */
+    private static final int OUTPUT_BUFFER_MILLIS = 150;
+    private static final int OUTPUT_BUFFER_BYTES =
+            Math.round(SAMPLE_RATE * 2 * OUTPUT_BUFFER_MILLIS / 1_000f);
+
+    /**
+     * 버퍼 크기가 곧 지연이다. 화면이 이 값만큼 기다렸다 강조 표시를 옮기면 눈과 귀가
+     * 맞는다. 숫자를 화면 쪽에 따로 적어 두지 않는다 — 버퍼를 바꾸면 그 숫자만 남아
+     * 어긋난다.
+     */
+    @Override
+    public java.time.Duration outputLatency() {
+        return java.time.Duration.ofMillis(OUTPUT_BUFFER_MILLIS);
+    }
     private static final int MAX_PENDING_FRAMES = 2;
 
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -103,7 +127,13 @@ public final class PcmGraphSonificationAdapter implements SonificationPort {
             if (line == null || !line.isOpen()) {
                 AudioFormat format = new AudioFormat(SAMPLE_RATE, 16, 1, true, false);
                 line = lineFactory.create(format);
-                line.open(format);
+                // 버퍼 크기를 지정하지 않으면 Java Sound 가 제 기본값을 쓴다. 그 값은
+                // 흔히 0.5초를 넘고, 그만큼 소리가 뒤늦게 나간다. 화면의 강조 표시는
+                // 이 write 가 돌아오는 즉시 바뀌므로, 눈이 귀보다 그만큼 앞선다.
+                //
+                // 지연을 화면 쪽에서 흉내 내 맞추는 방법도 있지만, 그러면 실제로 늦게
+                // 나가는 소리는 그대로 두고 눈만 늦추는 셈이다. 소리 자체를 앞당긴다.
+                line.open(format, OUTPUT_BUFFER_BYTES);
                 activeLine = line;
                 if (requestedGeneration != generation.get()) {
                     closeActiveLine();
