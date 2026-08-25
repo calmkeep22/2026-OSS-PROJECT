@@ -35,6 +35,11 @@ final class AiServiceHttp {
      * 들고 있으므로 이만큼 기다리는 것은 그 종목을 처음 여는 한 번뿐이다.
      */
     private static final Duration NEWS_TIMEOUT = Duration.ofSeconds(90);
+    /**
+     * 첫 시장지표 조회는 FinanceDataReader가 국내·해외 공급원에 접속하므로 분석보다
+     * 오래 걸릴 수 있다. 서버가 결과를 일일 캐시에 저장한 뒤부터는 즉시 끝난다.
+     */
+    private static final Duration MARKET_TIMEOUT = Duration.ofSeconds(60);
 
     private final URI baseUri;
     private final HttpClient http;
@@ -53,6 +58,11 @@ final class AiServiceHttp {
     JsonNode get(String path) {
         return send(HttpRequest.newBuilder(baseUri.resolve(path))
                 .timeout(CALL_TIMEOUT).GET().build());
+    }
+
+    JsonNode getMarket(String path) {
+        return send(HttpRequest.newBuilder(baseUri.resolve(path))
+                .timeout(MARKET_TIMEOUT).GET().build());
     }
 
     JsonNode post(String path, String body) {

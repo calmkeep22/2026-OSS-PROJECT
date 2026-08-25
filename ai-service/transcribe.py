@@ -32,14 +32,19 @@ from __future__ import annotations
 import collections
 import io
 import logging
+import os
 import re
+import sys
 import threading
 import time
 import wave
+from pathlib import Path
 
 LOG = logging.getLogger("ai-service.transcribe")
 
 MODEL_SIZE = "base"
+MODEL_FILES = ("config.json", "model.bin", "tokenizer.json", "vocabulary.txt")
+BUNDLED_MODEL_PATH = Path("whisper-models") / "faster-whisper-base"
 
 # 한 번에 받을 수 있는 소리 길이. 명령 한마디는 길어야 몇 초다. 이보다 길면
 # 마이크가 열린 채로 방치된 것이므로, 분 단위 소리를 붙들고 CPU 를 태우지 않는다.
@@ -60,6 +65,36 @@ _NOISE = {"", ".", "..", "...", "감사합니다.", "시청해주셔서 감사�
 
 class Unavailable(RuntimeError):
     """인식기를 쓸 수 없다. 왜인지를 메시지에 담는다."""
+
+
+def _complete_model(path: Path) -> bool:
+    """CTranslate2 모델을 열 수 있는 최소 파일이 모두 있는가."""
+    return path.is_dir() and all((path / name).is_file() for name in MODEL_FILES)
+
+
+def _model_source(size: str) -> tuple[str | Path | None, str]:
+    """
+    실행할 모델의 위치를 고른다.
+
+    배포본은 PyInstaller가 푼 ``_MEIPASS`` 아래의 모델만 쓴다. 파일이 빠졌는데
+    조용히 인터넷에서 받기 시작하면 오프라인 시연에서 음성 단추가 멈춘 것처럼 보인다.
+    개발 환경에서는 기존처럼 모델 이름을 넘겨 faster-whisper 캐시를 사용할 수 있다.
+    """
+    configured = os.environ.get("OPENSTOCK_WHISPER_MODEL", "").strip()
+    if configured:
+        explicit = Path(configured).expanduser().resolve()
+        if _complete_model(explicit):
+            return explicit, ""
+        return None, f"지정한 Whisper 모델 파일이 완전하지 않습니다: {explicit}"
+
+    runtime_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    bundled = runtime_root / BUNDLED_MODEL_PATH
+    if size == MODEL_SIZE and _complete_model(bundled):
+        return bundled, ""
+
+    if getattr(sys, "frozen", False):
+        return None, f"배포본에 Whisper {size} 모델이 포함되지 않았습니다."
+    return size, ""
 
 
 class Transcriber:
@@ -87,10 +122,15 @@ class Transcriber:
             return True
         try:
             import faster_whisper  # noqa: F401
-            return True
         except ImportError as missing:
             self._reason = f"faster-whisper 가 설치되지 않았습니다: {missing}"
             return False
+        source, reason = _model_source(self._size)
+        if source is None:
+            self._reason = reason
+            return False
+        self._reason = ""
+        return True
 
     def status(self) -> dict:
         return {
@@ -141,11 +181,18 @@ class Transcriber:
         from faster_whisper import WhisperModel
 
         device, compute = self._pick_device()
+        source, reason = _model_source(self._size)
+        if source is None:
+            self._reason = reason
+            raise Unavailable(reason)
         started = time.perf_counter()
-        self._model = WhisperModel(self._size, device=device, compute_type=compute)
+        local = isinstance(source, Path)
+        self._model = WhisperModel(str(source), device=device, compute_type=compute,
+                                   local_files_only=local)
         self._device = f"{device}/{compute}"
-        LOG.info("%s 모델 적재 %.1f초 (%s)", self._size,
-                 time.perf_counter() - started, self._device)
+        LOG.info("%s 모델 적재 %.1f초 (%s, %s)", self._size,
+                 time.perf_counter() - started, self._device,
+                 "배포본 내장" if local else "개발 환경 캐시")
         return self._model
 
     @staticmethod

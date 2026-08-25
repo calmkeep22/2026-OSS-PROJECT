@@ -108,3 +108,49 @@ def test_추적_목록은_덮어쓰지_않고_합친다(cache):
 def test_같은_종목을_두_번_넣지_않는다(cache):
     cache.track(["A전자"])
     assert cache.track(["A전자", "  "])["추가"] == 0
+
+
+class FakeArchiveNews(FakeNews):
+    def __init__(self, calls):
+        super().__init__(calls)
+        self.backfills = []
+        self.collected = []
+
+    def backfill(self, name, days_back, verbose=False):
+        self.backfills.append((name, days_back))
+        return 11
+
+    def collect(self, name, days=7):
+        self.collected.append((name, days))
+        return [name]
+
+    def archive_append(self, rows):
+        return len(rows)
+
+
+def test_새_종목은_과거를_한_번만_소급하고_매일치를_쌓는다(calls, monkeypatch):
+    monkeypatch.setattr(news_cache, "_REQUEST_GAP_SECONDS", 0)
+    source = FakeArchiveNews(calls)
+    cache = news_cache.NewsCache(source, backfill_days=180)
+    cache._names = ["A전자"]
+
+    cache._sweep_once()
+    cache._sweep_once()
+
+    assert source.backfills == [("A전자", 180)]
+    assert source.collected == [("A전자", 7)]
+    assert cache.status()["마지막결과"]["소급신규"] == 11
+
+
+def test_같은_날_새로_추가된_종목도_기다리지_않고_수집한다(calls, monkeypatch):
+    monkeypatch.setattr(news_cache, "_REQUEST_GAP_SECONDS", 0)
+    source = FakeArchiveNews(calls)
+    cache = news_cache.NewsCache(source, backfill_days=30)
+    cache._names = ["A전자"]
+    cache._sweep_once()
+
+    cache._names.append("B화학")
+    cache._sweep_once()
+
+    assert source.backfills == [("A전자", 30), ("B화학", 30)]
+    assert source.collected == [("A전자", 7), ("B화학", 7)]

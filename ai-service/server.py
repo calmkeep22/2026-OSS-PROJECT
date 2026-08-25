@@ -43,6 +43,7 @@ from accessible_investor import serving as SV
 import chat as CHAT
 from news_cache import CACHE as NEWS_CACHE
 from transcribe import TRANSCRIBER, Unavailable as TranscribeUnavailable
+import market_overview as MARKET
 
 LOG = logging.getLogger("ai-service")
 
@@ -126,6 +127,7 @@ def health() -> dict:
         report = SV.health()
         report["서버"] = "정상"
         report["음성인식"] = TRANSCRIBER.status()
+        report["시장지표"] = MARKET.status()
         return report
     except Exception as error:
         return {
@@ -133,6 +135,24 @@ def health() -> dict:
             "전체정상": False,
             "사유": f"{type(error).__name__}: {error}",
         }
+
+
+@app.get("/market/overview")
+def market_overview() -> dict:
+    """
+    국내·해외 지수와 환율. 홈 화면 맨 위 카드 세 개가 쓴다.
+
+    받지 못한 지표는 목록에서 빠진다. 0 이나 직전 값으로 채우지 않는다 — 화면을 볼
+    수 없는 사용자는 채운 값과 받은 값을 구별할 수 없다.
+
+    하나가 실패해도 200 을 돌려준다. 코스피는 국내 서버, S&P 는 해외 서버라 함께
+    죽지 않는데, 한 묶음으로 실패시키면 멀쩡한 지표까지 화면에서 사라진다. 몇 개를
+    받았는지는 목록 길이로 알 수 있다.
+
+    `as_of` 를 반드시 함께 쓴다. 미국장은 하루 늦고 주말에는 금요일 종가가 월요일
+    내내 남는다. 날짜가 없으면 사용자는 그것을 오늘 값으로 읽는다.
+    """
+    return {"indices": MARKET.overview()}
 
 
 @app.post("/brief")

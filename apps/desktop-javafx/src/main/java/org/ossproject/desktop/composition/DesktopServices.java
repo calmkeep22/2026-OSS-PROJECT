@@ -33,6 +33,8 @@ import org.ossproject.sonification.port.SonificationPort;
 import org.ossproject.secret.SecretStore;
 import org.ossproject.secret.SecretStoreException;
 import org.ossproject.secret.SecretBytes;
+import org.ossproject.secret.file.FileSecretStore;
+import org.ossproject.secret.file.PassphraseSecretCodec;
 import org.ossproject.secret.windows.SecretStoreFactory;
 import org.ossproject.persistence.PersistentOrderLifecyclePort;
 import org.ossproject.persistence.SqliteAnomalyAlertRepository;
@@ -69,6 +71,7 @@ public record DesktopServices(
         SonificationPreferencesRepository sonificationPreferences,
         AiInsightPort aiInsight,
         org.ossproject.ai.NewsPort news,
+        org.ossproject.ai.MarketOverviewPort marketOverview,
         AiServiceProcess aiServiceProcess,
         VoiceInputPort voice,
         org.ossproject.voice.AudioCapturePort microphone,
@@ -88,6 +91,7 @@ public record DesktopServices(
             org.ossproject.ai.NewsPort news, AiServiceProcess aiServiceProcess, String marketDataSource) {
         this(trading, market, stocks, candles, speech, speechQueue, sounds, sonification, secrets,
                 stateRepository, accessibilityPreferences, sonificationPreferences, aiInsight, news,
+                org.ossproject.ai.MarketOverviewPort.unavailable(),
                 aiServiceProcess, VoiceInputPort.unavailable("음성 인식이 준비되지 않았습니다."),
                 new MicrophoneCapture(),
                 marketDataSource, unavailableAnomalyRepository(), () -> { });
@@ -123,7 +127,7 @@ public record DesktopServices(
                         stateDirectory.resolve("accessibility.properties"), legacyState),
                 new PropertiesSonificationPreferencesRepository(
                         stateDirectory.resolve("sonification.properties")),
-                ai.port(), ai.news(), ai.process(), ai.voice(), ai.microphone(),
+                ai.port(), ai.news(), ai.market(), ai.process(), ai.voice(), ai.microphone(),
                 source.description(), persistence.alerts(), persistence.closeable());
     }
 
@@ -140,6 +144,7 @@ public record DesktopServices(
      * 거치므로 예측·이상감지가 멀쩡해도 혼자 실패한다.
      */
     private record AiService(AiInsightPort port, org.ossproject.ai.NewsPort news,
+                             org.ossproject.ai.MarketOverviewPort market,
                              AiServiceProcess process, VoiceInputPort voice,
                              org.ossproject.voice.AudioCapturePort microphone) {
     }
@@ -161,6 +166,10 @@ public record DesktopServices(
                 baseUri, java.time.Clock.systemDefaultZone());
         org.ossproject.ai.NewsPort news =
                 new org.ossproject.ai.http.HttpNewsAdapter(baseUri);
+        // 지수와 환율도 같은 서버를 쓴다. 공개 시세 서버를 거치므로 예측이나 뉴스가
+        // 멀쩡해도 혼자 실패할 수 있어 창구를 따로 둔다.
+        org.ossproject.ai.MarketOverviewPort marketOverview =
+                new org.ossproject.ai.http.HttpMarketOverviewAdapter(baseUri);
         // 음성도 같은 서버를 쓴다. 마이크는 이 컴퓨터 것이다. 둘 중 하나만 없어도
         // 어댑터는 그대로 만들어 두고, 왜 못 쓰는지는 화면이 물어서 읽어 준다.
         MicrophoneCapture microphone = new MicrophoneCapture();
@@ -169,16 +178,16 @@ public record DesktopServices(
         Optional<Path> directory = AiServiceProcess.locateServiceDirectory();
         if (directory.isEmpty()) {
             LOGGER.log(System.Logger.Level.INFO, "ai-service 를 찾지 못했습니다. AI 기능은 꺼집니다.");
-            return new AiService(adapter, news, null, voice, microphone);
+            return new AiService(adapter, news, marketOverview, null, voice, microphone);
         }
         AiServiceProcess process = new AiServiceProcess(directory.get(), port,
                 stateDirectory.resolve("ai-service.log"));
         if (!process.start()) {
             LOGGER.log(System.Logger.Level.INFO,
                     "AI 서버를 띄우지 못했습니다. ai-service 에서 pip install -r requirements.txt 를 실행해주세요.");
-            return new AiService(adapter, news, null, voice, microphone);
+            return new AiService(adapter, news, marketOverview, null, voice, microphone);
         }
-        return new AiService(adapter, news, process, voice, microphone);
+        return new AiService(adapter, news, marketOverview, process, voice, microphone);
     }
 
     /** 포트를 바꿔야 하는 환경을 위해 열어 둔다. */
@@ -323,7 +332,23 @@ public record DesktopServices(
 
     private static SecretStore createSecretStore(Path directory) {
         try {
-            return SecretStoreFactory.create(directory);
+            String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+            if (os.startsWith("windows")) {
+                return SecretStoreFactory.create(directory);
+            }
+
+            String configured = System.getenv("OPENSTOCK_SECRET_PASSPHRASE");
+            if (configured == null || configured.length() < 12) {
+                throw new SecretStoreException(
+                        "macOS·Linux에서는 OPENSTOCK_SECRET_PASSPHRASE에 "
+                                + "12자 이상의 암호문구를 설정해야 합니다.");
+            }
+            char[] passphrase = configured.toCharArray();
+            try {
+                return new FileSecretStore(directory, new PassphraseSecretCodec(passphrase));
+            } finally {
+                java.util.Arrays.fill(passphrase, '\0');
+            }
         } catch (SecretStoreException unavailable) {
             return new UnavailableSecretStore(unavailable.getMessage());
         }
