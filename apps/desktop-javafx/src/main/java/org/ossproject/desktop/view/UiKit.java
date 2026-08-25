@@ -7,6 +7,8 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.*;
+import javafx.scene.input.MouseEvent;
+import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.*;
 
 import java.util.List;
@@ -32,7 +34,103 @@ public final class UiKit {
         scroll.setFitToWidth(true);
         scroll.setAccessibleText(accessibleName);
         scroll.getStyleClass().add("workspace-scroll");
+        useBrowserLikeScrolling(scroll);
         return scroll;
+    }
+
+    /**
+     * 마우스 휠을 브라우저에 가까운 줄 이동량으로 맞춘다.
+     *
+     * <p>JavaFX 기본 ScrollPane은 Windows의 휠 한 칸이 지나치게 짧다. 줄 단위 휠은
+     * 약 90px씩 옮기고, 픽셀 단위 장치는 원래 이동량을 적당히 가속한다.
+     */
+    public static void useBrowserLikeScrolling(ScrollPane scroll) {
+        // JavaFX 기본 pannable은 ScrollPane이 중첩된 주문 화면에서 한 방향의 드래그를
+        // 바깥 ScrollPane이 먼저 가져가는 경우가 있다. 직접 시작 위치를 기억해 양방향을
+        // 같은 계산으로 처리한다.
+        scroll.setPannable(false);
+        double[] dragStartY = new double[1];
+        double[] dragStartValue = new double[1];
+        boolean[] draggingPage = new boolean[1];
+        scroll.addEventFilter(MouseEvent.MOUSE_PRESSED, event -> {
+            if (!event.isPrimaryButtonDown() || isInteractiveDragTarget(event.getTarget(), scroll)) {
+                draggingPage[0] = false;
+                return;
+            }
+            double travel = scroll.getContent().getLayoutBounds().getHeight()
+                    - scroll.getViewportBounds().getHeight();
+            if (travel <= 0) {
+                draggingPage[0] = false;
+                return;
+            }
+            dragStartY[0] = event.getSceneY();
+            dragStartValue[0] = scroll.getVvalue();
+            draggingPage[0] = true;
+        });
+        scroll.addEventFilter(MouseEvent.MOUSE_DRAGGED, event -> {
+            if (!draggingPage[0] || !event.isPrimaryButtonDown()) return;
+            double travel = scroll.getContent().getLayoutBounds().getHeight()
+                    - scroll.getViewportBounds().getHeight();
+            if (travel <= 0) return;
+            double range = scroll.getVmax() - scroll.getVmin();
+            // 터치식으로 콘텐츠를 붙잡는 반대 방향이 아니라 스크롤바와 같은 방향이다.
+            // 위로 끌면 위로, 아래로 끌면 아래로 이동해야 마우스 사용자가 예측할 수 있다.
+            double draggedPixels = event.getSceneY() - dragStartY[0];
+            double next = dragStartValue[0] + draggedPixels / travel * range;
+            scroll.setVvalue(Math.max(scroll.getVmin(), Math.min(scroll.getVmax(), next)));
+            event.consume();
+        });
+        scroll.addEventFilter(MouseEvent.MOUSE_RELEASED, event -> draggingPage[0] = false);
+        // 가장 안쪽 ScrollPane은 필터 단계에서 즉시 움직인다. 바깥 ScrollPane은 안쪽을
+        // 먼저 지나가게 하고, 안쪽이 끝에 닿아 이벤트가 남았을 때 버블 단계에서 이어받는다.
+        scroll.addEventFilter(ScrollEvent.SCROLL, event -> {
+            if (!hasNestedScrollableBetween(event.getTarget(), scroll)) {
+                applyWheelScroll(scroll, event);
+            }
+        });
+        scroll.addEventHandler(ScrollEvent.SCROLL, event -> {
+            if (!event.isConsumed()) applyWheelScroll(scroll, event);
+        });
+    }
+
+    private static void applyWheelScroll(ScrollPane scroll, ScrollEvent event) {
+        if (event.isDirect() || event.isInertia() || event.isControlDown() || event.isMetaDown()) return;
+        double travel = scroll.getContent().getLayoutBounds().getHeight()
+                - scroll.getViewportBounds().getHeight();
+        if (travel <= 0 || (event.getTextDeltaY() == 0 && event.getDeltaY() == 0)) return;
+        double range = scroll.getVmax() - scroll.getVmin();
+        double pixels = event.getTextDeltaYUnits() == ScrollEvent.VerticalTextScrollUnits.LINES
+                ? event.getTextDeltaY() * 90.0
+                : event.getDeltaY() * 1.8;
+        double next = scroll.getVvalue() - pixels / travel * range;
+        double clamped = Math.max(scroll.getVmin(), Math.min(scroll.getVmax(), next));
+        if (Math.abs(clamped - scroll.getVvalue()) > 1e-8) {
+            scroll.setVvalue(clamped);
+            event.consume();
+        }
+    }
+
+    private static boolean hasNestedScrollableBetween(Object target, ScrollPane owner) {
+        if (!(target instanceof Node node)) return false;
+        for (Node current = node; current != null && current != owner; current = current.getParent()) {
+            if (current instanceof ScrollPane
+                    || current instanceof TableView<?>
+                    || current instanceof TreeTableView<?>
+                    || current instanceof ListView<?>
+                    || current instanceof TreeView<?>
+                    || current instanceof TextArea) return true;
+        }
+        return false;
+    }
+
+    /** Keeps page dragging away from controls whose own click/drag behavior must win. */
+    private static boolean isInteractiveDragTarget(Object target, ScrollPane owner) {
+        if (!(target instanceof Node node)) return true;
+        for (Node current = node; current != null && current != owner; current = current.getParent()) {
+            if (current instanceof Control && !(current instanceof Label)) return true;
+            if (current.getStyleClass().contains("split-pane-divider")) return true;
+        }
+        return false;
     }
 
     public static FlowPane wrappingRow(double gap, Node... nodes) {
@@ -81,6 +179,42 @@ public final class UiKit {
     public static Button primaryButton(String text, Runnable action) {
         Button button = new Button(text); button.getStyleClass().add("primary-button");
         button.setOnAction(event -> action.run()); return button;
+    }
+
+    /** 모든 별도 창을 앱의 금융 UI 테마와 같은 카드형 대화상자로 맞춘다. */
+    public static void styleDialog(Dialog<?> dialog) {
+        DialogPane pane = dialog.getDialogPane();
+        String stylesheet = UiKit.class.getResource("/styles/application.css").toExternalForm();
+        if (!pane.getStylesheets().contains(stylesheet)) pane.getStylesheets().add(stylesheet);
+        pane.getStyleClass().addAll("app-dialog", "figma-neutral-theme");
+        pane.setMinWidth(440);
+        pane.setPrefWidth(520);
+
+        if (dialog instanceof Alert alert) {
+            alert.setGraphic(null);
+            pane.getStyleClass().add("dialog-" + alert.getAlertType().name().toLowerCase());
+        } else if (!(dialog instanceof TextInputDialog) && pane.getHeader() == null
+                && dialog.getTitle() != null && !dialog.getTitle().isBlank()) {
+            Label title = new Label(dialog.getTitle());
+            title.getStyleClass().add("app-dialog-title");
+            pane.setHeader(title);
+        }
+
+        dialog.setOnShowing(event -> {
+            String title = dialog.getTitle() == null ? "" : dialog.getTitle();
+            String header = dialog instanceof Alert alert && alert.getHeaderText() != null
+                    ? alert.getHeaderText() : "";
+            boolean destructive = (title + ' ' + header).matches(".*(삭제|취소|매도).*" );
+            for (ButtonType type : pane.getButtonTypes()) {
+                Node node = pane.lookupButton(type);
+                if (node == null) continue;
+                if (type.getButtonData().isDefaultButton()) {
+                    node.getStyleClass().add(destructive ? "danger-button" : "primary-button");
+                } else if (type.getButtonData().isCancelButton()) {
+                    node.getStyleClass().add("secondary-button");
+                }
+            }
+        });
     }
 
     public static Label styledLabel(String text, String styleClass) {
@@ -221,6 +355,15 @@ public final class UiKit {
                 order.status().displayName())).toList();
         TableView<ObservableList<String>> table = textTable(open ? "미체결 주문" : "체결·종료 주문", rows,
                 "주문번호", "시간", "종목", "구분", "주문가", "수량", "체결", "잔여", "상태");
+        // 큰 글자에서 9개 열을 화면 폭에 강제로 압축하면 값이 잘린다. 각 열에 읽을 수 있는
+        // 최소 폭을 주고 표 자체의 가로 스크롤로 이동하게 한다.
+        table.setColumnResizePolicy(TableView.UNCONSTRAINED_RESIZE_POLICY);
+        double[] widths = {150, 125, 150, 90, 125, 85, 85, 85, 125};
+        for (int index = 0; index < table.getColumns().size(); index++) {
+            TableColumn<ObservableList<String>, ?> column = table.getColumns().get(index);
+            column.setMinWidth(widths[index]);
+            column.setPrefWidth(widths[index]);
+        }
         table.setPlaceholder(new Label(open
                 ? "미체결 주문이 없습니다." : "체결되었거나 종료된 주문이 없습니다."));
         return table;

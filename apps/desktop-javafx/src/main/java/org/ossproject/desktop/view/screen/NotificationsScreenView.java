@@ -13,6 +13,8 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListView;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -80,6 +82,7 @@ public final class NotificationsScreenView {
                     "저장된 알림 " + entries.size() + "건을 모두 지우시겠습니까?",
                     ButtonType.OK, ButtonType.CANCEL);
             confirmation.setHeaderText("알림 기록 전체 지우기");
+            styleDialog(confirmation);
             confirmation.showAndWait().filter(ButtonType.OK::equals).ifPresent(result -> {
                 entries.clear();
                 onChanged.run();
@@ -119,10 +122,40 @@ public final class NotificationsScreenView {
             status.accept("선택한 알림을 삭제했습니다.");
             onChanged.run();
         });
+        notifications.setAccessibleHelp(
+                "위아래 방향키로 알림 이동, Enter 또는 Space로 듣기, Control+Enter로 읽음 처리, Delete로 삭제");
+        notifications.setOnKeyPressed(event -> {
+            if (notifications.getSelectionModel().getSelectedItem() == null
+                    && !notifications.getItems().isEmpty()) {
+                notifications.getSelectionModel().selectFirst();
+            }
+            if ((event.getCode() == KeyCode.ENTER || event.getCode() == KeyCode.SPACE)
+                    && !event.isControlDown()) {
+                listen.fire();
+                event.consume();
+            } else if (event.isControlDown() && event.getCode() == KeyCode.ENTER) {
+                markRead.fire();
+                event.consume();
+            } else if (event.getCode() == KeyCode.DELETE) {
+                delete.fire();
+                event.consume();
+            }
+        });
         VBox history = new VBox(10, notifications, wrappingRow(8, listen, markRead, delete));
         history.getStyleClass().add("settings-card");
         history.setPadding(new Insets(12));
-        return scrollPage("알림", new VBox(12, header, history));
+        ScrollPane page = scrollPage("알림", new VBox(12, header, history));
+        page.setAccessibleHelp("Control+F 필터 선택, Control+Shift+R 모두 읽음 처리");
+        page.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
+            if (event.isControlDown() && event.getCode() == KeyCode.F) {
+                filter.requestFocus();
+                event.consume();
+            } else if (event.isControlDown() && event.isShiftDown() && event.getCode() == KeyCode.R) {
+                allRead.fire();
+                event.consume();
+            }
+        });
+        return page;
     }
 
 }

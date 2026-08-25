@@ -9,8 +9,10 @@ import javafx.scene.control.Control;
 import javafx.scene.control.Label;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.TextField;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.GridPane;
-import javafx.scene.layout.HBox;
+import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.util.Duration;
@@ -26,6 +28,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import static org.ossproject.desktop.view.UiKit.*;
 
@@ -53,19 +56,49 @@ public final class OrderFormView {
     private final Consumer<String> onStatus;
     /** 초안이 바뀔 때마다 알린다. 주문 화면을 떠났다 돌아와도 값이 남아야 한다. */
     private final Consumer<OrderDraft> onDraftChanged;
+    private final PriceShortcuts priceShortcuts;
     /** 같은 주문을 연달아 내지 못하게 막을지. 설정에서 온다. */
     private final boolean preventDuplicates;
+    private TextField priceField;
+    private ComboBox<OrderType> orderTypeField;
+
+    /** 호가가 아직 도착하지 않았을 수 있으므로 모든 값은 Optional 로 받는다. */
+    public record PriceShortcuts(Supplier<java.util.Optional<BigDecimal>> currentPrice,
+                                 Supplier<java.util.Optional<BigDecimal>> bestAsk,
+                                 Supplier<java.util.Optional<BigDecimal>> bestBid,
+                                 Supplier<java.util.Optional<BigDecimal>> tickSize) {
+        public PriceShortcuts {
+            Objects.requireNonNull(currentPrice, "currentPrice");
+            Objects.requireNonNull(bestAsk, "bestAsk");
+            Objects.requireNonNull(bestBid, "bestBid");
+            Objects.requireNonNull(tickSize, "tickSize");
+        }
+
+        public static PriceShortcuts unavailable() {
+            Supplier<java.util.Optional<BigDecimal>> empty = java.util.Optional::empty;
+            return new PriceShortcuts(empty, empty, empty, empty);
+        }
+    }
 
     public OrderFormView(OrderDraftViewModel viewModel, boolean preventDuplicates,
                          Function<BigDecimal, String> formatMoney,
                          Consumer<OrderDraft> onPreview, Consumer<String> onStatus,
                          Consumer<OrderDraft> onDraftChanged) {
+        this(viewModel, preventDuplicates, formatMoney, onPreview, onStatus, onDraftChanged,
+                PriceShortcuts.unavailable());
+    }
+
+    public OrderFormView(OrderDraftViewModel viewModel, boolean preventDuplicates,
+                         Function<BigDecimal, String> formatMoney,
+                         Consumer<OrderDraft> onPreview, Consumer<String> onStatus,
+                         Consumer<OrderDraft> onDraftChanged, PriceShortcuts priceShortcuts) {
         this.viewModel = Objects.requireNonNull(viewModel, "viewModel");
         this.preventDuplicates = preventDuplicates;
         this.formatMoney = Objects.requireNonNull(formatMoney, "formatMoney");
         this.onPreview = Objects.requireNonNull(onPreview, "onPreview");
         this.onStatus = Objects.requireNonNull(onStatus, "onStatus");
         this.onDraftChanged = Objects.requireNonNull(onDraftChanged, "onDraftChanged");
+        this.priceShortcuts = Objects.requireNonNull(priceShortcuts, "priceShortcuts");
     }
 
     public VBox create() {
@@ -74,16 +107,24 @@ public final class OrderFormView {
         TextField symbol = readOnlyField("종목 코드", draft.symbol());
         TextField name = readOnlyField("종목명", draft.name());
         ComboBox<OrderSide> side = sideBox(draft.side());
+        side.setId("order-side-field");
+        side.setAccessibleText("매수 또는 매도");
         ComboBox<OrderType> orderType = typeBox(draft.type());
+        orderType.setId("order-type-field");
+        orderType.setAccessibleText("주문 유형");
         Spinner<Integer> quantity = new Spinner<>(1, 1_000_000, draft.quantity());
+        quantity.setId("order-quantity-field");
         quantity.setEditable(true);
         quantity.setAccessibleText("주문 수량");
         // 스피너에 이름을 달아도 초점은 안쪽 편집기가 받는다. 편집기에 이름이 없으면
         // 스크린리더는 "편집" 이라고만 읽는다.
         quantity.getEditor().setAccessibleText("주문 수량");
         TextField price = new TextField(draft.price());
+        price.setId("order-price-field");
         price.setAccessibleText("주문 가격");
         price.setDisable(draft.type() == OrderType.MARKET);
+        priceField = price;
+        orderTypeField = orderType;
 
         GridPane form = new GridPane();
         form.setHgap(8);
@@ -97,11 +138,26 @@ public final class OrderFormView {
 
         Label estimated = new Label();
         Label orderable = new Label("모의계좌 조회 중");
+        Label draftSummary = new Label();
+        draftSummary.setWrapText(true);
+        draftSummary.getStyleClass().add("order-draft-summary");
+        Label shortcutGuide = new Label("단축키  Alt+B 매수 · Alt+Shift+B 매도 · Alt+P 가격 · "
+                + "Alt+N 수량 · Ctrl+Enter 주문 검토");
+        shortcutGuide.setWrapText(true);
+        shortcutGuide.getStyleClass().add("muted-label");
+        shortcutGuide.setAccessibleText("주문 단축키 안내. Alt B 매수, Alt Shift B 매도, Alt P 가격, "
+                + "Alt N 수량, Control Enter 주문 검토.");
         Runnable refresh = () -> {
             viewModel.update(side.getValue(), orderType.getValue(), quantity.getValue(),
                     price.getText());
             estimated.setText(viewModel.estimatedAmount(price.getText(), quantity.getValue())
                     .map(formatMoney).orElse("가격을 확인하세요"));
+            String priceText = orderType.getValue() == OrderType.MARKET ? "시장가"
+                    : parsePrice(price.getText()).map(formatMoney).orElse("가격 확인 필요");
+            draftSummary.setText(name.getText() + " " + side.getValue().displayName() + ", "
+                    + orderType.getValue().displayName() + " " + priceText + ", "
+                    + quantity.getValue() + "주.");
+            draftSummary.setAccessibleText("현재 주문 초안. " + draftSummary.getText());
             onDraftChanged.accept(viewModel.draft());
         };
 
@@ -115,9 +171,11 @@ public final class OrderFormView {
         quantity.valueProperty().addListener((observable, old, value) -> refresh.run());
         refresh.run();
 
+        FlowPane priceRow = priceShortcutRow(price, orderType);
+        FlowPane quantityRow = quantityShortcutRow(quantity);
         List<Button> ratioButtons = ratioButtons(side, orderType, price, quantity);
-        HBox ratioRow = new HBox(10, new Label("주문 비율"), new HBox(8, ratioButtons.toArray(Button[]::new)));
-        ratioRow.setAlignment(Pos.CENTER_LEFT);
+        FlowPane ratioRow = wrappingRow(8, ratioButtons.toArray(Button[]::new));
+        ratioRow.getChildren().add(0, new Label("주문 비율"));
 
         VBox estimates = new VBox(4,
                 informationRow("주문 예상금액", estimated),
@@ -125,14 +183,137 @@ public final class OrderFormView {
         estimates.getStyleClass().add("estimate-box");
         estimates.setPadding(new Insets(8));
 
-        VBox box = new VBox(8, sectionHeading("모의주문 준비"), form, ratioRow, estimates,
-                previewButton());
+        Button preview = previewButton();
+        VBox box = new VBox(8, sectionHeading("모의주문 준비"), form, priceRow, quantityRow,
+                ratioRow, draftSummary, shortcutGuide, estimates, preview);
         box.getStyleClass().addAll("panel-card", "order-form-compact");
         box.setPadding(new Insets(12));
         box.setMaxHeight(Double.MAX_VALUE);
         this.orderableLabel = orderable;
         this.ratios = ratioButtons;
+        installKeyboardShortcuts(box, side, orderType, price, quantity, preview);
+        // 첫 진입은 읽기 전용 종목 코드가 아니라 실제로 결정해야 하는 매수/매도에서 시작한다.
+        box.sceneProperty().addListener((observable, oldScene, scene) -> {
+            if (scene != null) javafx.application.Platform.runLater(side::requestFocus);
+        });
         return box;
+    }
+
+    private FlowPane priceShortcutRow(TextField price, ComboBox<OrderType> orderType) {
+        Button current = priceButton("현재가", "order-price-current", priceShortcuts.currentPrice(), price);
+        Button ask = priceButton("매도 1호가", "order-price-best-ask", priceShortcuts.bestAsk(), price);
+        Button bid = priceButton("매수 1호가", "order-price-best-bid", priceShortcuts.bestBid(), price);
+        Button down = new Button("-1호가");
+        Button up = new Button("+1호가");
+        down.setId("order-price-down");
+        up.setId("order-price-up");
+        down.setOnAction(event -> movePrice(price, -1));
+        up.setOnAction(event -> movePrice(price, 1));
+        List<Button> buttons = List.of(current, ask, bid, down, up);
+        Runnable enabled = () -> buttons.forEach(button ->
+                button.setDisable(orderType.getValue() == OrderType.MARKET));
+        orderType.valueProperty().addListener((observable, old, value) -> enabled.run());
+        enabled.run();
+        FlowPane row = wrappingRow(8, buttons.toArray(Button[]::new));
+        row.getChildren().add(0, new Label("가격 빠른 선택"));
+        return row;
+    }
+
+    private Button priceButton(String text, String id, Supplier<java.util.Optional<BigDecimal>> supplier,
+                               TextField price) {
+        Button button = new Button(text);
+        button.setId(id);
+        button.setAccessibleHelp(text + "를 지정가 입력칸에 넣습니다.");
+        button.setOnAction(event -> supplier.get().ifPresentOrElse(value -> {
+            selectLimitPrice(value);
+            onStatus.accept(text + " " + formatMoney.apply(value) + "을 지정가로 넣었습니다.");
+        }, () -> onStatus.accept("호가를 아직 받지 못했습니다. 잠시 후 다시 시도해주세요.")));
+        return button;
+    }
+
+    private FlowPane quantityShortcutRow(Spinner<Integer> quantity) {
+        Button minus = quantityButton("-1주", "order-quantity-down", quantity, -1, null);
+        Button plus = quantityButton("+1주", "order-quantity-up", quantity, 1, null);
+        Button one = quantityButton("1주", "order-quantity-1", quantity, 0, 1);
+        Button five = quantityButton("5주", "order-quantity-5", quantity, 0, 5);
+        Button ten = quantityButton("10주", "order-quantity-10", quantity, 0, 10);
+        FlowPane row = wrappingRow(8, minus, plus, one, five, ten);
+        row.getChildren().add(0, new Label("수량 빠른 선택"));
+        return row;
+    }
+
+    private Button quantityButton(String text, String id, Spinner<Integer> quantity,
+                                  int delta, Integer fixed) {
+        Button button = new Button(text);
+        button.setId(id);
+        button.setOnAction(event -> {
+            int next = fixed == null ? quantity.getValue() + delta : fixed;
+            quantity.getValueFactory().setValue(Math.max(1, Math.min(1_000_000, next)));
+            onStatus.accept("주문 수량을 " + quantity.getValue() + "주로 맞췄습니다.");
+            quantity.requestFocus();
+        });
+        return button;
+    }
+
+    private void movePrice(TextField price, int direction) {
+        java.util.Optional<BigDecimal> current = parsePrice(price.getText());
+        java.util.Optional<BigDecimal> tick = priceShortcuts.tickSize().get();
+        if (current.isEmpty() || tick.isEmpty() || tick.get().signum() <= 0) {
+            onStatus.accept("호가 간격을 아직 알 수 없습니다. 호가표에서 가격을 선택해주세요.");
+            return;
+        }
+        BigDecimal next = current.get().add(tick.get().multiply(BigDecimal.valueOf(direction)));
+        if (next.signum() > 0) selectLimitPrice(next);
+    }
+
+    private void installKeyboardShortcuts(VBox root, ComboBox<OrderSide> side,
+                                          ComboBox<OrderType> orderType, TextField price,
+                                          Spinner<Integer> quantity, Button preview) {
+        root.setAccessibleHelp("주문 단축키. Alt+B 매수, Alt+Shift+B 매도, Alt+P 가격, Alt+N 수량, "
+                + "가격 칸 위아래 화살표 한 호가 조절, Control+Enter 주문 검토.");
+        root.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
+            if (event.isAltDown() && !event.isShiftDown() && event.getCode() == KeyCode.B) {
+                side.setValue(OrderSide.BUY); side.requestFocus(); event.consume();
+            } else if (event.isAltDown() && event.isShiftDown() && event.getCode() == KeyCode.B) {
+                side.setValue(OrderSide.SELL); side.requestFocus(); event.consume();
+            } else if (event.isAltDown() && event.getCode() == KeyCode.P) {
+                if (orderType.getValue() == OrderType.LIMIT) { price.requestFocus(); price.selectAll(); }
+                else onStatus.accept("시장가 주문에는 가격을 입력하지 않습니다.");
+                event.consume();
+            } else if (event.isAltDown() && event.getCode() == KeyCode.N) {
+                quantity.requestFocus(); quantity.getEditor().selectAll(); event.consume();
+            } else if (event.isControlDown() && event.getCode() == KeyCode.ENTER) {
+                preview.fire(); event.consume();
+            } else if (event.getTarget() == price && event.getCode() == KeyCode.UP) {
+                movePrice(price, 1); event.consume();
+            } else if (event.getTarget() == price && event.getCode() == KeyCode.DOWN) {
+                movePrice(price, -1); event.consume();
+            }
+        });
+    }
+
+    private static java.util.Optional<BigDecimal> parsePrice(String text) {
+        try {
+            BigDecimal value = new BigDecimal(text == null ? "" : text.replace(",", "").trim());
+            return value.signum() > 0 ? java.util.Optional.of(value) : java.util.Optional.empty();
+        } catch (NumberFormatException invalid) {
+            return java.util.Optional.empty();
+        }
+    }
+
+    /**
+     * 호가표에서 고른 가격을 지정가 입력칸에 반영한다.
+     *
+     * @return 지정가라 반영했으면 {@code true}, 시장가이거나 화면 준비 전이면 {@code false}
+     */
+    public boolean selectLimitPrice(BigDecimal selectedPrice) {
+        if (selectedPrice == null || selectedPrice.signum() <= 0 || priceField == null
+                || orderTypeField == null || orderTypeField.getValue() != OrderType.LIMIT) {
+            return false;
+        }
+        priceField.setText(selectedPrice.stripTrailingZeros().toPlainString());
+        priceField.requestFocus();
+        return true;
     }
 
     private Label orderableLabel;
@@ -208,14 +389,14 @@ public final class OrderFormView {
     /**
      * 고칠 수 없는 칸.
      *
-     * <p>읽기 전용이어도 초점은 받는다. 이름이 없으면 스크린리더는 "편집" 이라고만 읽고,
-     * 사용자는 무엇을 주문하려는지 모른 채 지나간다.
+     * <p>값은 접근성 이름으로 읽히되 탭 순서에서는 뺀다. 처음 초점은 매수/매도에 간다.
      */
     private static TextField readOnlyField(String label, String value) {
         TextField field = new TextField(value);
         field.setEditable(false);
         field.setAccessibleText(label + " " + value);
         field.setAccessibleHelp("종목을 바꾸려면 종목검색에서 다른 종목을 선택해주세요.");
+        field.setFocusTraversable(false);
         return field;
     }
 

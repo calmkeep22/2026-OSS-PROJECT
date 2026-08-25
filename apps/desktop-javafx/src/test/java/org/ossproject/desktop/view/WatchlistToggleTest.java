@@ -40,6 +40,20 @@ class WatchlistToggleTest {
                 () -> { }, () -> { }).button();
     }
 
+    /**
+     * 별만 보고는 뜻을 알 수 없다. 모양과 함께, 머무를 때 뜨는 이름까지 확인한다.
+     * 둘 중 하나만 맞으면 눈으로 보는 사람이나 스크린리더 한쪽이 상태를 놓친다.
+     */
+    private static void assertNotListed(Button button, String message) {
+        assertEquals("☆", button.getText(), message + " — 빈 별이어야 합니다");
+        assertEquals("관심종목 추가", button.getTooltip().getText(), message);
+    }
+
+    private static void assertListed(Button button, String message) {
+        assertEquals("★", button.getText(), message + " — 채운 별이어야 합니다");
+        assertEquals("관심종목 취소", button.getTooltip().getText(), message);
+    }
+
     @Test
     @DisplayName("담기 전에는 추가, 담고 나면 취소로 바뀐다")
     void flipsAfterAdding() {
@@ -47,9 +61,9 @@ class WatchlistToggleTest {
             ObservableList<WatchlistItem> watchlist = emptyList();
             Button button = toggle(watchlist);
 
-            assertEquals("관심종목 추가", button.getText());
+            assertNotListed(button, "담기지 않은 상태");
             button.fire();
-            assertEquals("관심종목 취소", button.getText());
+            assertListed(button, "담긴 상태");
         });
     }
 
@@ -61,10 +75,10 @@ class WatchlistToggleTest {
                     FXCollections.observableArrayList(item("005930", "KRX"));
             Button button = toggle(watchlist);
 
-            assertEquals("관심종목 취소", button.getText());
+            assertListed(button, "담긴 상태");
             button.fire();
             assertTrue(watchlist.isEmpty());
-            assertEquals("관심종목 추가", button.getText());
+            assertNotListed(button, "담기지 않은 상태");
         });
     }
 
@@ -83,13 +97,13 @@ class WatchlistToggleTest {
             Button button = toggle(watchlist);
 
             button.fire();
-            assertEquals("관심종목 취소", button.getText());
+            assertListed(button, "담긴 상태");
             button.fire();
-            assertEquals("관심종목 추가", button.getText());
+            assertNotListed(button, "담기지 않은 상태");
             button.fire();
 
             assertEquals(1, watchlist.size(), "다시 담기지 않았습니다.");
-            assertEquals("관심종목 취소", button.getText());
+            assertListed(button, "담긴 상태");
         });
     }
 
@@ -107,12 +121,11 @@ class WatchlistToggleTest {
             Button button = inertToggle(watchlist);
 
             button.fire();
-            assertEquals("관심종목 추가", button.getText(),
-                    "아직 담기지 않았으므로 그대로여야 합니다.");
+            assertNotListed(button, "아직 담기지 않았으므로 그대로여야 합니다.");
 
             // 조회가 끝나 뒤늦게 목록에 들어온다.
             watchlist.add(item("005930", "KRX"));
-            assertEquals("관심종목 취소", button.getText());
+            assertListed(button, "담긴 상태");
         });
     }
 
@@ -143,9 +156,9 @@ class WatchlistToggleTest {
                     FXCollections.observableArrayList(item("005930", "KRX"));
             Button button = inertToggle(watchlist);
 
-            assertEquals("관심종목 취소", button.getText());
+            assertListed(button, "담긴 상태");
             watchlist.clear();
-            assertEquals("관심종목 추가", button.getText());
+            assertNotListed(button, "담기지 않은 상태");
         });
     }
 
@@ -158,7 +171,7 @@ class WatchlistToggleTest {
                     FXCollections.observableArrayList(item("005930", "NXT"));
             Button button = inertToggle(watchlist);
 
-            assertEquals("관심종목 추가", button.getText());
+            assertNotListed(button, "담기지 않은 상태");
         });
     }
 }

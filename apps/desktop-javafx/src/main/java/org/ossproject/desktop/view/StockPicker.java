@@ -5,7 +5,6 @@ import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
 import javafx.geometry.Pos;
 import javafx.scene.control.ComboBox;
-import javafx.scene.control.Label;
 import javafx.scene.layout.HBox;
 import javafx.util.StringConverter;
 import org.ossproject.desktop.state.WatchlistItem;
@@ -47,6 +46,10 @@ public final class StockPicker {
     private StockSelection current;
     /** 목록을 새로 채우는 동안 선택 이벤트가 나가지 않게 막는다. */
     private boolean rebuilding;
+    /** 펼치기 직전의 값. Esc 로 닫으면 여기로 되돌린다. */
+    private Entry valueBeforeOpen;
+    /** Esc 로 닫는 중인지. 그때는 확정하지 않는다. */
+    private boolean cancelled;
 
     /** 목록의 한 줄. 어디서 온 종목인지 함께 든다. */
     private record Entry(String source, StockSelection stock) {
@@ -74,24 +77,63 @@ public final class StockPicker {
         });
         box.getStyleClass().add("stock-picker");
         box.setAccessibleText("종목 선택");
-        box.valueProperty().addListener((observable, old, selected) -> {
-            if (rebuilding || selected == null
-                    || selected.stock().securityId().equals(this.current.securityId())) {
+        // 목록을 펼친 동안에는 확정하지 않는다.
+        //
+        // JavaFX 고르개는 펼친 채로 방향키를 누르면 그때마다 값이 바뀐다. 보통은 무해한
+        // 동작이지만 여기서는 한 번 바뀔 때마다 화면을 다시 세우고 시세를 새로 받는다.
+        // 다섯 개를 훑어보면 다섯 번 갈아엎는 셈이고, 소리로 이름을 확인하며 내려가는
+        // 사용자에게는 훑어보는 일 자체가 불가능하다.
+        //
+        // 펼친 동안은 옮겨만 다니고, 닫힐 때 확정한다. Enter 나 클릭으로 닫으면 그 값이
+        // 확정되고, Esc 로 닫으면 펼치기 전 값으로 되돌린다.
+        box.setOnShowing(event -> valueBeforeOpen = box.getValue());
+        box.addEventFilter(javafx.scene.input.KeyEvent.KEY_PRESSED, event -> {
+            if (event.getCode() == javafx.scene.input.KeyCode.ESCAPE && box.isShowing()) {
+                cancelled = true;
+            }
+        });
+        box.showingProperty().addListener((observed, was, showing) -> {
+            if (showing) {
+                cancelled = false;
                 return;
             }
-            this.current = selected.stock();
-            onSelect.accept(selected.stock());
+            if (cancelled) {
+                cancelled = false;
+                rebuilding = true;
+                box.setValue(valueBeforeOpen);
+                rebuilding = false;
+                return;
+            }
+            commit(box.getValue());
+        });
+        box.valueProperty().addListener((observable, old, selected) -> {
+            // 펼친 동안의 값 변화는 아직 고른 것이 아니다. 닫힐 때 한 번만 확정한다.
+            if (box.isShowing()) {
+                return;
+            }
+            commit(selected);
         });
 
-        Label label = new Label("종목");
-        label.setLabelFor(box);
-        root = new HBox(8, label, box);
+        // "종목" 이라는 글자를 옆에 두지 않는다. 고르개 안에 이미 "보는 중 · NAVER" 가
+        // 적혀 있어 무엇을 고르는 자리인지 보이고, 스크린리더에는 box 의 접근성 이름
+        // ("종목 선택, 현재 …")이 그대로 읽힌다. 글자를 빼도 잃는 것이 없다.
+        root = new HBox(8, box);
         root.setAlignment(Pos.CENTER_LEFT);
         root.getStyleClass().add("stock-picker-row");
 
         // 관심 목록이 바뀌면 따라간다. 방금 담은 종목이 목록에 없으면 다시 검색해야 한다.
         watchlist.addListener((ListChangeListener<WatchlistItem>) change -> rebuild());
         rebuild();
+    }
+
+    /** 고른 것을 실제로 적용한다. 같은 종목이면 아무 일도 하지 않는다. */
+    private void commit(Entry selected) {
+        if (rebuilding || selected == null
+                || selected.stock().securityId().equals(this.current.securityId())) {
+            return;
+        }
+        this.current = selected.stock();
+        onSelect.accept(selected.stock());
     }
 
     public javafx.scene.Node root() {

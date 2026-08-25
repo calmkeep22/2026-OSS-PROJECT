@@ -72,7 +72,10 @@ public final class AiInsightViewModel {
 
         inFlight = security;
         market.loadCandles(security, CandleInterval.DAY, BAR_COUNT)
-                .thenApply(bars -> ai.brief(security, bars, withSimilar))
+                // 캔들이 메모리 캐시에서 즉시 끝나면 thenApply 는 호출한 JavaFX 스레드에서
+                // 그대로 AI HTTP 요청을 실행한다. 메뉴 진입 렉의 원인이므로, 캐시 적중 여부와
+                // 상관없이 느린 분석은 반드시 백그라운드에서 수행한다.
+                .thenApplyAsync(bars -> ai.brief(security, bars, withSimilar))
                 .whenComplete((insight, failure) -> stateExecutor.execute(() -> {
                     // 사용자가 그새 다른 종목을 골랐으면 늦게 온 결과를 버린다.
                     if (!security.equals(inFlight)) {

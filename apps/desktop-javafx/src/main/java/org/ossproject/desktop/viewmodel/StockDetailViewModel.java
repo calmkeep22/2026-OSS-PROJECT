@@ -28,15 +28,22 @@ public final class StockDetailViewModel {
 
     private static final ZoneId MARKET_ZONE = ZoneId.of("Asia/Seoul");
 
-    /** 차트 기간 버튼. 각 버튼은 봉 주기와 조회 개수로만 정의된다. */
+    /**
+     * 차트 기간 버튼. 각 버튼은 봉 주기와 처음 받을 개수로 정의된다.
+     *
+     * <p>화면에 보이는 개수보다 넉넉히 받는다. 끌어서 과거를 보는 동안 매번 조회하면
+     * 호출 한도에 걸려 기다리게 되고, 화면을 볼 수 없는 사용자는 빈 구간이 데이터가 없는
+     * 것인지 아직 오지 않은 것인지 구분할 수 없다. 미리 받아 두면 대부분의 탐색이 조회
+     * 없이 끝난다. 더 과거로 가면 {@link #loadOlderHistory()} 가 이어 받는다.
+     */
     public enum ChartRange {
-        MINUTE_1("1분", CandleInterval.MINUTE_1, 60),
-        MINUTE_5("5분", CandleInterval.MINUTE_5, 78),
-        MINUTE_15("15분", CandleInterval.MINUTE_15, 64),
-        MINUTE_60("60분", CandleInterval.MINUTE_60, 48),
-        DAY("일", CandleInterval.DAY, 30),
-        WEEK("주", CandleInterval.WEEK, 26),
-        MONTH("월", CandleInterval.MONTH, 24);
+        MINUTE_1("1분", CandleInterval.MINUTE_1, 240),
+        MINUTE_5("5분", CandleInterval.MINUTE_5, 240),
+        MINUTE_15("15분", CandleInterval.MINUTE_15, 200),
+        MINUTE_60("60분", CandleInterval.MINUTE_60, 200),
+        DAY("일", CandleInterval.DAY, 250),
+        WEEK("주", CandleInterval.WEEK, 156),
+        MONTH("월", CandleInterval.MONTH, 120);
 
         private final String label;
         private final CandleInterval interval;
@@ -73,6 +80,19 @@ public final class StockDetailViewModel {
     private final Map<ChartRange, List<PricePoint>> historyCache = new EnumMap<>(ChartRange.class);
     private final Map<ChartRange, List<Candle>> candleCache = new EnumMap<>(ChartRange.class);
     private EventSubscription candleSubscription;
+    /**
+     * 한 구간에 쌓아 둘 최대 캔들 수.
+     *
+     * <p>끝없이 늘리면 메모리와 그리기 비용이 함께 커진다. 증권사가 더 준다 해도 여기서
+     * 멈춘다.
+     */
+    private static final int MAX_LOADED_CANDLES = 3_000;
+
+    /** 증권사가 가진 구간의 끝에 닿은 기간. 같은 요청을 되풀이하지 않는다. */
+    private final java.util.Set<ChartRange> exhaustedRanges =
+            java.util.EnumSet.noneOf(ChartRange.class);
+    /** 진행 중인 과거 조회. 끄는 동안 요청이 쌓이지 않게 한다. */
+    private CompletionStage<List<PricePoint>> olderInFlight;
     private SecurityId cachedSecurity;
     private StockDetail cachedDetail;
     private ChartRange selectedChartRange = ChartRange.DAY;
@@ -158,6 +178,13 @@ public final class StockDetailViewModel {
                 && historyCache.containsKey(selectedChartRange);
     }
 
+    /** Whether a specific candle interval is cached for the currently selected stock. */
+    public boolean hasCurrentChartData(ChartRange range) {
+        Objects.requireNonNull(range, "range");
+        return hasCurrentDetail() && candleCache.containsKey(range)
+                && historyCache.containsKey(range);
+    }
+
     public ChartRange selectedChartRange() {
         requireCurrentChartData();
         return selectedChartRange;
@@ -166,6 +193,83 @@ public final class StockDetailViewModel {
     public List<Candle> selectedCandles() {
         requireCurrentChartData();
         return candleCache.get(selectedChartRange);
+    }
+
+    /** Cached candles for a specific interval without changing the visible chart selection. */
+    public List<Candle> candles(ChartRange range) {
+        Objects.requireNonNull(range, "range");
+        if (!hasCurrentChartData(range)) {
+            throw new IllegalStateException("해당 구간의 차트 데이터를 먼저 조회해야 합니다.");
+        }
+        return candleCache.get(range);
+    }
+
+    /**
+     * 보고 있는 구간의 과거를 더 받아 앞에 잇는다.
+     *
+     * <p>끌어서 왼쪽 끝에 가까워질 때 호출한다. 이미 받아 둔 구간보다 더 과거를 요청해
+     * 앞쪽에 붙이므로, 사용자는 계속 이어지는 하나의 차트를 보게 된다.
+     *
+     * <p>같은 요청이 겹치지 않게 막는다. 끄는 동안 경계에 여러 번 닿으면 요청이 줄줄이
+     * 쌓여 호출 한도에 걸린다. 진행 중이면 새 요청을 만들지 않고 진행 중인 것을 돌려준다.
+     *
+     * <p>더 받을 것이 없으면 지금 가진 구간을 그대로 돌려준다. 호출한 쪽은 개수가 늘지
+     * 않은 것으로 끝을 알 수 있다.
+     */
+    public CompletionStage<List<PricePoint>> loadOlderHistory() {
+        ChartRange range = selectedChartRange;
+        List<Candle> loaded = candleCache.get(range);
+        if (loaded == null || loaded.isEmpty()) {
+            return CompletableFuture.completedFuture(List.of());
+        }
+        CompletionStage<List<PricePoint>> running = olderInFlight;
+        if (running != null) {
+            return running;
+        }
+        if (exhaustedRanges.contains(range)) {
+            return CompletableFuture.completedFuture(historyCache.getOrDefault(range, List.of()));
+        }
+
+        SecurityId requested = selection().securityId();
+        int have = loaded.size();
+        int want = Math.min(have + range.count(), MAX_LOADED_CANDLES);
+        if (want <= have) {
+            exhaustedRanges.add(range);
+            return CompletableFuture.completedFuture(historyCache.getOrDefault(range, List.of()));
+        }
+
+        CompletableFuture<List<PricePoint>> result = new CompletableFuture<>();
+        olderInFlight = result;
+        market.loadCandles(requested, range.interval(), want).whenComplete((candles, failure) ->
+                executeStateChange(result, () -> {
+                    olderInFlight = null;
+                    if (failure != null) {
+                        result.completeExceptionally(unwrap(failure));
+                        return;
+                    }
+                    if (!requested.equals(selection().securityId()) || range != selectedChartRange) {
+                        result.completeExceptionally(
+                                new IllegalStateException("선택이 변경되어 이전 조회 결과를 버렸습니다."));
+                        return;
+                    }
+                    // 더 달라고 했는데 늘지 않았으면 증권사가 가진 구간의 끝이다.
+                    if (candles.size() <= have) {
+                        exhaustedRanges.add(range);
+                        result.complete(historyCache.getOrDefault(range, List.of()));
+                        return;
+                    }
+                    List<PricePoint> points = toPricePoints(candles);
+                    candleCache.put(range, candles);
+                    historyCache.put(range, points);
+                    result.complete(points);
+                }));
+        return result;
+    }
+
+    /** 지금 보고 있는 구간에서 과거를 더 받을 수 있는지 여부. */
+    public boolean canLoadOlder() {
+        return hasCurrentChartData() && !exhaustedRanges.contains(selectedChartRange)
+                && candleCache.getOrDefault(selectedChartRange, List.of()).size() < MAX_LOADED_CANDLES;
     }
 
     public CompletionStage<List<PricePoint>> loadHistory(ChartRange range) {
@@ -186,6 +290,7 @@ public final class StockDetailViewModel {
                     if (!requested.equals(cachedSecurity)) {
                         historyCache.clear();
                         candleCache.clear();
+                        exhaustedRanges.clear();
                         cachedDetail = null;
                     }
                     List<PricePoint> points = toPricePoints(candles);
@@ -248,6 +353,7 @@ public final class StockDetailViewModel {
         if (!security.equals(cachedSecurity)) {
             historyCache.clear();
             candleCache.clear();
+            exhaustedRanges.clear();
             selectedChartRange = ChartRange.DAY;
         }
         cachedSecurity = security;

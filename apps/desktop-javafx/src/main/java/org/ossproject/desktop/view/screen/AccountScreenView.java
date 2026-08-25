@@ -6,6 +6,7 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TabPane;
@@ -102,7 +103,17 @@ public final class AccountScreenView {
                 "종목", "수량", "평균단가", "현재가", "평가금액", "손익", "수익률");
         holdings.setPrefHeight(300);
         holdings.setOnMouseClicked(event -> { if (event.getClickCount() == 2) openStock.accept(holdings); });
-        holdings.setOnKeyPressed(event -> { if (event.getCode() == KeyCode.ENTER) openStock.accept(holdings); });
+        holdings.setAccessibleHelp(
+                "위아래 방향키로 종목 이동, Enter로 상세 열기, Alt+B 매수, Alt+Shift+B 매도");
+        holdings.setOnKeyPressed(event -> {
+            if (event.getCode() == KeyCode.ENTER) {
+                openStock.accept(holdings);
+                event.consume();
+            } else if (event.isAltDown() && event.getCode() == KeyCode.B) {
+                tradeStock.accept(holdings, event.isShiftDown() ? OrderSide.SELL : OrderSide.BUY);
+                event.consume();
+            }
+        });
         Button holdingDetail = new Button("선택 종목 상세"); holdingDetail.setOnAction(event -> openStock.accept(holdings));
         Button holdingBuy = primaryButton("선택 종목 매수", () -> tradeStock.accept(holdings, OrderSide.BUY));
         Button holdingSell = new Button("선택 종목 매도"); holdingSell.setOnAction(event -> tradeStock.accept(holdings, OrderSide.SELL));
@@ -152,6 +163,19 @@ public final class AccountScreenView {
         });
         Button deleteJournal = new Button("선택 삭제");
         deleteJournal.setOnAction(event -> onDeleteJournal.accept(journal));
+        journal.setAccessibleHelp("위아래 방향키로 일지 이동, Enter로 수정, Delete로 삭제");
+        journal.setOnMouseClicked(event -> {
+            if (event.getClickCount() == 2) editJournal.fire();
+        });
+        journal.setOnKeyPressed(event -> {
+            if (event.getCode() == KeyCode.ENTER) {
+                editJournal.fire();
+                event.consume();
+            } else if (event.getCode() == KeyCode.DELETE) {
+                deleteJournal.fire();
+                event.consume();
+            }
+        });
         Button attach = new Button("차트 화면 첨부"); attach.setOnAction(event -> status.accept("현재 차트 화면을 매매일지 첨부 대상으로 선택했습니다."));
         VBox journalPanel = new VBox(10, journal, wrappingRow(8, addJournal, editJournal, deleteJournal, attach));
         journalPanel.setPadding(new Insets(10));
@@ -161,8 +185,21 @@ public final class AccountScreenView {
                 tab("체결", fills), tab("주문내역", history), tab("매매일지", journalPanel));
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
         tabs.setPrefHeight(390);
+        tabs.setAccessibleHelp("Control+Tab 다음 탭, Control+Shift+Tab 이전 탭");
         VBox body = new VBox(20, header, metrics, tabs);
-        return scrollPage("계좌 대시보드", body);
+        ScrollPane page = scrollPage("계좌 대시보드", body);
+        page.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
+            if (event.isControlDown() && event.getCode() == KeyCode.TAB) {
+                int count = tabs.getTabs().size();
+                int current = Math.max(0, tabs.getSelectionModel().getSelectedIndex());
+                int next = event.isShiftDown()
+                        ? (current - 1 + count) % count
+                        : (current + 1) % count;
+                tabs.getSelectionModel().select(next);
+                event.consume();
+            }
+        });
+        return page;
     }
 
 

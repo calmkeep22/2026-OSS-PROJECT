@@ -3,12 +3,17 @@ package org.ossproject.desktop.view;
 import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
 import javafx.scene.control.Button;
+import javafx.scene.control.Tooltip;
 import org.ossproject.desktop.state.WatchlistItem;
 
 import java.util.Objects;
 
 /**
  * 관심종목에 담고 빼는 단추.
+ *
+ * <p>채운 별이면 담겨 있고 빈 별이면 아니다. 별 하나가 글자 두 마디보다 좁아 한 줄에
+ * 들어가지만, 별 모양만으로는 뜻이 전해지지 않는다. 그래서 접근 가능한 이름은 상태까지
+ * 말로 풀어 두고, 눈으로 보는 사람에게는 머무를 때 이름이 뜨게 한다.
  *
  * <p>담긴 뒤에도 "추가" 라고 적혀 있으면 사용자는 눌린 것인지 아닌지 알 수 없다. 눈으로
  * 보면 목록을 열어 확인할 수 있지만, 화면을 볼 수 없으면 확인할 방법이 상태 안내 문구
@@ -27,8 +32,12 @@ public final class WatchlistToggle {
 
     private static final String ADD = "관심종목 추가";
     private static final String REMOVE = "관심종목 취소";
+    /** 빈 별은 담기지 않음, 채운 별은 담김. 상태를 글자 없이 한 자리로 보인다. */
+    private static final String ADD_MARK = "☆";
+    private static final String REMOVE_MARK = "★";
 
     private final Button button = new Button();
+    private final Tooltip label = new Tooltip();
     private final ObservableList<WatchlistItem> watchlist;
     private final String symbol;
     private final String exchange;
@@ -50,6 +59,9 @@ public final class WatchlistToggle {
         Objects.requireNonNull(onRemove, "onRemove");
 
         button.getStyleClass().add("watchlist-toggle");
+        // 별만 남기면 눈으로 보는 사람에게는 뜻이 적히지 않는다. 머무르면 이름이 뜬다.
+        // 스크린리더는 아래 refresh 가 붙이는 접근 가능한 이름을 읽으므로 별에 기대지 않는다.
+        button.setTooltip(label);
         button.setOnAction(event -> {
             // 결과를 기다리지 않는다. 목록이 바뀌면 아래 지켜보기가 단추를 고친다.
             if (contains()) {
@@ -81,7 +93,8 @@ public final class WatchlistToggle {
      */
     private void refresh() {
         boolean inList = contains();
-        button.setText(inList ? REMOVE : ADD);
+        button.setText(inList ? REMOVE_MARK : ADD_MARK);
+        label.setText(inList ? REMOVE : ADD);
         button.setAccessibleText(inList
                 ? name + " 관심종목 취소, 지금 담겨 있음"
                 : name + " 관심종목 추가, 지금 담겨 있지 않음");
