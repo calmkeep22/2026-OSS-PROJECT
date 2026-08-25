@@ -6,14 +6,14 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 
 /**
  * 시간축이 {@link Instant} 인 봉.
  *
- * <p>기존 {@link PricePoint} 는 날짜가 {@link LocalDate} 라 분봉과 실시간을 표현할 수 없다.
- * 일봉만 다루는 화면 계층은 {@link PricePoint} 를 계속 쓰고, 실시간·분봉을 다루는
- * 계층은 이 타입을 쓴다.
+ * <p>{@link PricePoint} 는 화면 표시를 위해 거래소 현지 시각을 함께 들고 있고, 이 타입은
+ * 데이터 수집과 봉 합성을 위해 시간대에 독립적인 {@link Instant} 를 기준으로 삼는다.
  */
 public record Candle(
         Instant timestamp,
@@ -56,8 +56,9 @@ public record Candle(
     /** 화면 계층이 쓰는 {@link PricePoint} 로 되돌린다. */
     public PricePoint toPricePoint(ZoneId zone) {
         ZoneId effectiveZone = zone == null ? ZoneId.of("Asia/Seoul") : zone;
-        LocalDate date = timestamp.atZone(effectiveZone).toLocalDate();
-        return new PricePoint(date, open, high, low, close, volume);
+        LocalDateTime localTimestamp = timestamp.atZone(effectiveZone).toLocalDateTime();
+        LocalDate date = localTimestamp.toLocalDate();
+        return new PricePoint(date, open, high, low, close, volume, localTimestamp);
     }
 
     /** 종가 기준 등락 금액(종가 - 시가). */

@@ -124,7 +124,7 @@ public final class FileSecretStore implements SecretStore {
 
     @Override
     public void close() {
-        // File-backed implementation owns no open resources between calls.
+        codec.close();
     }
 
     private Path fileFor(String alias) {

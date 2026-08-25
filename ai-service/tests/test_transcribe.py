@@ -116,6 +116,46 @@ class TestUnavailable:
         assert status["모델"] == "base"
 
 
+class TestModelSource:
+    @staticmethod
+    def _model(directory: Path) -> Path:
+        directory.mkdir(parents=True)
+        for name in T.MODEL_FILES:
+            (directory / name).write_bytes(b"test")
+        return directory
+
+    def test_명시한_로컬_모델은_다운로드_없이_쓴다(self, tmp_path, monkeypatch):
+        model = self._model(tmp_path / "whisper")
+        monkeypatch.setenv("OPENSTOCK_WHISPER_MODEL", str(model))
+
+        source, reason = T._model_source("base")
+
+        assert source == model.resolve()
+        assert reason == ""
+
+    def test_배포본에서_내장_모델이_빠지면_인터넷으로_우회하지_않는다(
+            self, tmp_path, monkeypatch):
+        monkeypatch.delenv("OPENSTOCK_WHISPER_MODEL", raising=False)
+        monkeypatch.setattr(T.sys, "frozen", True, raising=False)
+        monkeypatch.setattr(T.sys, "_MEIPASS", str(tmp_path), raising=False)
+
+        source, reason = T._model_source("base")
+
+        assert source is None
+        assert "배포본" in reason
+
+    def test_배포본의_내장_모델을_찾는다(self, tmp_path, monkeypatch):
+        model = self._model(tmp_path / T.BUNDLED_MODEL_PATH)
+        monkeypatch.delenv("OPENSTOCK_WHISPER_MODEL", raising=False)
+        monkeypatch.setattr(T.sys, "frozen", True, raising=False)
+        monkeypatch.setattr(T.sys, "_MEIPASS", str(tmp_path), raising=False)
+
+        source, reason = T._model_source("base")
+
+        assert source == model
+        assert reason == ""
+
+
 class _Segment:
     def __init__(self, logprob, start=0.0, end=1.0):
         self.avg_logprob = logprob

@@ -6,30 +6,26 @@ import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressIndicator;
 import javafx.scene.control.ScrollPane;
-import javafx.scene.control.TabPane;
-import javafx.scene.control.TextField;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.HBox;
-import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
-import org.ossproject.ai.ChatAnswer;
 import org.ossproject.ai.NewsArticle;
 import org.ossproject.ai.NewsDigest;
 
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.util.List;
 import java.util.Objects;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import static org.ossproject.desktop.view.UiKit.*;
 
 /**
- * 뉴스와 질의응답 화면.
- *
- * <p>둘을 한 화면에 둔 이유는 같은 것을 묻기 때문이다. 뉴스를 듣다 "이게 무슨 뜻이냐"
- * 가 나오는데, 그때 다른 화면으로 가야 하면 방금 들은 것을 잊는다.
+ * 종목 뉴스 화면.
  *
  * <p>감성 지수는 <b>여론의 방향을 요약한 값이지 주가 예측이 아니다.</b> 그 사실을 지수
  * 옆에 붙인다. 점수만 보이면 사용자는 그것을 신호로 읽는다.
@@ -41,33 +37,46 @@ public final class NewsScreenView {
 
     private final String stockName;
     private final BiConsumer<String, String> speak;
-    /** 질문을 보낸다. 답은 화면 스레드로 돌아온다. */
-    private final BiConsumer<String, Consumer<ChatAnswer>> ask;
     private final Runnable reload;
+    private final Consumer<String> openArticle;
 
     private final VBox newsBody = new VBox(12);
-    private final VBox chatLog = new VBox(10);
-    private final VBox suggestionHost = new VBox(8);
-    private final TextField question = new TextField();
+    private final List<VBox> articleCards = new ArrayList<>();
+    private int focusedArticle;
 
-    public NewsScreenView(String stockName, BiConsumer<String, String> speak,
-                          BiConsumer<String, Consumer<ChatAnswer>> ask, Runnable reload) {
+    public NewsScreenView(String stockName, BiConsumer<String, String> speak, Runnable reload) {
+        this(stockName, speak, reload, ignored -> { });
+    }
+
+    public NewsScreenView(String stockName, BiConsumer<String, String> speak, Runnable reload,
+                          Consumer<String> openArticle) {
         this.stockName = stockName == null || stockName.isBlank() ? "선택한 종목" : stockName;
         this.speak = Objects.requireNonNull(speak, "speak");
-        this.ask = Objects.requireNonNull(ask, "ask");
         this.reload = Objects.requireNonNull(reload, "reload");
+        this.openArticle = Objects.requireNonNull(openArticle, "openArticle");
     }
 
     public ScrollPane create() {
         loading();
-        TabPane tabs = new TabPane(tab("뉴스", newsBody), tab("챗봇", chatPane()));
-        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
-        tabs.setAccessibleText("뉴스와 챗봇 탭");
-        VBox body = new VBox(14, heading(stockName + " 뉴스"), tabs);
-        return scrollPage(stockName + " 뉴스와 챗봇 화면", body);
+        // 종목명은 상단 바의 현재 위치와 이 화면의 접근성 이름(scrollPage 첫 인자)에
+        // 이미 들어 있다. 큰 제목으로 한 번 더 쓰면 화면만 좁아지고, 스크린리더는
+        // 같은 이름을 두 번 읽는다.
+        VBox body = new VBox(14, newsBody);
+        ScrollPane page = scrollPage(stockName + " 뉴스 화면", body);
+        page.setAccessibleHelp("기사에서는 위아래 방향키로 이동하고, Enter로 원문을 열며, "
+                + "Space로 요약을 듣습니다. Control+R로 뉴스를 다시 받습니다.");
+        page.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
+            if (event.isControlDown() && event.getCode() == KeyCode.R) {
+                reload.run();
+                event.consume();
+            }
+        });
+        return page;
     }
 
     public void loading() {
+        articleCards.clear();
+        focusedArticle = 0;
         ProgressIndicator spinner = new ProgressIndicator();
         spinner.setPrefSize(28, 28);
         HBox row = new HBox(10, spinner, new Label("뉴스를 받고 있습니다."));
@@ -77,6 +86,8 @@ public final class NewsScreenView {
 
     /** 받지 못한 이유를 적고 다시 시도할 길을 준다. 빈 목록은 "뉴스 없음"으로 읽힌다. */
     public void unavailable(String reason) {
+        articleCards.clear();
+        focusedArticle = 0;
         Button again = new Button("다시 시도");
         again.setOnAction(event -> reload.run());
         newsBody.getChildren().setAll(stateBanner(reason == null || reason.isBlank()
@@ -85,6 +96,8 @@ public final class NewsScreenView {
 
     public void show(NewsDigest digest) {
         newsBody.getChildren().clear();
+        articleCards.clear();
+        focusedArticle = 0;
 
         // 지수를 먼저 둔다. 기사 제목만 훑으면 전체 논조가 어느 쪽인지 남지 않는다.
         digest.sentimentText().ifPresent(text -> {
@@ -112,8 +125,11 @@ public final class NewsScreenView {
 
         VBox articles = new VBox(10);
         for (NewsArticle article : digest.articles()) {
-            articles.getChildren().add(articleCard(article));
+            VBox articleCard = articleCard(article);
+            articleCards.add(articleCard);
+            articles.getChildren().add(articleCard);
         }
+        if (!articleCards.isEmpty()) articleCards.get(0).setFocusTraversable(true);
         if (digest.articles().isEmpty()) {
             articles.getChildren().add(wrappingLabel(digest.briefing()));
         }
@@ -148,101 +164,57 @@ public final class NewsScreenView {
         head.getStyleClass().add("metric-detail");
         Label title = wrappingLabel(article.title());
         title.getStyleClass().add("section-title");
+        Button original = new Button("원문 열기");
+        original.getStyleClass().add("primary-button");
+        original.setAccessibleText(article.source() + " 기사 원문을 기본 브라우저에서 열기");
+        original.setOnAction(event -> openArticle.accept(article.url()));
+        boolean hasUrl = article.url() != null && !article.url().isBlank();
+        original.setVisible(hasUrl);
+        original.setManaged(hasUrl);
         Button listen = new Button("요약 듣기");
         listen.setOnAction(event -> speak.accept(article.describe(), "news-article"));
 
-        VBox card = new VBox(6, head, title, listen);
+        VBox card = new VBox(8, head, title, wrappingRow(8, original, listen));
         card.getStyleClass().add("panel-card");
         card.setPadding(new Insets(14));
         card.setAccessibleText(article.describe());
+        card.setAccessibleHelp("위아래 방향키로 기사를 이동합니다. Enter는 원문 열기, Space는 요약 듣기입니다.");
+        card.setFocusTraversable(false);
+        card.focusedProperty().addListener((observable, old, focused) -> {
+            if (focused) focusedArticle = articleCards.indexOf(card);
+        });
+        card.setOnMouseClicked(event -> {
+            if (!(event.getTarget() instanceof Button)) card.requestFocus();
+        });
+        card.setOnKeyPressed(event -> {
+            int target = switch (event.getCode()) {
+                case UP -> Math.max(0, focusedArticle - 1);
+                case DOWN -> Math.min(articleCards.size() - 1, focusedArticle + 1);
+                case HOME -> 0;
+                case END -> articleCards.size() - 1;
+                default -> -1;
+            };
+            if (target >= 0) {
+                focusArticle(target);
+                event.consume();
+            } else if (event.getCode() == KeyCode.ENTER && hasUrl) {
+                original.fire();
+                event.consume();
+            } else if (event.getCode() == KeyCode.SPACE) {
+                listen.fire();
+                event.consume();
+            }
+        });
         return card;
     }
 
-    private VBox chatPane() {
-        chatLog.setFillWidth(true);
-        question.setPromptText("질문을 입력하세요");
-        question.setOnAction(event -> send());
-        HBox.setHgrow(question, Priority.ALWAYS);
-
-        HBox input = new HBox(8, question, primaryButton("보내기", this::send));
-        input.setAlignment(Pos.CENTER_LEFT);
-
-        // 무엇을 물어야 할지 모르면 아무것도 못 묻는다. 답할 수 있는 것만 권한다.
-        suggestions(List.of("쉽게 설명해줘", "핵심 수치 알려줘", "무슨 일이 있었어?"));
-
-        Label footer = new Label("투자 추천 · 가격 예측은 제공하지 않습니다.");
-        footer.getStyleClass().add("safety-note");
-        footer.setWrapText(true);
-
-        VBox pane = new VBox(12, chatLog, suggestionHost, input, footer);
-        pane.setPadding(new Insets(4));
-        return pane;
-    }
-
-    private void suggestions(List<String> picks) {
-        if (picks.isEmpty()) {
-            suggestionHost.getChildren().clear();
-            return;
+    private void focusArticle(int index) {
+        if (index < 0 || index >= articleCards.size()) return;
+        for (int i = 0; i < articleCards.size(); i++) {
+            articleCards.get(i).setFocusTraversable(i == index);
         }
-        Button[] buttons = new Button[picks.size()];
-        for (int i = 0; i < picks.size(); i++) {
-            String pick = picks.get(i);
-            Button button = new Button(pick);
-            button.setOnAction(event -> {
-                question.setText(pick);
-                send();
-            });
-            buttons[i] = button;
-        }
-        suggestionHost.getChildren().setAll(wrappingRow(8, buttons));
-    }
-
-    private void send() {
-        String text = question.getText();
-        if (text == null || text.isBlank()) {
-            return;
-        }
-        question.clear();
-        chatLog.getChildren().add(bubble("나", text, false));
-        Label pending = new Label("답을 찾고 있습니다.");
-        chatLog.getChildren().add(pending);
-        ask.accept(text, answer -> {
-            chatLog.getChildren().remove(pending);
-            chatLog.getChildren().add(answerBubble(answer));
-            if (!answer.suggestions().isEmpty()) {
-                suggestions(answer.suggestions());
-            }
-        });
-    }
-
-    /**
-     * 답 한 덩이.
-     *
-     * <p>답하지 않기로 한 것은 실패가 아니다. 오류처럼 보여 주면 사용자는 다시 물으면
-     * 답이 나올 것으로 오해한다. 같은 모양으로 두되 근거 줄만 없다.
-     */
-    private VBox answerBubble(ChatAnswer answer) {
-        VBox bubble = bubble("챗봇", answer.text(), true);
-        if (!answer.groundsText().isBlank()) {
-            Label grounds = new Label(answer.groundsText());
-            grounds.getStyleClass().add("metric-detail");
-            grounds.setWrapText(true);
-            bubble.getChildren().add(grounds);
-        }
-        Button listen = new Button("답변 듣기");
-        listen.setOnAction(event -> speak.accept(answer.text(), "chat-answer"));
-        bubble.getChildren().add(listen);
-        return bubble;
-    }
-
-    private VBox bubble(String who, String text, boolean fromBot) {
-        Label name = new Label(who);
-        name.getStyleClass().add("metric-label");
-        VBox bubble = new VBox(4, name, wrappingLabel(text));
-        bubble.getStyleClass().addAll("panel-card", fromBot ? "chat-bot" : "chat-user");
-        bubble.setPadding(new Insets(12));
-        bubble.setAccessibleText(who + ". " + text);
-        return bubble;
+        focusedArticle = index;
+        articleCards.get(index).requestFocus();
     }
 
     private static Label wrappingLabel(String text) {

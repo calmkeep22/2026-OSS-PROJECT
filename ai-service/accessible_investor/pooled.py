@@ -46,6 +46,7 @@ RSI, 지수 대비 초과수익, 베타, 상관, 뉴스 확률. 가격 수준이
 from __future__ import annotations
 
 import json
+import sys
 import time
 from pathlib import Path
 
@@ -65,13 +66,24 @@ FEATURES = (FC.TECH_FEATURES + FC.MKT_FEATURES + FC.PEER_FEATURES
 
 VERSION = 1
 
+# Windows Installer는 영문 코드페이지로 패키지 테이블을 만들기 때문에 배포본 안의
+# 한글 파일명이 링크 단계에서 거절될 수 있다. 개발·학습 파일명은 사람이 읽기 좋은
+# 기존 이름을 유지하고, PyInstaller 배포본에서만 ASCII로 복사한 이름을 연다.
+PACKAGED_TARGETS = {"방향": "direction", "변동성": "volatility"}
+
+
+def _stored_target(target: str) -> str:
+    if getattr(sys, "frozen", False):
+        return PACKAGED_TARGETS.get(target, target)
+    return target
+
 
 def model_path(target: str) -> Path:
-    return MODEL_DIR / f"pooled_{target}.pkl"
+    return MODEL_DIR / f"pooled_{_stored_target(target)}.pkl"
 
 
 def meta_path(target: str) -> Path:
-    return MODEL_DIR / f"pooled_{target}.json"
+    return MODEL_DIR / f"pooled_{_stored_target(target)}.json"
 
 
 # ==========================================================================

@@ -26,6 +26,7 @@ import org.ossproject.desktop.testsupport.JavaFxToolkit;
 import org.ossproject.desktop.trades.TradeTapeView;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -249,6 +250,45 @@ class ScreenAccessibilityTest {
         });
     }
 
+    @Test
+    @DisplayName("고대비 큰 글자에서도 음량 막대가 설정 카드를 가로지르지 않는다")
+    void settingsVolumeSliderKeepsABoundedWidth() {
+        JavaFxToolkit.onFxThread(() -> {
+            Node settings = settingsView().create();
+            javafx.scene.layout.StackPane host = new javafx.scene.layout.StackPane(settings);
+            host.getStyleClass().addAll("app-root", "figma-neutral-theme", "large-text", "high-contrast");
+            javafx.scene.Scene scene = new javafx.scene.Scene(host, 1280, 900);
+            scene.getStylesheets().add(Objects.requireNonNull(
+                    ScreenAccessibilityTest.class.getResource("/styles/application.css"))
+                    .toExternalForm());
+            host.applyCss();
+            host.layout();
+
+            Node slider = settings.lookup(".volume-slider");
+            assertTrue(slider != null, "음량 슬라이더를 찾지 못했습니다.");
+            Node track = slider.lookup(".track");
+            assertTrue(track != null, "음량 슬라이더 트랙을 찾지 못했습니다.");
+
+            javafx.geometry.Bounds trackBounds =
+                    track.localToScene(track.getBoundsInLocal());
+            javafx.geometry.Bounds gridBounds = slider.getParent().getParent().localToScene(
+                    slider.getParent().getParent().getBoundsInLocal());
+            assertTrue(trackBounds.getWidth() <= 420.5,
+                    () -> "음량 막대가 카드 전체로 늘어났습니다: trackScene=" + trackBounds
+                            + ", trackLocal=" + track.getBoundsInLocal()
+                            + ", sliderLocal=" + slider.getBoundsInLocal()
+                            + ", sliderLayout=" + slider.getLayoutBounds()
+                            + ", parentLocal=" + slider.getParent().getBoundsInLocal()
+                            + ", gridLocal=" + slider.getParent().getParent().getBoundsInLocal()
+                            + ", gridScene=" + gridBounds);
+            assertTrue(gridBounds.getWidth() <= 1040.5,
+                    () -> "긴 장치명이 음성 설정 그리드를 화면 밖으로 밀었습니다: " + gridBounds);
+            assertTrue(trackBounds.getMinX() >= gridBounds.getMinX() + 120,
+                    () -> "음량 막대가 왼쪽의 음량 라벨을 침범했습니다: track="
+                            + trackBounds + ", grid=" + gridBounds);
+        });
+    }
+
     private SettingsScreenView settingsView() {
         return settingsView(preferences -> { });
     }
@@ -333,6 +373,7 @@ class ScreenAccessibilityTest {
             StockChartPanel panel = new StockChartPanel("삼성전자",
                     java.math.BigDecimal::toPlainString,
                     range -> java.util.concurrent.CompletableFuture.completedFuture(points()),
+                    () -> java.util.concurrent.CompletableFuture.completedFuture(points()),
                     (chart, table) -> { }, text -> { }, () -> { }, () -> { });
 
             assertNoMissingNames("차트 칸", panel.create(points()));

@@ -109,6 +109,21 @@ class LiveCandleUseCaseTest {
     }
 
     @Test
+    @DisplayName("구독하지 않은 종목의 체결은 봉에 섞이지 않는다")
+    void ignoresQuotesOfOtherSymbols() {
+        useCase.start("005930", 100);
+
+        stream.push(Quote.of("000020", new BigDecimal("250000"), 13_385, OPEN.plusSeconds(10)));
+
+        assertTrue(updated.isEmpty(), "다른 종목의 가격이 이 차트의 봉을 만들면 안 된다");
+
+        stream.push(tick("73500", 1_000, 20));
+
+        assertEquals(1, updated.size());
+        assertEquals(0, new BigDecimal("73500").compareTo(updated.get(0).high()));
+    }
+
+    @Test
     @DisplayName("분이 바뀌면 마감된 봉을 따로 알린다")
     void notifiesCompletedCandle() {
         useCase.start("005930", 100);

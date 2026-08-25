@@ -70,6 +70,38 @@ class GraphPlaybackControllerTest {
         assertDoesNotThrow(playback::close);
     }
 
+    @Test void playPauseAndReplayUseTheExpectedStatesAndRestartAtTheFirstPoint()
+            throws InterruptedException {
+        RecordingPort port = new RecordingPort();
+        List<TimeSeriesSample> samples = samples();
+        CountDownLatch firstPlaybackPoint = new CountDownLatch(1);
+        try (StreamingGraphSonifier sonifier = new StreamingGraphSonifier(port);
+             GraphPlaybackController playback = new GraphPlaybackController(sonifier)) {
+            playback.addListener(new GraphPlaybackListener() {
+                @Override public void onPointChanged(
+                        int index, int total, TimeSeriesSample sample, GraphAudioFrame frame) {
+                    firstPlaybackPoint.countDown();
+                }
+            });
+            playback.load(samples, GraphValueScale.automatic(samples), Duration.ofSeconds(1));
+
+            playback.play();
+            assertEquals(GraphPlaybackState.PLAYING, playback.state());
+            assertTrue(firstPlaybackPoint.await(1, TimeUnit.SECONDS));
+
+            playback.pause();
+            assertEquals(GraphPlaybackState.PAUSED, playback.state());
+
+            port.frames.clear();
+            playback.replay();
+            assertEquals(GraphPlaybackState.PLAYING, playback.state());
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            while (port.frames.isEmpty() && System.nanoTime() < deadline) Thread.onSpinWait();
+            assertFalse(port.frames.isEmpty());
+            assertEquals(100d, port.frames.get(0).currentValue(), 0.001);
+        }
+    }
+
     @Test void playsReducedPlanWhileKeepingOriginalPointsSeekable() throws InterruptedException {
         RecordingPort port = new RecordingPort();
         List<TimeSeriesSample> source = List.of(

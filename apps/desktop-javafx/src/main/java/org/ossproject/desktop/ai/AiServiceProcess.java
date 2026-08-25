@@ -12,7 +12,8 @@ import java.util.Optional;
  * <p>분석 엔진이 파이썬이라 같은 프로세스에서 부를 수 없다. 사용자가 터미널을 열어 서버를
  * 직접 띄우게 하면 대부분은 AI 기능을 못 보고 지나간다. 앱이 대신 띄운다.
  *
- * <p>사용자가 할 일은 한 번의 설치뿐이다.
+ * <p>공식 배포본은 Python과 모델을 함께 넣으므로 사용자가 할 일은 앱 설치뿐이다.
+ * 저장소에서 직접 개발 실행할 때만 아래 준비가 필요하다.
  *
  * <pre>
  *   cd ai-service
@@ -138,6 +139,11 @@ public final class AiServiceProcess implements AutoCloseable {
                 ? Path.of(System.getProperty("user.home"), ".openstock-access", "ai-data")
                 : Path.of(localAppData, "OpenStockAccess", "ai-data");
         builder.environment().put("OPENSTOCK_AI_DATA_DIR", data.toString());
+        // Windows 한글 로캘(CP949)에서 joblib이 보조 프로세스의 UTF-8 출력을 읽으면
+        // 진단 스레드가 UnicodeDecodeError로 끝날 수 있다. 서버와 자식 프로세스의
+        // 표준 입출력 인코딩을 한쪽으로 고정해 로그와 CPU 탐지가 조용히 깨지지 않게 한다.
+        builder.environment().put("PYTHONUTF8", "1");
+        builder.environment().put("PYTHONIOENCODING", "utf-8");
         return builder;
     }
 

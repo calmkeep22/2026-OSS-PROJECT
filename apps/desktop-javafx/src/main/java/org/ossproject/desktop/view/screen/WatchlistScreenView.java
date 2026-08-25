@@ -7,6 +7,7 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.*;
 import org.ossproject.desktop.state.WatchlistItem;
 import org.ossproject.desktop.viewmodel.DesktopSession;
@@ -60,15 +61,32 @@ public final class WatchlistScreenView {
         Button moveDown = new Button("아래로"); moveDown.setOnAction(event -> moveSelected(table, 1));
         Button alert = new Button("가격 알림"); alert.setOnAction(event -> editAlert(table));
         FlowPane actions = wrappingRow(8, open, edit, remove, moveUp, moveDown, alert);
-        Label help = new Label("Enter: 종목 열기 · Delete: 관심종목 제거 · Ctrl+위/아래: 순서 변경");
+        Label help = new Label("Enter: 종목 열기 · Delete: 관심종목 제거 · Ctrl+위/아래: 순서 변경 · Ctrl+R: 새로고침");
         help.getStyleClass().add("muted-text");
+        table.setAccessibleHelp("Enter 종목 열기, Delete 제거, Control+위아래 순서 변경, Control+R 새로고침");
         table.setOnKeyPressed(event -> {
-            if (event.getCode() == KeyCode.DELETE) removeSelected(table);
-            else if (event.getCode() == KeyCode.ENTER) openSelected(table);
-            else if (event.isControlDown() && event.getCode() == KeyCode.UP) moveSelected(table, -1);
-            else if (event.isControlDown() && event.getCode() == KeyCode.DOWN) moveSelected(table, 1);
+            if (event.getCode() == KeyCode.DELETE) {
+                removeSelected(table);
+                event.consume();
+            } else if (event.getCode() == KeyCode.ENTER) {
+                openSelected(table);
+                event.consume();
+            } else if (event.isControlDown() && event.getCode() == KeyCode.UP) {
+                moveSelected(table, -1);
+                event.consume();
+            } else if (event.isControlDown() && event.getCode() == KeyCode.DOWN) {
+                moveSelected(table, 1);
+                event.consume();
+            }
         });
-        return scrollPage("관심종목", new VBox(18, header, table, actions, help));
+        ScrollPane page = scrollPage("관심종목", new VBox(18, header, table, actions, help));
+        page.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
+            if (event.isControlDown() && event.getCode() == KeyCode.R) {
+                refresh.fire();
+                event.consume();
+            }
+        });
+        return page;
     }
 
     private void refreshQuotes(Button button) {
@@ -111,6 +129,7 @@ public final class WatchlistScreenView {
     private void showEditor(WatchlistItem existing) {
         Dialog<ButtonType> dialog = new Dialog<>();
         dialog.setTitle("관심종목 설정 수정");
+        styleDialog(dialog);
         ComboBox<String> group = new ComboBox<>(FXCollections.observableArrayList(
                 viewModel.groups().stream().filter(value -> !value.equals(DesktopSession.ALL_GROUP)).toList()));
         group.setValue(existing.group());
@@ -146,6 +165,7 @@ public final class WatchlistScreenView {
 
     private void showGroupManager() {
         Dialog<ButtonType> dialog = new Dialog<>(); dialog.setTitle("관심종목 그룹 관리");
+        styleDialog(dialog);
         ObservableList<String> editable = FXCollections.observableArrayList(
                 viewModel.groups().stream().filter(value -> !value.equals(DesktopSession.ALL_GROUP)).toList());
         ListView<String> groups = new ListView<>(editable);
@@ -186,6 +206,7 @@ public final class WatchlistScreenView {
         Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION,
                 selected.securityName() + "을 관심종목에서 삭제하시겠습니까?", ButtonType.OK, ButtonType.CANCEL);
         confirmation.setHeaderText("관심종목 삭제");
+        styleDialog(confirmation);
         confirmation.showAndWait().filter(ButtonType.OK::equals).ifPresent(result -> {
             viewModel.remove(selected.item());
             status.accept(selected.securityName() + "을 관심종목에서 삭제했습니다.");
@@ -218,6 +239,7 @@ public final class WatchlistScreenView {
         WatchlistItem item = selected.item();
         TextInputDialog dialog = new TextInputDialog(item.alertText().equals("없음") ? "" : item.alertText());
         dialog.setTitle("가격 알림 설정"); dialog.setHeaderText(item.securityName() + " 목표 가격");
+        styleDialog(dialog);
         dialog.setContentText("가격");
         dialog.showAndWait().ifPresent(value -> {
             WatchlistItem replacement = viewModel.setAlert(item, value);
@@ -234,6 +256,7 @@ public final class WatchlistScreenView {
 
     private void information(String title, String message) {
         Alert alert = new Alert(Alert.AlertType.INFORMATION, message, ButtonType.OK);
+        styleDialog(alert);
         alert.setHeaderText(title); alert.showAndWait();
     }
 }

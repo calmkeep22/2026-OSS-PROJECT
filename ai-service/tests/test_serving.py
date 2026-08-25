@@ -62,6 +62,15 @@ def _synthetic_bars(n: int = 400, seed: int = 0,
          "volume": rng.integers(1e5, 5e6, n).astype(float)}, index=idx)
 
 
+def test_packaged_pooled_model_names_are_ascii(monkeypatch):
+    """Windows Installer 영문 코드페이지에 한글 파일명을 넣지 않는다."""
+    monkeypatch.setattr(PL.sys, "frozen", True, raising=False)
+
+    assert PL.model_path("방향").name == "pooled_direction.pkl"
+    assert PL.meta_path("변동성").name == "pooled_volatility.json"
+    assert PL.model_path("방향").name.isascii()
+
+
 # ==========================================================================
 def test_registry_covers_four_indices():
     """네 지수가 모두 들어 있고, 대표 종목이 코드로 찾아진다."""

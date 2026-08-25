@@ -29,6 +29,8 @@ val aiServiceDirectory = rootProject.layout.projectDirectory.dir("ai-service")
 val aiBundleRoot = layout.buildDirectory.dir("ai-runtime")
 val aiVenvPython = aiBundleRoot.map { it.file("venv/Scripts/python.exe") }
 val aiExecutableDirectory = aiBundleRoot.map { it.dir("dist/OpenStockAiService") }
+val whisperModelDirectory = aiBundleRoot.map { it.dir("models/faster-whisper-base") }
+val packagedAiModels = aiBundleRoot.map { it.dir("packaged-models") }
 
 val createAiBundleVenv = tasks.register<Exec>("createAiBundleVenv") {
     group = "distribution"
@@ -53,14 +55,40 @@ val installAiBundleDependencies = tasks.register<Exec>("installAiBundleDependenc
     }
 }
 
+val downloadWhisperModel = tasks.register<Exec>("downloadWhisperModel") {
+    group = "distribution"
+    description = "오프라인 음성 인식용 Whisper base 모델의 고정 스냅숏을 받습니다."
+    dependsOn(installAiBundleDependencies)
+    inputs.file(aiServiceDirectory.file("package_whisper_model.py"))
+    inputs.property("modelRevision", "ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66")
+    outputs.dir(whisperModelDirectory)
+    environment("PYTHONUTF8", "1")
+    commandLine(aiVenvPython.get().asFile,
+        aiServiceDirectory.file("package_whisper_model.py").asFile,
+        whisperModelDirectory.get().asFile)
+}
+
+val stageAiModels = tasks.register<Sync>("stageAiModels") {
+    group = "distribution"
+    description = "Windows 설치 프로그램과 호환되는 ASCII 파일명으로 AI 모델을 준비합니다."
+    from(aiServiceDirectory.dir("models"))
+    into(packagedAiModels)
+    rename { name -> name
+        .replace("pooled_방향", "pooled_direction")
+        .replace("pooled_변동성", "pooled_volatility")
+    }
+}
+
 val bundleAiService = tasks.register<Exec>("bundleAiService") {
     group = "distribution"
     description = "Python 설치 없이 실행되는 AI 서버 EXE를 만듭니다."
-    dependsOn(installAiBundleDependencies)
+    dependsOn(installAiBundleDependencies, downloadWhisperModel, stageAiModels)
     workingDir(aiServiceDirectory)
     inputs.files(fileTree(aiServiceDirectory) {
         include("*.py", "accessible_investor/**/*.py", "models/**")
     })
+    inputs.dir(whisperModelDirectory)
+    inputs.dir(packagedAiModels)
     outputs.dir(aiExecutableDirectory)
     environment("PYTHONUTF8", "1")
     doFirst { delete(aiBundleRoot.get().dir("dist"), aiBundleRoot.get().dir("work")) }
@@ -70,8 +98,15 @@ val bundleAiService = tasks.register<Exec>("bundleAiService") {
         "--distpath", aiBundleRoot.get().dir("dist").asFile,
         "--workpath", aiBundleRoot.get().dir("work").asFile,
         "--specpath", aiBundleRoot.get().asFile,
-        "--add-data", "${aiServiceDirectory.dir("models").asFile};models",
+        "--add-data", "${packagedAiModels.get().asFile};models",
+        "--add-data", "${whisperModelDirectory.get().asFile};whisper-models/faster-whisper-base",
         "--collect-all", "uvicorn",
+        "--collect-all", "faster_whisper",
+        "--collect-all", "ctranslate2",
+        "--collect-all", "av",
+        // SciPy 1.18은 array_api_compat를 런타임에 골라 import한다. 현재 PyInstaller
+        // 훅은 예전 _lib 경로를 찾아 이 모듈을 놓치므로 명시적으로 전부 모은다.
+        "--collect-submodules", "scipy._external.array_api_compat",
         "--exclude-module", "pytest",
         "--exclude-module", "matplotlib",
         "--exclude-module", "accessible_investor.cli",
@@ -99,8 +134,26 @@ fun copyAiBundleIntoApplication() {
     }
     copy {
         from(rootProject.layout.projectDirectory.file("LICENSE"))
+        into(File(target, "legal"))
+    }
+    copy {
+        from(rootProject.layout.projectDirectory.file("NOTICE.md"))
+        into(File(target, "legal"))
+        rename { "THIRD-PARTY-NOTICE.md" }
+    }
+    copy {
         from(aiServiceDirectory.file("NOTICE.md"))
         into(File(target, "legal"))
+        rename { "AI-MODEL-NOTICE.md" }
+    }
+    copy {
+        from(aiServiceDirectory.dir("legal"))
+        into(File(target, "legal"))
+    }
+    copy {
+        from(whisperModelDirectory.map { it.file("README.md") })
+        into(File(target, "legal"))
+        rename { "WHISPER-MODEL-CARD.md" }
     }
 }
 
@@ -123,7 +176,7 @@ tasks.register<Exec>("packagePortable") {
             "--name", "OpenStockAccess",
             "--app-version", "0.1.0",
             "--vendor", "OpenStock Access OSS",
-            "--description", "시각장애인 접근성을 우선한 오픈소스 모의투자 데스크톱 앱",
+            "--description", "Accessible open-source mock-trading desktop application",
             "--input", layout.buildDirectory.dir("install/desktop-javafx/lib").get().asFile,
             "--main-jar", tasks.named<Jar>("jar").get().archiveFileName.get(),
             "--main-class", application.mainClass.get(),
@@ -146,7 +199,7 @@ tasks.register<Exec>("packageWindowsInstaller") {
             "--name", "OpenStockAccess",
             "--app-version", "0.1.0",
             "--vendor", "OpenStock Access OSS",
-            "--description", "시각장애인 접근성을 우선한 오픈소스 모의투자 데스크톱 앱",
+            "--description", "Accessible open-source mock-trading desktop application",
             "--input", layout.buildDirectory.dir("install/desktop-javafx/lib").get().asFile,
             "--main-jar", tasks.named<Jar>("jar").get().archiveFileName.get(),
             "--main-class", application.mainClass.get(),
@@ -154,6 +207,17 @@ tasks.register<Exec>("packageWindowsInstaller") {
             "--win-menu", "--win-shortcut", "--win-dir-chooser"
         )
     }
+}
+
+tasks.register<Zip>("packagePortableZip") {
+    group = "distribution"
+    description = "사용자가 압축만 풀어 실행할 수 있는 Windows 포터블 ZIP을 만듭니다."
+    dependsOn(tasks.named("packagePortable"))
+    from(layout.buildDirectory.dir("package/portable/OpenStockAccess")) {
+        into("OpenStockAccess")
+    }
+    destinationDirectory = layout.buildDirectory.dir("package/release")
+    archiveFileName = "OpenStockAccess-0.1.0-windows-x64-portable.zip"
 }
 
 dependencies {
@@ -169,6 +233,7 @@ dependencies {
     implementation(project(":modules:ai-insight-http"))
     implementation(project(":modules:persistence-sqlite"))
     implementation(project(":modules:secret-store-api"))
+    implementation(project(":modules:file-secret-store"))
     implementation(project(":modules:windows-secret-store"))
     implementation(project(":modules:voice-input-api"))
     implementation(project(":modules:voice-input-java-sound"))

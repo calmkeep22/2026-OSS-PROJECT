@@ -12,6 +12,20 @@ import org.ossproject.sonification.model.GraphAudioFrame;
  */
 public interface SonificationPort extends AutoCloseable {
     /**
+     * 소리가 실제로 귀에 닿기까지 걸리는 시간.
+     *
+     * <p>출력 장치는 소리를 버퍼에 쌓았다가 내보낸다. 그래서 프레임을 넘긴 시각과
+     * 들리는 시각이 다르다. 화면이 그 차이를 모르면 강조 표시가 소리보다 앞서 움직인다.
+     *
+     * <p>기본값은 0이다. 소리를 내지 않는 구현이나 검사용 구현은 기다릴 것이 없다.
+     *
+     * @return 프레임을 넘긴 뒤 들리기까지의 시간
+     */
+    default java.time.Duration outputLatency() {
+        return java.time.Duration.ZERO;
+    }
+
+    /**
      * Queues one mapped graph frame for playback without waiting for its audible duration.
      * Implementations must reject {@code null} and apply {@link #overflowPolicy()} when saturated.
      *

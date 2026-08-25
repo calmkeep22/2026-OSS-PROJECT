@@ -15,8 +15,8 @@ import org.ossproject.finance.model.Exchange;
 import org.ossproject.finance.model.SecurityId;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -62,12 +62,13 @@ class AiInsightViewModelTest {
     @DisplayName("조회한 봉을 함께 넘긴다")
     void sendsTheBarsWeFetched() {
         RecordingAi ai = new RecordingAi(sample(), null);
-        AtomicReference<AiInsight> got = new AtomicReference<>();
+        CompletableFuture<AiInsight> got = new CompletableFuture<>();
 
         new AiInsightViewModel(market, ai, Runnable::run)
-                .analyze(SAMSUNG, false, got::set, reason -> fail(reason));
+                .analyze(SAMSUNG, false, got::complete,
+                        reason -> got.completeExceptionally(new AssertionError(reason)));
 
-        assertNotNull(got.get());
+        assertNotNull(got.join());
         assertTrue(ai.barsSeen > 0, "봉을 넘겨야 합니다");
         assertFalse(ai.similarAsked, "목록용 호출에서는 유사종목을 끕니다");
     }
@@ -76,10 +77,13 @@ class AiInsightViewModelTest {
     @DisplayName("상세에서는 닮은 종목까지 받는다")
     void asksForSimilarOnlyWhenRequested() {
         RecordingAi ai = new RecordingAi(sample(), null);
+        CompletableFuture<AiInsight> got = new CompletableFuture<>();
 
         new AiInsightViewModel(market, ai, Runnable::run)
-                .analyze(SAMSUNG, true, insight -> { }, reason -> fail(reason));
+                .analyze(SAMSUNG, true, got::complete,
+                        reason -> got.completeExceptionally(new AssertionError(reason)));
 
+        got.join();
         assertTrue(ai.similarAsked);
     }
 
@@ -89,12 +93,14 @@ class AiInsightViewModelTest {
     void reportsWhyItFailed() {
         RecordingAi ai = new RecordingAi(null,
                 new AiUnavailableException("AI 서비스에 연결하지 못했습니다."));
-        AtomicReference<String> reason = new AtomicReference<>();
+        CompletableFuture<String> reason = new CompletableFuture<>();
 
         new AiInsightViewModel(market, ai, Runnable::run)
-                .analyze(SAMSUNG, false, insight -> fail("성공하면 안 됩니다"), reason::set);
+                .analyze(SAMSUNG, false,
+                        insight -> reason.completeExceptionally(new AssertionError("성공하면 안 됩니다")),
+                        reason::complete);
 
-        assertEquals("AI 서비스에 연결하지 못했습니다.", reason.get());
+        assertEquals("AI 서비스에 연결하지 못했습니다.", reason.join());
     }
 
     /** 늦게 온 결과가 이미 바뀐 종목의 화면을 덮으면 안 된다. */
@@ -104,10 +110,20 @@ class AiInsightViewModelTest {
         RecordingAi ai = new RecordingAi(sample(), null);
         AtomicInteger delivered = new AtomicInteger();
         AiInsightViewModel viewModel = new AiInsightViewModel(market, ai, Runnable::run);
+        CompletableFuture<AiInsight> first = new CompletableFuture<>();
 
-        viewModel.analyze(SAMSUNG, false, insight -> delivered.incrementAndGet(), reason -> { });
+        viewModel.analyze(SAMSUNG, false, insight -> {
+            delivered.incrementAndGet();
+            first.complete(insight);
+        }, reason -> first.completeExceptionally(new AssertionError(reason)));
+        first.join();
         int afterFirst = delivered.get();
-        viewModel.analyze(HYNIX, false, insight -> delivered.incrementAndGet(), reason -> { });
+        CompletableFuture<AiInsight> second = new CompletableFuture<>();
+        viewModel.analyze(HYNIX, false, insight -> {
+            delivered.incrementAndGet();
+            second.complete(insight);
+        }, reason -> second.completeExceptionally(new AssertionError(reason)));
+        second.join();
 
         assertEquals(afterFirst + 1, delivered.get(), "각 요청이 한 번씩만 전달되어야 합니다");
     }
@@ -118,9 +134,14 @@ class AiInsightViewModelTest {
         RecordingAi ai = new RecordingAi(sample(), null);
         AtomicInteger delivered = new AtomicInteger();
         AiInsightViewModel viewModel = new AiInsightViewModel(market, ai, Runnable::run);
+        CompletableFuture<AiInsight> got = new CompletableFuture<>();
 
         viewModel.cancel();
-        viewModel.analyze(SAMSUNG, false, insight -> delivered.incrementAndGet(), reason -> { });
+        viewModel.analyze(SAMSUNG, false, insight -> {
+            delivered.incrementAndGet();
+            got.complete(insight);
+        }, reason -> got.completeExceptionally(new AssertionError(reason)));
+        got.join();
 
         assertEquals(1, delivered.get(), "취소는 이후 요청을 막지 않습니다");
     }

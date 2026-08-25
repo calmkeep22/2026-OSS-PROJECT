@@ -9,6 +9,13 @@ AI 분석에 쓰는 **모델과 학습 데이터**의 조건입니다. 자바·�
 
 ## 모델
 
+### Systran/faster-whisper-base — 한국어 음성 명령 인식
+- 라이선스: MIT (원본 OpenAI Whisper와 SYSTRAN 변환본)
+- 공식 출처: https://huggingface.co/Systran/faster-whisper-base
+- 배포 리비전: `ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66`
+- 소스 저장소에는 가중치를 넣지 않고 배포 빌드 때 공식 출처에서 받아 동봉한다
+- 모델 카드와 라이선스는 배포물 `app/ai-service/legal/`에 함께 둔다
+
 ### snunlp/KR-FinBert-SC — 국내 뉴스 감성 분석
 - 용도: 한글 기사 제목 → 긍정/중립/부정
 - 실행: **로컬**. API 키도 비용도 필요 없다

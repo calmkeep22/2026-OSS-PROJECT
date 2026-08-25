@@ -6,6 +6,8 @@ import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressIndicator;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -14,6 +16,8 @@ import org.ossproject.ai.AiInsight;
 import org.ossproject.ai.SimilarOutlook;
 import org.ossproject.ai.SimilarStock;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
@@ -48,6 +52,8 @@ public final class SimilarScreenView {
     private final Consumer<Runnable> retry;
 
     private final VBox body = new VBox(14);
+    private final List<VBox> resultCards = new ArrayList<>();
+    private int focusedResult;
 
     public SimilarScreenView(String stockName, BiConsumer<String, String> speak,
                              BiFunction<String, String, Button> watchlistToggle,
@@ -62,17 +68,30 @@ public final class SimilarScreenView {
 
     public ScrollPane create() {
         loading();
-        return scrollPage(stockName + "와 닮은 차트 화면", body);
+        ScrollPane page = scrollPage(stockName + "와 닮은 차트 화면", body);
+        page.setAccessibleHelp("결과 카드에서 위아래 방향키로 이동, Enter 또는 Space로 비교, Control+R 다시 조회");
+        page.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
+            if (event.isControlDown() && event.getCode() == KeyCode.R) {
+                retry.accept(this::loading);
+                event.consume();
+            }
+        });
+        return page;
     }
 
     /** 기다리는 중이라고 적는다. 빈 화면은 결과가 없는 것과 구별되지 않는다. */
     public void loading() {
+        resultCards.clear();
+        focusedResult = 0;
         ProgressIndicator spinner = new ProgressIndicator();
         spinner.setPrefSize(28, 28);
         Label text = new Label("닮은 차트를 찾고 있습니다.");
         HBox row = new HBox(10, spinner, text);
         row.setAlignment(Pos.CENTER_LEFT);
-        body.getChildren().setAll(heading(stockName + "와 유사한 항목"), row);
+        // 종목명은 상단 바의 현재 위치와 이 화면의 접근성 이름(scrollPage 첫 인자)에
+        // 이미 들어 있다. 큰 제목으로 한 번 더 쓰면 화면만 좁아지고, 스크린리더는
+        // 같은 이름을 두 번 읽는다.
+        body.getChildren().setAll(row);
     }
 
     /**
@@ -82,16 +101,20 @@ public final class SimilarScreenView {
      * 아무것도 없으면 사용자는 닮은 종목이 없다고 읽는다.
      */
     public void unavailable(String reason) {
+        resultCards.clear();
+        focusedResult = 0;
         Button again = new Button("다시 시도");
         again.setOnAction(event -> retry.accept(this::loading));
-        body.getChildren().setAll(heading(stockName + "와 유사한 항목"),
+        body.getChildren().setAll(
                 stateBanner(reason == null || reason.isBlank()
                         ? "닮은 차트를 받지 못했습니다." : reason, "warning"),
                 again);
     }
 
     public void show(AiInsight insight) {
-        body.getChildren().setAll(heading(insight.name() + "와 유사한 항목"));
+        body.getChildren().clear();
+        resultCards.clear();
+        focusedResult = 0;
 
         // 단서가 목록보다 먼저 온다. 뒤에 두면 카드를 다 듣고 나서야 이게 예측이 아니라는
         // 것을 알게 되는데, 그때는 이미 순위와 퍼센트가 머리에 남아 있다.
@@ -154,7 +177,8 @@ public final class SimilarScreenView {
 
         // 카드를 눌러도 차트가 열린다. 버튼만 두면 눈으로 보는 사람은 카드를 눌러 보고
         // 아무 일도 안 일어나 고장으로 읽는다.
-        openChartOnActivate(card, stock, compareButton);
+        resultCards.add(card);
+        openChartOnActivate(card, compareButton);
         card.setAccessibleText(rank + "위 " + stock.describe() + ". 누르면 차트를 비교합니다.");
         return card;
     }
@@ -168,22 +192,47 @@ public final class SimilarScreenView {
      * <p>버튼 위에서 누른 것은 흘려보낸다. 안 그러면 "관심 종목에 추가" 를 눌렀는데 차트까지
      * 열린다.
      */
-    private static void openChartOnActivate(VBox card, SimilarStock stock, Button primary) {
-        card.setFocusTraversable(true);
+    private void openChartOnActivate(VBox card, Button primary) {
+        int index = resultCards.indexOf(card);
+        card.setFocusTraversable(index == 0);
         card.getStyleClass().add("clickable-card");
+        card.focusedProperty().addListener((observable, old, focused) -> {
+            if (focused) focusedResult = resultCards.indexOf(card);
+        });
         card.setOnMouseClicked(event -> {
             if (event.getTarget() instanceof Button) {
                 return;
             }
+            card.requestFocus();
             primary.fire();
         });
         card.setOnKeyPressed(event -> {
-            if (event.getCode() == javafx.scene.input.KeyCode.ENTER
-                    || event.getCode() == javafx.scene.input.KeyCode.SPACE) {
+            if (event.getCode() == KeyCode.ENTER || event.getCode() == KeyCode.SPACE) {
                 primary.fire();
+                event.consume();
+            } else if (event.getCode() == KeyCode.UP || event.getCode() == KeyCode.LEFT) {
+                focusResult(focusedResult - 1);
+                event.consume();
+            } else if (event.getCode() == KeyCode.DOWN || event.getCode() == KeyCode.RIGHT) {
+                focusResult(focusedResult + 1);
+                event.consume();
+            } else if (event.getCode() == KeyCode.HOME) {
+                focusResult(0);
+                event.consume();
+            } else if (event.getCode() == KeyCode.END) {
+                focusResult(resultCards.size() - 1);
                 event.consume();
             }
         });
+    }
+
+    private void focusResult(int requested) {
+        if (resultCards.isEmpty()) return;
+        focusedResult = Math.max(0, Math.min(requested, resultCards.size() - 1));
+        for (int i = 0; i < resultCards.size(); i++) {
+            resultCards.get(i).setFocusTraversable(i == focusedResult);
+        }
+        resultCards.get(focusedResult).requestFocus();
     }
 
     /**

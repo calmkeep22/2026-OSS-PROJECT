@@ -48,6 +48,13 @@ public final class KiwoomRestClient implements BrokerClient {
     private static final String BROKER_ID = "kiwoom";
     private static final DateTimeFormatter BASE_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final ZoneId MARKET_ZONE = ZoneId.of("Asia/Seoul");
+    /**
+     * 봉 조회 연속조회 상한.
+     *
+     * <p>호출 간격이 강제되어 있어 페이지마다 시간이 든다. 서버가 계속 이어짐을 알려도
+     * 무한히 요청하지 않도록 막는다.
+     */
+    private static final int MAX_CANDLE_PAGES = 10;
 
     private final HttpTransport transport;
     private final KiwoomJsonMapper jsonMapper;
@@ -145,13 +152,18 @@ public final class KiwoomRestClient implements BrokerClient {
                         + "\",\"upd_stkpc_tp\":\"" + properties.adjustedPriceCode() + "\"}";
 
         return executor.call("봉 조회", () -> {
-            List<Candle> candles = call("봉 조회", tr, body, node -> jsonMapper.toCandles(node, interval));
-            // 키움은 한 번에 주는 개수를 지정할 수 없다. 최신 count 개만 남긴다.
-            return candles.size() <= count
-                    ? candles
-                    : List.copyOf(candles.subList(candles.size() - count, candles.size()));
+            // 키움은 한 번에 주는 개수를 지정할 수 없다. 필요한 만큼 모일 때까지 연속조회한다.
+            List<Candle> collected = callPaged("봉 조회", tr, body,
+                    node -> jsonMapper.toCandles(node, interval), count, MAX_CANDLE_PAGES);
+            // 페이지마다 오름차순이지만 뒤 페이지가 더 과거 구간이라, 이어 붙이면 순서가 깨진다.
+            List<Candle> ordered = new java.util.ArrayList<>(collected);
+            ordered.sort(java.util.Comparator.comparing(Candle::timestamp));
+            return ordered.size() <= count
+                    ? List.copyOf(ordered)
+                    : List.copyOf(ordered.subList(ordered.size() - count, ordered.size()));
         });
     }
+
 
     @Override
     public Account fetchAccount(String accountNo) {
@@ -258,27 +270,86 @@ public final class KiwoomRestClient implements BrokerClient {
      * 를 확인한다. 키움은 업무 오류를 200 응답으로 알리기 때문이다.
      */
     private <T> T call(String operation, KiwoomTr tr, String body, Function<JsonNode, T> parser) {
-        HttpTextResponse response = send(tr, body);
+        return callPage(operation, tr, body, null, parser).value();
+    }
+
+    /**
+     * 연속조회로 여러 페이지를 모은다.
+     *
+     * <p>키움 차트 TR 은 몇 개를 달라고 지정할 수 없다. 한 번에 주는 만큼만 오고, 더 있으면
+     * 응답 헤더 {@code cont-yn} 이 {@code Y} 이며 {@code next-key} 를 준다. 다음 요청에 그
+     * 키를 실어 보내면 이어지는 구간을 받는다.
+     *
+     * <p>필요한 개수를 채우거나 더 줄 것이 없을 때까지 반복한다. 페이지 수에 상한을 두어,
+     * 서버가 계속 이어짐을 알려도 무한히 호출하지 않는다. 호출 간격은 전송 계층이 맞춘다.
+     *
+     * @param wanted   필요한 개수. 이만큼 모이면 멈춘다
+     * @param maxPages 최대 페이지 수
+     */
+    private <T> List<T> callPaged(String operation, KiwoomTr tr, String body,
+                                  Function<JsonNode, List<T>> parser, int wanted, int maxPages) {
+        List<T> collected = new java.util.ArrayList<>();
+        String nextKey = null;
+        for (int page = 0; page < maxPages; page++) {
+            Page<List<T>> result = callPage(operation, tr, body, nextKey, parser);
+            List<T> value = result.value();
+            if (value.isEmpty()) {
+                break;
+            }
+            collected.addAll(value);
+            if (collected.size() >= wanted || !result.hasMore()) {
+                break;
+            }
+            nextKey = result.nextKey();
+        }
+        return List.copyOf(collected);
+    }
+
+    /** 한 페이지 응답과 연속조회 정보. */
+    private record Page<T>(T value, boolean hasMore, String nextKey) {
+    }
+
+    private <T> Page<T> callPage(String operation, KiwoomTr tr, String body, String nextKey,
+                                 Function<JsonNode, T> parser) {
+        HttpTextResponse response = send(tr, body, nextKey);
         if (response.statusCode() == 401) {
             tokenProvider.invalidate();
-            response = send(tr, body);
+            response = send(tr, body, nextKey);
         }
         if (!response.isSuccess()) {
             throw KiwoomErrorMapper.toException(operation, response);
         }
         JsonNode root = jsonMapper.parse(response.body());
         KiwoomErrorMapper.requireSuccessBody(operation, root, response);
-        return parser.apply(root);
+
+        String following = response.header("next-key").map(String::trim).orElse("");
+        boolean hasMore = response.header("cont-yn")
+                .map(value -> value.trim().equalsIgnoreCase("Y")).orElse(false)
+                && !following.isEmpty();
+        return new Page<>(parser.apply(root), hasMore, following);
     }
 
     private HttpTextResponse send(KiwoomTr tr, String body) {
-        HttpTextRequest request = HttpTextRequest.post(properties.resolve(tr))
+        return send(tr, body, null);
+    }
+
+    /**
+     * TR 을 호출한다.
+     *
+     * @param nextKey 연속조회 키. 첫 페이지는 {@code null}
+     */
+    private HttpTextResponse send(KiwoomTr tr, String body, String nextKey) {
+        HttpTextRequest.Builder request = HttpTextRequest.post(properties.resolve(tr))
                 .header("authorization", tokenProvider.token().asBearerHeader())
-                .header("api-id", tr.id())
+                .header("api-id", tr.id());
+        if (nextKey != null && !nextKey.isBlank()) {
+            // 연속조회는 직전 응답의 키를 그대로 되돌려 준다.
+            request.header("cont-yn", "Y").header("next-key", nextKey);
+        }
+        return transport.send(request
                 .jsonBody(body)
                 .timeout(properties.requestTimeout())
-                .build();
-        return transport.send(request);
+                .build());
     }
 
     private static void requireSymbol(String symbol) {

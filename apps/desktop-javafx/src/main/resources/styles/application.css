@@ -1,4 +1,9 @@
-.app-root { -fx-font-family: "Noto Sans KR", "Malgun Gothic", "Segoe UI", sans-serif; -fx-font-size: 15px; -fx-background-color: #f5f7fa; }
+/* 글꼴 이름은 여기 적지 않는다 — AppFonts 가 실제로 쓸 수 있는 것을 골라 뿌리에 건다. */
+.app-root { -fx-font-size: 15px; -fx-background-color: #f5f7fa; }
+/* LCD 서브픽셀 렌더링은 Windows 화면 배율이나 화면 캡처에서 한글 가장자리를
+   빨강·파랑으로 갈라 보이게 한다. 회색조 안티앨리어싱은 배율과 픽셀 배열에 의존하지
+   않아 확대 화면과 캡처에서도 글자 형태가 유지된다. */
+.app-root .text { -fx-font-smoothing-type: gray; }
 .screen-content { -fx-background-color: #f5f7fa; }
 .workspace { -fx-background-color: #f5f7fa; }
 .sidebar-hotspot {
@@ -10,17 +15,21 @@
 .sidebar { -fx-background-color: #ffffff; -fx-border-color: #dfe3e8; -fx-border-width: 0 1 0 0; }
 .sidebar-scroll, .sidebar-scroll > .viewport { -fx-background-color: transparent; -fx-border-color: transparent; }
 .sidebar-scroll .scroll-bar:vertical { -fx-pref-width: 5; -fx-padding: 0; }
+.sidebar-product { -fx-padding: 0 4 10 4; }
+.sidebar-product-name { -fx-text-fill: #0b326f; -fx-font-size: 16px; -fx-font-weight: 900; }
 .nav-rail-logo {
-    -fx-min-width: 42; -fx-min-height: 34; -fx-max-height: 34; -fx-alignment: center;
-    -fx-background-color: #2457e6; -fx-background-radius: 12;
-    -fx-text-fill: #ffffff; -fx-font-size: 15px; -fx-font-weight: 900;
+    -fx-min-width: 36; -fx-pref-width: 36; -fx-max-width: 36;
+    -fx-min-height: 36; -fx-pref-height: 36; -fx-max-height: 36; -fx-alignment: center;
+    -fx-background-color: #0b438f; -fx-background-radius: 18;
+    -fx-text-fill: #ffffff; -fx-font-size: 12px; -fx-font-weight: 900;
 }
 .nav-rail-button {
-    -fx-min-width: 54; -fx-pref-width: 54; -fx-max-width: 54;
-    -fx-min-height: 30; -fx-pref-height: 30; -fx-max-height: 30;
-    -fx-padding: 0; -fx-alignment: center;
-    -fx-font-size: 18px; -fx-font-weight: 800;
-    -fx-background-radius: 10; -fx-border-radius: 10;
+    -fx-min-width: 142; -fx-pref-width: 150; -fx-max-width: 156;
+    -fx-min-height: 38; -fx-pref-height: 38;
+    -fx-padding: 7 12; -fx-alignment: center-left;
+    -fx-font-size: 14px; -fx-font-weight: 700;
+    -fx-background-radius: 8; -fx-border-radius: 8;
+    -fx-background-color: transparent; -fx-border-color: transparent;
 }
 .nav-rail-button:hover { -fx-background-color: #eef2f7; -fx-text-fill: #1747b0; }
 .nav-rail-icon { -fx-fill: #56616f; -fx-scale-x: 0.82; -fx-scale-y: 0.82; }
@@ -42,13 +51,17 @@
 .nav-button:hover { -fx-background-color: #e8edf5; }
 .nav-button:selected { -fx-background-color: #e8efff; -fx-text-fill: #2457e6; -fx-border-color: #3d6aff; -fx-border-width: 0 0 0 4; }
 .nav-button.nav-rail-button {
-    -fx-alignment: center; -fx-padding: 0;
-    -fx-min-width: 54; -fx-pref-width: 54; -fx-max-width: 54;
-    -fx-min-height: 30; -fx-pref-height: 30; -fx-max-height: 30;
+    -fx-alignment: center-left; -fx-padding: 7 12;
+    -fx-min-width: 142; -fx-pref-width: 150; -fx-max-width: 156;
+    -fx-min-height: 38; -fx-pref-height: 38;
+    -fx-background-color: transparent; -fx-border-color: transparent;
 }
-.nav-rail-icon-box { -fx-alignment: center; }
+.nav-rail-icon-box { -fx-alignment: center; -fx-min-width: 24; -fx-pref-width: 24; -fx-max-width: 24; }
 .keyboard-help { -fx-background-color: #ffffff; -fx-border-color: #d1d6db; -fx-border-radius: 8; -fx-background-radius: 8; -fx-padding: 12; -fx-text-fill: #4e5968; }
 .top-bar { -fx-background-color: #ffffff; -fx-border-color: #dfe3e8; -fx-border-width: 0 0 1 0; }
+.top-actions { -fx-alignment: center-left; }
+.top-actions .button { -fx-padding: 9 12; }
+.top-actions .status-chip { -fx-padding: 7 9; }
 .top-bar .text-field { -fx-background-color: #f3f5f7; -fx-background-radius: 9; -fx-border-color: #d8dde3; -fx-border-radius: 9; -fx-padding: 10 13; }
 .global-search-shell { -fx-background-color: transparent; }
 .global-search-shell .text-field { -fx-background-radius: 18; -fx-border-radius: 18; -fx-padding: 11 16; }
@@ -99,6 +112,11 @@
 .stock-detail-summary .mini-metric { -fx-background-color: #f7f9fc; -fx-padding: 6 9; }
 .stock-detail-summary .metric-label { -fx-font-size: 12px; }
 .stock-detail-summary .mini-value { -fx-font-size: 15px; }
+/* 고가·저가는 두 줄짜리 카드에서 한 줄 글로 내려왔다. 현재가 옆에 붙되 현재가를
+   가리지 않게 한 단계 낮춘다. */
+.stock-extremes { -fx-font-size: 14px; -fx-text-fill: #52627a; }
+.large-text .stock-extremes { -fx-font-size: 18px; }
+.high-contrast .stock-extremes { -fx-text-fill: #ffffff; }
 .stock-compact-action { -fx-min-height: 34; -fx-pref-height: 34; -fx-padding: 5 11; }
 .stock-chart-toolbar { -fx-padding: 0 2; }
 .stock-chart-toggle { -fx-min-height: 32; -fx-pref-height: 32; -fx-padding: 5 9; }
@@ -121,10 +139,13 @@
 .trading-order-area > .split-pane-divider { -fx-padding: 0 2; -fx-background-color: #dfe3e8; }
 .order-book-panel { -fx-background-color: #ffffff; }
 .order-book-panel .tab-header-area .tab,
-.order-status-tabs .tab-header-area .tab { -fx-padding: 6 11; }
+.order-status-tabs .tab-header-area .tab { -fx-padding: 3 10; }
+.order-book-panel > .tab-header-area { -fx-padding: 0; }
 .order-book-panel .table-row-cell { -fx-cell-size: 34px; }
-/* 호가 표는 스스로 높이를 맞춘다. 안쪽 스크롤막대가 자리를 먹지 않게 한다. */
-.order-book-panel .table-view > .virtual-flow > .scroll-bar:vertical { -fx-pref-width: 0; -fx-opacity: 0; }
+/* 자리가 있으면 표가 스스로 모든 단계에 맞춰 커지므로 스크롤막대는 뜨지 않는다.
+   자리가 모자라 뜰 때는 보여야 한다 — 숨겨 두었더니 맨 아래 단계가 스크롤도 없이
+   잘린 채로 남았다. 그때는 막대가 있다는 사실 자체가 "더 있다" 는 신호다. */
+.order-book-panel .table-view > .virtual-flow > .scroll-bar:vertical { -fx-pref-width: 10; }
 .order-form-compact .section-title { -fx-font-size: 20px; }
 .order-form-compact .label { -fx-font-size: 14px; }
 .order-form-compact .button { -fx-min-height: 32; -fx-pref-height: 32; -fx-padding: 5 10; }
@@ -186,7 +207,9 @@
     -fx-border-color: #3d6aff;
     -fx-border-width: 0 0 0 3;
 }
-.button.nav-button.nav-rail-button { -fx-padding: 0; }
+.button.nav-button.nav-rail-button {
+    -fx-padding: 0; -fx-background-color: transparent; -fx-border-color: transparent;
+}
 .danger-outline-button { -fx-background-color: #ffffff; -fx-border-color: #e6a09b; -fx-text-fill: #b42318; }
 .danger-outline-button:hover { -fx-background-color: #fff3f3; -fx-border-color: #d92d20; }
 .text-field, .combo-box-base, .spinner {
@@ -239,13 +262,131 @@
 .clickable-card:focused { -fx-border-color: #3d6aff; -fx-border-width: 2; }
 /* 종목 고르개. 화면 맨 위에서 지금 무엇을 보고 있는지 알리는 자리라 눈에 띄어야 한다. */
 .stock-picker-row { -fx-padding: 4 0 0 0; }
+.analysis-stock-picker-row { -fx-padding: 8 20 0 20; }
+/* 왼쪽 여백을 청각 차트 본문과 맞춘다. 본문은 AccessibleChartView 에서 안쪽
+   여백 32 를 쓰는데, 여기만 50 이라 고르개가 "청각 차트" 글자보다 안쪽으로
+   들어가 두 줄이 어긋나 보였다. */
+.radio-stock-picker-row { -fx-padding: 8 32 0 32; }
 .stock-picker { -fx-min-width: 260; -fx-pref-width: 300; }
+.radio-stock-picker-row .stock-picker {
+    -fx-min-width: 220;
+    -fx-pref-width: 250;
+    -fx-max-width: 270;
+}
+.top-chat-button {
+    -fx-background-color: #eef4ff;
+    -fx-border-color: #c9d8ff;
+    -fx-text-fill: #1747b0;
+    -fx-font-weight: 800;
+}
+.chat-screen {
+    -fx-background-color: #f5f7fa;
+    -fx-max-width: infinity;
+    -fx-max-height: infinity;
+}
+.chat-header {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #dfe5ec;
+    -fx-border-radius: 14;
+    -fx-background-radius: 14;
+    -fx-padding: 14 16;
+    -fx-effect: dropshadow(gaussian, rgba(25,31,40,0.05), 12, 0.08, 0, 3);
+}
+.chat-title { -fx-font-size: 24px; -fx-font-weight: 800; -fx-text-fill: #191f28; }
+.chat-scope { -fx-font-size: 13px; -fx-text-fill: #6b7684; }
+.chat-listen-button, .chat-answer-listen {
+    -fx-background-color: #edf3ff;
+    -fx-border-color: #b9ccff;
+    -fx-text-fill: #1747b0;
+    -fx-font-weight: 700;
+}
+.chat-log-scroll, .chat-log-scroll > .viewport {
+    -fx-background-color: #ffffff;
+    -fx-border-color: transparent;
+}
+.chat-log-scroll {
+    -fx-background-radius: 14;
+    -fx-border-radius: 14;
+    -fx-border-color: #e3e8ef;
+    -fx-padding: 2;
+}
+.chat-log { -fx-background-color: #ffffff; -fx-padding: 18; }
+.chat-message-row { -fx-max-width: infinity; }
+.chat-bubble {
+    -fx-border-width: 1;
+    -fx-border-radius: 12;
+    -fx-background-radius: 12;
+}
 .chat-bot { -fx-background-color: #f4f7ff; -fx-border-color: #c9d6ff; }
-.chat-user { -fx-background-color: #ffffff; -fx-border-color: #dfe3e8; }
+.chat-user { -fx-background-color: #ffffff; -fx-border-color: #3569f6; -fx-border-width: 2; }
+.chat-speaker { -fx-font-size: 12px; -fx-font-weight: 800; -fx-text-fill: #3d5ca8; }
+.chat-user .chat-speaker { -fx-text-fill: #1747b0; }
+.chat-message-text { -fx-font-size: 14px; -fx-line-spacing: 3px; -fx-text-fill: #252b35; }
+.chat-grounds {
+    -fx-padding: 8 0 0 0;
+    -fx-font-size: 12px;
+    -fx-text-fill: #6b7684;
+    -fx-border-color: #dce4f2 transparent transparent transparent;
+    -fx-border-width: 1 0 0 0;
+}
+.chat-pending {
+    -fx-background-color: #f3f5f7;
+    -fx-background-radius: 999;
+    -fx-padding: 7 12;
+    -fx-text-fill: #6b7684;
+}
+.chat-composer {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #dfe5ec;
+    -fx-border-radius: 14;
+    -fx-background-radius: 14;
+    -fx-padding: 12 14;
+    -fx-effect: dropshadow(gaussian, rgba(25,31,40,0.05), 12, 0.08, 0, -2);
+}
+.chat-suggestion-label { -fx-font-size: 12px; -fx-font-weight: 800; -fx-text-fill: #6b7684; }
+.chat-suggestion-chip {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #d8dee8;
+    -fx-border-radius: 999;
+    -fx-background-radius: 999;
+    -fx-padding: 6 10;
+}
+.chat-suggestion-chip:hover { -fx-background-color: #f4f7ff; -fx-border-color: #3569f6; }
+.chat-input-row .text-field {
+    -fx-background-color: #f8fafc;
+    -fx-border-color: #cfd7e3;
+    -fx-border-radius: 9;
+    -fx-background-radius: 9;
+    -fx-padding: 10 12;
+}
+.chat-footer { -fx-font-size: 12px; -fx-text-fill: #6b7684; }
 .state-preview { -fx-background-color: #ffffff; -fx-border-color: #d1d6db; -fx-border-radius: 12; -fx-background-radius: 12; -fx-padding: 18; }
 .anomaly-high { -fx-background-color: #fff7e6; -fx-border-color: #f5a623; -fx-border-width: 2; -fx-border-radius: 12; -fx-background-radius: 12; -fx-padding: 22; -fx-font-weight: 700; }
 .radio-status { -fx-background-color: #eef4ff; -fx-border-color: #3d6aff; -fx-border-width: 2; -fx-border-radius: 12; -fx-background-radius: 12; -fx-padding: 18; -fx-font-weight: 700; }
 .chart-summary { -fx-background-color: #ffffff; -fx-border-color: #8b95a1; -fx-border-width: 2; -fx-border-radius: 12; -fx-background-radius: 12; -fx-padding: 18; }
+.sonification-chart {
+    -fx-min-height: 190;
+    -fx-pref-height: 190;
+    -fx-max-height: 190;
+    -fx-background-color: #ffffff;
+    -fx-border-color: #d8dee8;
+    -fx-border-radius: 12;
+    -fx-background-radius: 12;
+    -fx-padding: 18;
+}
+.sonification-bars { -fx-padding: 4 0 0 10; }
+.sonification-axis { -fx-padding: 4 0 0 0; }
+.sonification-bar {
+    -fx-background-color: #c9cdd3;
+    -fx-background-radius: 4 4 0 0;
+    -fx-cursor: hand;
+}
+.sonification-bar:hover { -fx-background-color: #9ba8bd; }
+.sonification-bar:selected {
+    -fx-background-color: #ffc447;
+    -fx-effect: dropshadow(gaussian, rgba(255,174,0,0.30), 10, 0.2, 0, 0);
+}
+.sonification-axis-label { -fx-font-size: 12px; -fx-text-fill: #6b7684; }
 .settings-screen { -fx-background-color: #f5f7fa; }
 .settings-shell {
     -fx-background-color: #ffffff;
@@ -303,8 +444,101 @@
 .settings-tab-scroll, .settings-tab-scroll > .viewport { -fx-background-color: #ffffff; }
 .settings-tab-scroll { -fx-border-color: transparent; -fx-background-insets: 0; -fx-padding: 0; }
 .anomaly-screen { -fx-background-color: #f5f7fa; }
-.anomaly-shell { -fx-padding: 12; }
+.anomaly-shell {
+    -fx-padding: 20;
+    -fx-background-color: #ffffff;
+    -fx-background-radius: 14;
+    -fx-border-color: #dfe3e8;
+    -fx-border-radius: 14;
+    -fx-effect: dropshadow(gaussian, rgba(25,31,40,0.055), 12, 0.08, 0, 3);
+}
 .anomaly-shell .title { -fx-font-size: 24px; }
+.anomaly-title-icon {
+    -fx-min-width: 42; -fx-pref-width: 42; -fx-max-width: 42;
+    -fx-min-height: 42; -fx-pref-height: 42; -fx-max-height: 42;
+    -fx-alignment: center;
+    -fx-background-color: #0b438f; -fx-background-radius: 21;
+    -fx-text-fill: #ffffff; -fx-font-size: 22px; -fx-font-weight: 900;
+}
+.anomaly-status-icon {
+    -fx-min-width: 26; -fx-pref-width: 26; -fx-max-width: 26;
+    -fx-min-height: 26; -fx-pref-height: 26; -fx-max-height: 26;
+    -fx-alignment: center; -fx-background-radius: 13;
+    -fx-text-fill: #ffffff; -fx-font-weight: 900;
+}
+.anomaly-status-normal { -fx-background-color: #1769d2; }
+.anomaly-status-alert { -fx-background-color: #d92d20; }
+.ai-insight-list { -fx-padding: 4 0 2 0; }
+.ai-insight-list-header {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+    -fx-padding: 8 0;
+}
+.ai-insight-list-title { -fx-font-size: 16px; -fx-font-weight: 800; -fx-text-fill: #26364f; }
+.ai-insight-card {
+    -fx-padding: 18;
+    -fx-border-color: #dce3ec;
+    -fx-border-radius: 12;
+    -fx-background-radius: 12;
+    -fx-effect: null;
+}
+.ai-insight-header {
+    -fx-padding: 0 0 8 0;
+    -fx-border-color: transparent;
+}
+.ai-company-badge {
+    -fx-min-width: 52; -fx-pref-width: 52; -fx-max-width: 52;
+    -fx-min-height: 52; -fx-pref-height: 52; -fx-max-height: 52;
+    -fx-alignment: center;
+    -fx-background-color: #f4f7fb; -fx-background-radius: 26;
+    -fx-border-color: #d6e0ed; -fx-border-radius: 26;
+    -fx-text-fill: #0b438f; -fx-font-size: 12px; -fx-font-weight: 900;
+}
+.ai-insight-title { -fx-font-size: 20px; -fx-font-weight: 800; -fx-text-fill: #191f28; }
+.ai-status-badge {
+    -fx-padding: 5 9;
+    -fx-background-radius: 999;
+    -fx-font-size: 12px;
+    -fx-font-weight: 800;
+}
+.ai-status-normal { -fx-background-color: #e8f7ef; -fx-text-fill: #087443; }
+.ai-status-alert { -fx-background-color: #fff0e5; -fx-text-fill: #a04400; }
+.ai-status-unavailable { -fx-background-color: #f0f2f5; -fx-text-fill: #4e5968; }
+.ai-confidence-ok { -fx-background-color: #edf3ff; -fx-text-fill: #2457b3; }
+.ai-confidence-warning { -fx-background-color: #fff4d6; -fx-text-fill: #7a5200; }
+.ai-metric-grid { -fx-padding: 2 0 4 0; }
+.ai-metric-card {
+    -fx-min-width: 180;
+    -fx-pref-width: 190;
+    -fx-min-height: 92;
+    -fx-padding: 12 14;
+    -fx-background-color: #f8fafc;
+    -fx-border-color: #e3e8ef;
+    -fx-border-radius: 10;
+    -fx-background-radius: 10;
+}
+.ai-metric-label { -fx-font-size: 12px; -fx-font-weight: 700; -fx-text-fill: #6b7684; }
+.ai-metric-value { -fx-font-size: 21px; -fx-font-weight: 800; -fx-text-fill: #191f28; }
+.ai-metric-detail { -fx-font-size: 12px; -fx-text-fill: #6b7684; }
+.ai-insight-section {
+    -fx-padding: 12 14;
+    -fx-background-color: #fafbfc;
+    -fx-border-color: #edf0f3;
+    -fx-border-radius: 10;
+    -fx-background-radius: 10;
+}
+.ai-insight-section-title {
+    -fx-font-size: 13px;
+    -fx-font-weight: 800;
+    -fx-text-fill: #3b4a60;
+}
+.ai-insight-copy { -fx-font-size: 14px; -fx-line-spacing: 3px; -fx-text-fill: #333d4b; }
+.ai-caveat-section {
+    -fx-background-color: #eef5ff;
+    -fx-border-color: #b8d0ff;
+    -fx-border-width: 1 1 1 4;
+}
+.ai-caveat-copy { -fx-font-size: 13px; -fx-line-spacing: 4px; -fx-text-fill: #29466f; }
 .anomaly-urgent-card, .anomaly-urgent-high {
     -fx-padding: 12;
     -fx-background-radius: 9;
@@ -379,27 +613,347 @@
 .dashboard-tone-positive .dashboard-card-value { -fx-text-fill: #b42318; }
 .dashboard-tone-negative .dashboard-card-value { -fx-text-fill: #175cd3; }
 .dashboard-feature-card {
-    -fx-min-height: 108;
-    -fx-pref-height: 108;
-    -fx-padding: 11 12;
+    -fx-min-height: 142;
+    -fx-pref-height: 142;
+    -fx-padding: 18 14;
     -fx-background-color: #ffffff;
-    -fx-background-radius: 11;
-    -fx-border-color: #dfe3e8;
-    -fx-border-radius: 11;
+    -fx-background-radius: 8;
+    -fx-border-color: #d6dde7;
+    -fx-border-width: 1;
+    -fx-border-radius: 8;
 }
+.large-text .dashboard-feature-card { -fx-min-height: 180px; -fx-pref-height: 180px; }
+.large-text .dashboard-feature-title,
+.large-text .dashboard-feature-detail { -fx-wrap-text: true; }
 .dashboard-feature-card:hover, .dashboard-feature-card:focused {
-    -fx-background-color: #f7f9ff;
-    -fx-border-color: #3569f6;
+    -fx-background-color: #f8fbff;
+    -fx-border-color: #0b438f;
+    -fx-border-width: 2;
 }
-.dashboard-feature-card .nav-rail-icon { -fx-fill: #191f28; -fx-scale-x: 0.78; -fx-scale-y: 0.78; }
-.dashboard-feature-title { -fx-text-fill: #191f28; -fx-font-size: 16px; -fx-font-weight: 800; }
-.dashboard-feature-detail { -fx-text-fill: #8b95a1; -fx-font-size: 13px; }
+.dashboard-feature-card .nav-rail-icon { -fx-fill: #0b438f; }
+.dashboard-feature-icon {
+    -fx-min-width: 54; -fx-pref-width: 54; -fx-max-width: 54;
+    -fx-min-height: 54; -fx-pref-height: 54; -fx-max-height: 54;
+    -fx-background-color: transparent;
+}
+.dashboard-feature-icon .nav-rail-icon { -fx-fill: #0b438f; -fx-scale-x: 1.42; -fx-scale-y: 1.42; }
+.dashboard-feature-title { -fx-text-fill: #0f2f5f; -fx-font-size: 18px; -fx-font-weight: 900; }
+.dashboard-feature-detail { -fx-text-fill: #6b7684; -fx-font-size: 14px; }
 .status-bar { -fx-background-color: #ffffff; -fx-border-color: #d8dde3; -fx-border-width: 1 0 0 0; }
 .status-item { -fx-text-fill: #4e5968; -fx-font-size: 13px; }
 .status-ok { -fx-text-fill: #087443; -fx-font-weight: 700; }
 .status-mock { -fx-background-color: #fff3cd; -fx-text-fill: #664d03; -fx-padding: 3 7; -fx-background-radius: 5; }
 .button:focused, .text-field:focused, .combo-box:focused, .spinner:focused, .table-view:focused,
 .list-view:focused, .check-box:focused { -fx-border-color: #005fcc; -fx-border-width: 3; -fx-border-insets: -2; }
+
+/* Figma 설정 화면에서 이어 온 무채색 데스크톱 테마.
+   배치·패딩·최소 높이·표 행 높이는 건드리지 않는다. 기존 화면 구조를 보존한 채
+   글꼴, 색, 테두리, 모서리와 포커스 표현만 하나의 체계로 맞춘다. */
+.figma-neutral-theme {
+    -fx-base: #ffffff;
+    -fx-background: #f5f7fa;
+    -fx-control-inner-background: #ffffff;
+    -fx-accent: #2457e6;
+    -fx-focus-color: #2457e6;
+    -fx-faint-focus-color: rgba(36, 87, 230, 0.16);
+}
+.figma-neutral-theme,
+.figma-neutral-theme .screen-content,
+.figma-neutral-theme .workspace,
+.figma-neutral-theme .workspace-scroll,
+.figma-neutral-theme .workspace-scroll > .viewport,
+.figma-neutral-theme .dashboard-screen,
+.figma-neutral-theme .chat-screen,
+.figma-neutral-theme .settings-screen {
+    -fx-background-color: #f5f7fa;
+}
+.figma-neutral-theme .top-bar,
+.figma-neutral-theme .sidebar,
+.figma-neutral-theme .status-bar {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #dfe3e8;
+}
+.figma-neutral-theme .title,
+.figma-neutral-theme .section-title,
+.figma-neutral-theme .sidebar-title,
+.figma-neutral-theme .settings-card-heading,
+.figma-neutral-theme .dashboard-feature-title,
+.figma-neutral-theme .dashboard-card-value,
+.figma-neutral-theme .chat-title,
+.figma-neutral-theme .ai-insight-title,
+.figma-neutral-theme .ai-insight-section-title,
+.figma-neutral-theme .anomaly-urgent-message,
+.figma-neutral-theme .anomaly-section-title {
+    -fx-text-fill: #191f28;
+    -fx-font-weight: 700;
+}
+.figma-neutral-theme .muted-text,
+.figma-neutral-theme .metric-label,
+.figma-neutral-theme .metric-detail,
+.figma-neutral-theme .information-label,
+.figma-neutral-theme .dashboard-card-title,
+.figma-neutral-theme .dashboard-feature-detail,
+.figma-neutral-theme .status-item,
+.figma-neutral-theme .chat-scope,
+.figma-neutral-theme .chat-footer {
+    -fx-text-fill: #6b7684;
+}
+.figma-neutral-theme .button,
+.figma-neutral-theme .toggle-button {
+    -fx-background-color: #ffffff;
+    -fx-text-fill: #303947;
+    -fx-border-color: #d8dde3;
+    -fx-background-radius: 9;
+    -fx-border-radius: 9;
+    -fx-font-weight: 600;
+}
+.figma-neutral-theme .button:hover,
+.figma-neutral-theme .toggle-button:hover {
+    -fx-background-color: #f3f6fb;
+    -fx-border-color: #aeb8c4;
+}
+.figma-neutral-theme .button:pressed,
+.figma-neutral-theme .toggle-button:selected {
+    -fx-background-color: #e8efff;
+    -fx-border-color: #2457e6;
+    -fx-text-fill: #1747b0;
+}
+.figma-neutral-theme .primary-button,
+.figma-neutral-theme .button.primary-button {
+    -fx-background-color: #2457e6;
+    -fx-border-color: #2457e6;
+    -fx-text-fill: #ffffff;
+    -fx-font-weight: 700;
+}
+.figma-neutral-theme .primary-button:hover,
+.figma-neutral-theme .button.primary-button:hover { -fx-background-color: #1747b0; }
+.figma-neutral-theme .connection-button,
+.figma-neutral-theme .top-chat-button {
+    -fx-background-color: #eef4ff;
+    -fx-border-color: #c9d8ff;
+    -fx-text-fill: #1747b0;
+}
+.figma-neutral-theme .text-field,
+.figma-neutral-theme .text-area,
+.figma-neutral-theme .combo-box,
+.figma-neutral-theme .spinner,
+.figma-neutral-theme .date-picker {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #d8dde3;
+    -fx-background-radius: 9;
+    -fx-border-radius: 9;
+    -fx-text-fill: #191f28;
+    -fx-prompt-text-fill: #8b95a1;
+}
+.figma-neutral-theme .text-field:focused,
+.figma-neutral-theme .text-area:focused,
+.figma-neutral-theme .combo-box:focused,
+.figma-neutral-theme .spinner:focused {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #2457e6;
+}
+.figma-neutral-theme .combo-box-popup .list-view,
+.figma-neutral-theme .combo-box-popup .list-cell {
+    -fx-background-color: #ffffff;
+    -fx-text-fill: #191f28;
+}
+.figma-neutral-theme .combo-box-popup .list-cell:filled:hover,
+.figma-neutral-theme .combo-box-popup .list-cell:filled:focused,
+.figma-neutral-theme .combo-box-popup .list-cell:filled:selected {
+    -fx-background-color: #e8efff;
+    -fx-text-fill: #191f28;
+}
+.figma-neutral-theme .summary-card,
+.figma-neutral-theme .compact-market-card,
+.figma-neutral-theme .mini-metric,
+.figma-neutral-theme .panel-card,
+.figma-neutral-theme .settings-card,
+.figma-neutral-theme .dashboard-shell,
+.figma-neutral-theme .dashboard-status-card,
+.figma-neutral-theme .dashboard-feature-card,
+.figma-neutral-theme .chat-header,
+.figma-neutral-theme .chat-composer,
+.figma-neutral-theme .ai-insight-section,
+.figma-neutral-theme .ai-metric-card,
+.figma-neutral-theme .anomaly-urgent-card,
+.figma-neutral-theme .anomaly-signal-card {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #dfe3e8;
+    -fx-background-radius: 12;
+    -fx-border-radius: 12;
+}
+.figma-neutral-theme .panel-card,
+.figma-neutral-theme .dashboard-shell,
+.figma-neutral-theme .settings-card {
+    -fx-effect: dropshadow(gaussian, rgba(25,31,40,0.055), 12, 0.08, 0, 3);
+}
+.figma-neutral-theme .tab-pane > .tab-header-area > .tab-header-background {
+    -fx-background-color: #f1f4f8;
+}
+.figma-neutral-theme .tab-pane > .tab-header-area > .headers-region > .tab {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+}
+.figma-neutral-theme .tab-pane > .tab-header-area > .headers-region > .tab:selected {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #dfe3e8 #dfe3e8 #2457e6 #dfe3e8;
+    -fx-border-width: 1 1 3 1;
+}
+.figma-neutral-theme .table-view,
+.figma-neutral-theme .list-view,
+.figma-neutral-theme .tree-view {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #dfe3e8;
+    -fx-background-radius: 10;
+    -fx-border-radius: 10;
+}
+.figma-neutral-theme .table-view .column-header-background,
+.figma-neutral-theme .table-view .column-header {
+    -fx-background-color: #f1f4f8;
+}
+.figma-neutral-theme .table-row-cell,
+.figma-neutral-theme .list-cell { -fx-background-color: #ffffff; }
+.figma-neutral-theme .table-row-cell:odd,
+.figma-neutral-theme .list-cell:odd { -fx-background-color: #fbfcfd; }
+.figma-neutral-theme .table-row-cell:selected,
+.figma-neutral-theme .list-cell:selected {
+    -fx-background-color: #e8efff;
+    -fx-text-background-color: #191f28;
+}
+.figma-neutral-theme .nav-button:hover,
+.figma-neutral-theme .nav-group-button:hover { -fx-background-color: #f1f4f8; }
+.figma-neutral-theme .button.nav-button.nav-rail-button {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+    -fx-text-fill: #253b5a;
+}
+.figma-neutral-theme .button.nav-button.nav-rail-button:hover {
+    -fx-background-color: #f1f4f8;
+    -fx-border-color: transparent;
+}
+.figma-neutral-theme .nav-button:selected {
+    -fx-background-color: #e8efff;
+    -fx-text-fill: #1747b0;
+    -fx-border-color: #2457e6;
+}
+.figma-neutral-theme .button.nav-button.nav-rail-button:selected {
+    -fx-background-color: #e8efff;
+    -fx-border-color: transparent transparent transparent #2457e6;
+    -fx-border-width: 0 0 0 3;
+    -fx-text-fill: #0b438f;
+}
+.figma-neutral-theme .dashboard-feature-card {
+    -fx-background-radius: 8;
+    -fx-border-radius: 8;
+    -fx-border-color: #d6dde7;
+}
+.figma-neutral-theme .dashboard-feature-card:hover,
+.figma-neutral-theme .dashboard-feature-card:focused {
+    -fx-background-color: #f8fbff;
+    -fx-border-color: #0b438f;
+}
+.figma-neutral-theme .dashboard-feature-title {
+    -fx-text-fill: #0f2f5f;
+    -fx-font-weight: 900;
+}
+.figma-neutral-theme .dashboard-feature-detail { -fx-text-fill: #6b7684; }
+.figma-neutral-theme .dashboard-feature-icon .nav-rail-icon { -fx-fill: #0b438f; }
+.figma-neutral-theme .nav-rail-icon { -fx-fill: #56616f; }
+.figma-neutral-theme .nav-button:selected .nav-rail-icon,
+.figma-neutral-theme .nav-rail-button:selected .nav-rail-icon { -fx-fill: #2457e6; }
+.figma-neutral-theme .status-chip,
+.figma-neutral-theme .mode-badge { -fx-font-weight: 700; }
+.figma-neutral-theme .state-success,
+.figma-neutral-theme .positive-chip { -fx-background-color: #e7f7ef; -fx-text-fill: #087443; }
+.figma-neutral-theme .state-warning,
+.figma-neutral-theme .status-mock { -fx-background-color: #fff3cd; -fx-text-fill: #664d03; }
+.figma-neutral-theme .state-error { -fx-background-color: #fff0f0; -fx-text-fill: #b42318; }
+
+/* 앱 전체에서 사용하는 카드형 대화상자. */
+.app-dialog {
+    -fx-font-size: 14px;
+    -fx-background-color: #ffffff;
+    -fx-border-color: #cfd8e5;
+    -fx-border-width: 1;
+}
+.app-dialog > .header-panel {
+    -fx-background-color: #f7f9fc;
+    -fx-padding: 20 24;
+    -fx-border-color: transparent transparent #e1e7ef transparent;
+    -fx-border-width: 0 0 1 0;
+}
+.app-dialog > .header-panel .label,
+.app-dialog-title {
+    -fx-text-fill: #0f2f5f;
+    -fx-font-size: 20px;
+    -fx-font-weight: 900;
+    -fx-wrap-text: true;
+}
+.app-dialog > .content.label {
+    -fx-padding: 20 24;
+    -fx-text-fill: #334155;
+    -fx-font-size: 14px;
+    -fx-line-spacing: 4px;
+    -fx-wrap-text: true;
+}
+.app-dialog > .graphic-container { -fx-padding: 0; }
+.app-dialog > .button-bar {
+    -fx-background-color: #ffffff;
+    -fx-padding: 14 24 20 24;
+    -fx-border-color: #edf0f4 transparent transparent transparent;
+    -fx-border-width: 1 0 0 0;
+}
+.app-dialog > .button-bar > .container { -fx-spacing: 8; }
+.app-dialog > .button-bar .button {
+    -fx-min-width: 96;
+    -fx-min-height: 40;
+    -fx-padding: 9 18;
+    -fx-background-color: #ffffff;
+    -fx-text-fill: #334155;
+    -fx-border-color: #cfd8e5;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-font-weight: 700;
+}
+.app-dialog > .button-bar .button.primary-button {
+    -fx-background-color: #0b438f;
+    -fx-border-color: #0b438f;
+    -fx-text-fill: #ffffff;
+}
+.app-dialog > .button-bar .button.primary-button:hover { -fx-background-color: #082f68; }
+.app-dialog > .button-bar .button.danger-button {
+    -fx-background-color: #b42318;
+    -fx-border-color: #b42318;
+    -fx-text-fill: #ffffff;
+}
+.app-dialog > .button-bar .button.danger-button:hover { -fx-background-color: #8f1c13; }
+.app-dialog.dialog-error > .header-panel {
+    -fx-background-color: #fff4f3;
+    -fx-border-color: transparent transparent #fecaca transparent;
+}
+.app-dialog.dialog-error > .header-panel .label { -fx-text-fill: #9f1c14; }
+.app-dialog.dialog-information > .header-panel { -fx-background-color: #f2f7ff; }
+.app-dialog .text-field,
+.app-dialog .text-area,
+.app-dialog .combo-box {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #cfd8e5;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-padding: 9 11;
+}
+.figma-neutral-theme .button:focused,
+.figma-neutral-theme .toggle-button:focused,
+.figma-neutral-theme .text-field:focused,
+.figma-neutral-theme .combo-box:focused,
+.figma-neutral-theme .spinner:focused,
+.figma-neutral-theme .table-view:focused,
+.figma-neutral-theme .list-view:focused,
+.figma-neutral-theme .check-box:focused {
+    -fx-border-color: #2457e6;
+    -fx-border-width: 3;
+    -fx-border-insets: -2;
+}
 .large-text { -fx-font-size: 18px; }
 .large-text .title { -fx-font-size: 36px; }
 .large-text .stock-detail-title { -fx-font-size: 28px; }
@@ -407,15 +961,29 @@
 .large-text .sidebar-title { -fx-font-size: 27px; }
 .large-text .table-row-cell { -fx-cell-size: 56px; }
 .large-text .button { -fx-min-height: 46px; }
-.large-text .button.stock-compact-action { -fx-min-height: 34; -fx-pref-height: 34; }
-.large-text .order-form-compact .button { -fx-min-height: 34; -fx-pref-height: 34; }
+/* 높이를 34 에 못 박아 두면 18px 글자가 아래부터 잘린다. "최신 정보 듣기" 가 실제로
+   그렇게 그려졌다. 바닥만 정해 두고 나머지는 글자가 필요한 만큼 가져가게 둔다. */
+.large-text .button.stock-compact-action { -fx-min-height: 40; -fx-pref-height: -1; }
+.large-text .order-form-compact .button { -fx-min-height: 40; -fx-pref-height: -1; }
+.large-text .order-form-compact .text-field,
+.large-text .order-form-compact .spinner { -fx-min-height: 44; -fx-pref-height: -1; }
+.large-text .toggle-button.stock-chart-toggle { -fx-min-height: 38; -fx-pref-height: -1; }
 .large-text .order-form-compact .section-title { -fx-font-size: 22px; }
 .large-text .order-form-compact .label { -fx-font-size: 15px; }
-.large-text .order-status-tabs .table-row-cell,
-.large-text .order-book-panel .table-row-cell { -fx-cell-size: 38px; }
-.large-text .toggle-button.stock-chart-toggle { -fx-min-height: 32; -fx-pref-height: 32; }
+.large-text .order-status-tabs .table-row-cell { -fx-cell-size: 56px; }
+.large-text .order-book-panel .table-row-cell { -fx-cell-size: 48px; }
+.large-text .table-cell { -fx-padding: 8 10; }
+.large-text .tab-pane > .tab-header-area .tab { -fx-min-height: 48px; -fx-padding: 8 16; }
+.large-text .text-field,
+.large-text .combo-box,
+.large-text .choice-box,
+.large-text .spinner { -fx-min-height: 46px; }
+.large-text .toggle-button.stock-chart-toggle { -fx-min-height: 38; -fx-pref-height: -1; }
+.large-text .order-status-tabs .button { -fx-min-height: 38; -fx-pref-height: -1; }
+/* 여기만 max 까지 걸려 있다. 글자를 16px 로 낮춰 함께 맞춰 둔 자리라 그대로 두되,
+   글자가 자라면 잘리므로 위쪽 여유는 열어 둔다. */
 .large-text .nav-rail-button {
-    -fx-min-height: 30; -fx-pref-height: 30; -fx-max-height: 30;
+    -fx-min-height: 30; -fx-pref-height: -1; -fx-max-height: -1;
     -fx-font-size: 16px;
 }
 .large-text .status-item { -fx-font-size: 15px; }
@@ -427,13 +995,18 @@
 .high-contrast .table-view, .high-contrast .list-view, .high-contrast .tab-pane,
 .high-contrast .workspace-scroll, .high-contrast .workspace-scroll > .viewport,
 .high-contrast .state-preview, .high-contrast .state-banner, .high-contrast .search-suggestion-panel,
+.high-contrast .chat-screen, .high-contrast .chat-header,
+.high-contrast .chat-log-scroll, .high-contrast .chat-log-scroll > .viewport,
+.high-contrast .chat-log, .high-contrast .chat-composer,
 .high-contrast .chat-bot, .high-contrast .chat-user,
 .high-contrast .dashboard-screen, .high-contrast .dashboard-shell,
 .high-contrast .dashboard-status-card, .high-contrast .dashboard-feature-card,
 .high-contrast .settings-shell, .high-contrast .settings-tab-content,
 .high-contrast .settings-tab-scroll, .high-contrast .settings-tab-scroll > .viewport,
 .high-contrast .settings-tabs, .high-contrast .anomaly-urgent-card,
-.high-contrast .anomaly-urgent-high, .high-contrast .anomaly-signal-list .list-cell {
+.high-contrast .anomaly-urgent-high, .high-contrast .anomaly-signal-list .list-cell,
+.high-contrast .ai-insight-list-header, .high-contrast .ai-metric-card,
+.high-contrast .ai-insight-section {
     -fx-background-color: #000000; -fx-border-color: #ffffff;
 }
 .high-contrast .label, .high-contrast .check-box, .high-contrast .feature-title,
@@ -444,7 +1017,16 @@
 .high-contrast .dashboard-feature-detail, .high-contrast .settings-card-heading,
 .high-contrast .anomaly-urgent-message, .high-contrast .anomaly-section-title,
 .high-contrast .anomaly-signal-name, .high-contrast .anomaly-signal-time,
-.high-contrast .anomaly-signal-message { -fx-text-fill: #ffffff; }
+.high-contrast .anomaly-signal-message, .high-contrast .ai-insight-list-title,
+.high-contrast .ai-insight-title, .high-contrast .ai-metric-label,
+.high-contrast .ai-metric-value, .high-contrast .ai-metric-detail,
+.high-contrast .ai-insight-section-title, .high-contrast .ai-insight-copy,
+.high-contrast .ai-caveat-copy, .high-contrast .chat-title,
+.high-contrast .chat-scope, .high-contrast .chat-speaker,
+.high-contrast .chat-message-text, .high-contrast .chat-grounds,
+.high-contrast .chat-suggestion-label, .high-contrast .chat-footer {
+    -fx-text-fill: #ffffff;
+}
 .high-contrast .nav-group-button { -fx-background-color: #000000; -fx-text-fill: #ffffff; -fx-border-color: #ffffff; }
 .high-contrast .nav-group-button:current-group, .high-contrast .nav-group-button:expanded { -fx-text-fill: #ffff00; -fx-border-color: #ffff00; }
 .high-contrast .nav-button:selected { -fx-text-fill: #ffff00; -fx-border-color: #ffff00; }
@@ -453,6 +1035,23 @@
 .high-contrast .button:focused, .high-contrast .text-field:focused, .high-contrast .combo-box:focused,
 .high-contrast .spinner:focused, .high-contrast .table-view:focused, .high-contrast .list-view:focused,
 .high-contrast .check-box:focused { -fx-border-color: #ffff00; }
+.high-contrast .button, .high-contrast .toggle-button,
+.high-contrast .text-field, .high-contrast .text-area,
+.high-contrast .combo-box, .high-contrast .spinner {
+    -fx-background-color: #000000;
+    -fx-text-fill: #ffffff;
+    -fx-border-color: #ffffff;
+}
+.high-contrast .button.primary-button,
+.high-contrast .primary-button,
+.high-contrast .connection-button,
+.high-contrast .top-chat-button,
+.high-contrast .button:pressed,
+.high-contrast .toggle-button:selected {
+    -fx-background-color: #000000;
+    -fx-text-fill: #ffff00;
+    -fx-border-color: #ffff00;
+}
 
 /* 호가창 잔량 막대. 길이 비율은 도메인이 정하고 여기서는 색과 배경만 맡는다. */
 .ladder-bar-track { -fx-background-color: #f0f2f5; -fx-border-color: #dfe3e8; -fx-border-width: 0 0 0 0; }
@@ -466,3 +1065,910 @@
 .high-contrast .ladder-bar-ask { -fx-background-color: #ff6666; }
 .high-contrast .ladder-bar-bid { -fx-background-color: #66b3ff; }
 .high-contrast .table-row-cell:current-price { -fx-background-color: #000000; -fx-border-color: #ffff00 transparent #ffff00 transparent; }
+
+/* 두 종목 비교 창.
+   창을 화면의 70퍼센트로 키웠다. 두 차트를 나란히 놓는 자리라 작으면 봉이 뭉개져
+   나란히 보는 뜻이 사라진다. 유사도는 오른쪽 위에 알약으로 띄워 두 종목 이름과
+   같은 줄에서 읽히게 한다. */
+.compare-dialog { -fx-background-color: #f5f7fa; }
+.compare-dialog > .content { -fx-padding: 18 20 8 20; }
+.compare-dialog > .button-bar { -fx-padding: 8 20 16 20; }
+.dialog-compare-title { -fx-font-size: 21px; -fx-font-weight: 800; -fx-text-fill: #191f28; }
+.dialog-compare-score {
+    -fx-background-color: #e8efff; -fx-text-fill: #1747b0;
+    -fx-font-size: 15px; -fx-font-weight: 800;
+    -fx-padding: 7 14; -fx-background-radius: 999;
+}
+
+.high-contrast .compare-dialog { -fx-background-color: #000000; }
+.high-contrast .dialog-compare-title { -fx-text-fill: #ffffff; }
+.high-contrast .dialog-compare-score {
+    -fx-background-color: #000000; -fx-text-fill: #ffff00;
+    -fx-border-color: #ffff00; -fx-border-width: 1; -fx-border-radius: 999;
+}
+
+/* 종목 상세 · 차트 칸의 조작부를 얇게.
+   차트/호가/체결 탭, 기간 단추, 지표 체크박스, 그래프/표 탭이 모두 한 상자 안에 있다.
+   조작부가 두꺼우면 정작 봐야 할 그래프가 눌린다. 여기서 줄인 높이는 그대로 그래프로
+   간다 — 그래프 쪽에 setVgrow 가 걸려 있어 남는 높이를 전부 가져간다.
+   누르는 자리는 좁히지 않는다. 세로만 줄이고 좌우 여백은 남긴다. */
+.stock-chart-toggle { -fx-min-height: 26; -fx-pref-height: 26; -fx-padding: 2 10; -fx-font-size: 13px; }
+.large-text .toggle-button.stock-chart-toggle { -fx-min-height: 38; -fx-pref-height: -1; }
+.stock-chart-toolbar { -fx-padding: 0 2; }
+.large-chart-content { -fx-padding: 4; }
+.large-chart-toolbar {
+    -fx-padding: 8 10;
+    -fx-background-color: #f7f9fc;
+    -fx-border-color: #dfe5ec;
+    -fx-border-radius: 10;
+    -fx-background-radius: 10;
+}
+.large-chart-toolbar .button,
+.large-chart-toolbar .toggle-button { -fx-min-height: 32; }
+.chart-zoom-controls { -fx-alignment: center-left; }
+.stock-chart-toolbar .button { -fx-padding: 3 11; -fx-font-size: 13px; }
+.stock-chart-toolbar .check-box { -fx-font-size: 13px; -fx-padding: 0 2; }
+.stock-detail-tabs { -fx-padding: 1; }
+.stock-detail-tabs > .tab-header-area > .headers-region > .tab { -fx-padding: 4 12; }
+.stock-detail-tabs .tab-pane > .tab-header-area > .headers-region > .tab { -fx-padding: 3 11; }
+
+/* ==================================================================
+   디테일 다듬기
+   배치와 색 체계는 그대로 두고, 비어 있던 상태 표현과 작은 컨트롤의 마감만
+   채운다. 눌림·포커스·탭 선택은 이미 정의되어 있어 건드리지 않는다.
+   크기를 바꾸는 규칙은 넣지 않아 큰 글자 모드의 계산을 흔들지 않는다.
+   ================================================================== */
+
+/* --- 비활성 -------------------------------------------------------
+   조회 중에는 기간 단추가 잠긴다. 흐려지기만 하면 왜 눌리지 않는지 알 수
+   없으므로 커서도 함께 바꿔, 마우스로도 잠긴 상태가 드러나게 한다. */
+.button:disabled, .toggle-button:disabled,
+.combo-box-base:disabled, .text-field:disabled, .spinner:disabled,
+.check-box:disabled {
+    -fx-opacity: 0.45;
+    -fx-cursor: default;
+}
+
+/* --- 표와 목록 ----------------------------------------------------
+   행을 훑을 때 지금 어느 줄인지 보이게 한다. 선택 색(#dfe9ff)보다 옅게 두어
+   "가리키는 중" 과 "고른 것" 이 구분되게 한다. */
+.table-row-cell:filled:hover { -fx-background-color: #f2f6fd; }
+.table-row-cell:filled:selected:hover { -fx-background-color: #d3e0fb; }
+.list-view > .virtual-flow .list-cell:filled:hover { -fx-background-color: #f2f6fd; }
+/* 열 이름은 값보다 약하게. 굵기로 위계를 만들고 크기는 건드리지 않는다. */
+.table-view .column-header .label { -fx-text-fill: #4e5968; -fx-font-weight: 700; }
+.table-view .column-header-background { -fx-border-color: transparent transparent #e3e8ef transparent; }
+/* 빈 행에 줄이 그어지면 자료가 더 있는 것처럼 보인다. */
+.table-row-cell:empty { -fx-border-color: transparent; -fx-background-color: transparent; }
+.table-view .placeholder .label { -fx-text-fill: #6b7684; }
+
+/* --- 스크롤막대 ---------------------------------------------------
+   내용 위에 얹히는 요소라 존재감을 낮춘다. 손이 닿으면 진해져서 잡기 쉽다.
+   사이드바와 호가창은 따로 정해 둔 폭이 있으므로 색만 손댄다. */
+.scroll-bar { -fx-background-color: transparent; }
+.scroll-bar > .track { -fx-background-color: transparent; -fx-border-color: transparent; }
+.scroll-bar > .thumb { -fx-background-color: #c9d1dc; -fx-background-radius: 999; }
+.scroll-bar > .thumb:hover { -fx-background-color: #aab4c2; }
+.scroll-bar > .thumb:pressed { -fx-background-color: #8b95a1; }
+.scroll-bar > .increment-button, .scroll-bar > .decrement-button {
+    -fx-background-color: transparent; -fx-padding: 0;
+}
+.scroll-bar > .increment-button > .increment-arrow,
+.scroll-bar > .decrement-button > .decrement-arrow { -fx-shape: " "; -fx-padding: 0; }
+
+/* --- 선택 컨트롤 --------------------------------------------------
+   체크와 라디오는 기본 모양이 작고 흐리다. 네모와 표시를 또렷하게 해
+   켜짐과 꺼짐이 멀리서도 구분되게 한다. */
+.check-box > .box, .radio-button > .radio {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #b8c0cc;
+    -fx-border-width: 2;
+}
+.check-box > .box { -fx-background-radius: 5; -fx-border-radius: 5; }
+.radio-button > .radio { -fx-background-radius: 999; -fx-border-radius: 999; }
+.check-box:hover > .box, .radio-button:hover > .radio { -fx-border-color: #2457e6; }
+.check-box:selected > .box, .radio-button:selected > .radio {
+    -fx-background-color: #2457e6; -fx-border-color: #2457e6;
+}
+.check-box:selected > .box > .mark { -fx-background-color: #ffffff; }
+.radio-button:selected > .radio > .dot { -fx-background-color: #ffffff; }
+
+/* --- 안내 풍선 ----------------------------------------------------
+   기본 풍선은 배경과 따로 논다. 화면과 같은 계열로 맞추고 줄바꿈을 허용해
+   긴 도움말이 한 줄로 늘어지지 않게 한다. */
+.tooltip {
+    -fx-background-color: #191f28;
+    -fx-text-fill: #ffffff;
+    -fx-background-radius: 8;
+    -fx-padding: 8 11;
+    -fx-font-size: 13px;
+    -fx-wrap-text: true;
+    -fx-max-width: 320;
+    -fx-effect: dropshadow(gaussian, rgba(25,31,40,0.28), 14, 0.10, 0, 4);
+}
+
+/* --- 탭에 손이 닿을 때 --------------------------------------------
+   고른 탭의 표시는 이미 있으므로, 가리키는 중이라는 것만 덧붙인다. */
+.tab-pane > .tab-header-area > .headers-region > .tab:hover {
+    -fx-background-color: #eef2f7;
+}
+
+/* --- 고대비 보정 ---------------------------------------------------
+   위에서 옅은 회색으로 둔 것들은 검은 배경에서 사라진다. 이 화면의 고대비
+   강조색인 노랑을 그대로 써서 다른 요소와 어긋나지 않게 한다. */
+.high-contrast .scroll-bar > .thumb { -fx-background-color: #ffffff; }
+.high-contrast .scroll-bar > .thumb:hover { -fx-background-color: #ffff00; }
+.high-contrast .table-row-cell:filled:hover,
+.high-contrast .list-view > .virtual-flow .list-cell:filled:hover {
+    -fx-background-color: #333300;
+}
+.high-contrast .check-box > .box, .high-contrast .radio-button > .radio {
+    -fx-background-color: #000000; -fx-border-color: #ffffff;
+}
+.high-contrast .check-box:selected > .box, .high-contrast .radio-button:selected > .radio {
+    -fx-background-color: #ffff00; -fx-border-color: #ffff00;
+}
+.high-contrast .check-box:selected > .box > .mark,
+.high-contrast .radio-button:selected > .radio > .dot { -fx-background-color: #000000; }
+.high-contrast .tooltip {
+    -fx-background-color: #000000; -fx-text-fill: #ffff00;
+    -fx-border-color: #ffff00; -fx-border-width: 1;
+}
+.high-contrast .table-view .column-header .label { -fx-text-fill: #ffffff; }
+.high-contrast .table-view .column-header-background {
+    -fx-border-color: transparent transparent #ffffff transparent;
+}
+.high-contrast .tab-pane > .tab-header-area > .headers-region > .tab:hover {
+    -fx-background-color: #333300;
+}
+
+/* ==================================================================
+   고대비에서 빠져 있던 자리
+   검은 배경 위에 밝은 배경 조각이 남아 있거나, 글자 색을 정해 주지 않아
+   기본 회색이 그대로 남은 곳들이다. 색을 구별하기 어려운 사용자에게는
+   "읽을 수 없는 칸" 이 되므로, 배경은 검정, 글자는 흰색, 강조는 노랑으로
+   화면 전체와 같은 규칙을 따르게 한다.
+   ================================================================== */
+
+/* --- 탭 -----------------------------------------------------------
+   고르지 않은 탭 이름이 기본 회색으로 남아 검은 배경에서 거의 보이지 않았다.
+   고른 탭만 흰 배경 조각으로 떠 있어 나머지 화면과도 어긋났다. */
+.high-contrast .tab-pane > .tab-header-area > .tab-header-background {
+    -fx-background-color: #000000;
+}
+.high-contrast .tab-pane > .tab-header-area > .headers-region > .tab {
+    -fx-background-color: #000000;
+    -fx-border-color: transparent transparent #ffffff transparent;
+    -fx-border-width: 0 0 1 0;
+}
+.high-contrast .tab-pane > .tab-header-area > .headers-region > .tab .tab-label {
+    -fx-text-fill: #ffffff;
+}
+/* 고른 탭은 색만이 아니라 굵은 밑줄로도 구분한다. */
+.high-contrast .tab-pane > .tab-header-area > .headers-region > .tab:selected {
+    -fx-background-color: #000000;
+    -fx-border-color: transparent transparent #ffff00 transparent;
+    -fx-border-width: 0 0 3 0;
+}
+.high-contrast .tab-pane > .tab-header-area > .headers-region > .tab:selected .tab-label {
+    -fx-text-fill: #ffff00;
+    -fx-font-weight: 800;
+}
+
+/* --- 칩과 배지 ----------------------------------------------------
+   연한 노랑·연두 배경에 어두운 글자를 얹어 두어, 고대비에서는 배경만 밝고
+   글자가 묻혔다. 배경을 검정으로 되돌리고 테두리로 형태를 남긴다. */
+.high-contrast .status-chip,
+.high-contrast .mode-badge,
+.high-contrast .positive-chip,
+.high-contrast .status-item {
+    -fx-background-color: #000000;
+    -fx-text-fill: #ffff00;
+    -fx-border-color: #ffff00;
+    -fx-border-width: 1;
+    -fx-border-radius: 999;
+}
+.high-contrast .mode-badge { -fx-border-radius: 6; }
+
+/* --- 콤보 상자 안쪽 ------------------------------------------------
+   바깥 테두리는 이미 흰색으로 맞춰 두었지만, 안에 표시되는 값과 펼친 목록은
+   기본 색이라 읽히지 않았다. */
+.high-contrast .combo-box > .list-cell,
+.high-contrast .combo-box-base > .list-cell {
+    -fx-background-color: #000000;
+    -fx-text-fill: #ffffff;
+}
+.high-contrast .combo-box .arrow,
+.high-contrast .combo-box-base .arrow { -fx-background-color: #ffffff; }
+.high-contrast .combo-box-popup > .list-view {
+    -fx-background-color: #000000;
+    -fx-border-color: #ffffff;
+}
+.high-contrast .combo-box-popup > .list-view > .virtual-flow .list-cell {
+    -fx-background-color: #000000;
+    -fx-text-fill: #ffffff;
+}
+.high-contrast .combo-box-popup > .list-view > .virtual-flow .list-cell:filled:hover,
+.high-contrast .combo-box-popup > .list-view > .virtual-flow .list-cell:filled:selected {
+    -fx-background-color: #ffff00;
+    -fx-text-fill: #000000;
+}
+
+/* --- 목록과 선택 행 ------------------------------------------------
+   고른 행이 옅은 파랑으로 남아 글자가 묻혔다. */
+.high-contrast .table-row-cell:filled:selected {
+    -fx-background-color: #ffff00;
+    -fx-text-fill: #000000;
+    -fx-text-background-color: #000000;
+}
+
+/* ==================================================================
+   크게 보기 창 — 그래프에 높이를 몰아준다
+   조작 안내 줄을 걷어내고 남은 자리는 캔들이 가져간다. 탭·도구 모음·닫기
+   버튼은 창을 여는 수단이지 읽을 내용이 아니므로 한 단계 낮춘다.
+   누르는 자리는 손가락이 닿을 만큼 남기고, 큰 글자 모드에서는 아래에서
+   다시 키워 접근성 쪽 계산을 흔들지 않는다.
+   ================================================================== */
+.large-chart-content { -fx-padding: 2 4 4 4; }
+.large-chart-toolbar { -fx-padding: 5 8; }
+.large-chart-toolbar .button,
+.large-chart-toolbar .toggle-button { -fx-min-height: 27; -fx-pref-height: 27; -fx-padding: 2 10; }
+.large-chart-content .tab-pane > .tab-header-area { -fx-padding: 0; }
+.large-chart-content .tab-pane > .tab-header-area > .headers-region > .tab {
+    -fx-padding: 3 12;
+    -fx-min-height: 26;
+}
+.large-chart-content .tab-pane > .tab-header-area > .headers-region > .tab .tab-label {
+    -fx-font-size: 13px;
+}
+/* 닫기 단추를 숨겼으므로 단추 줄이 남기던 여백도 없앤다. Esc 와 제목 표시줄의
+   닫기가 그 역할을 대신한다. */
+.large-chart-dialog > .button-bar {
+    -fx-padding: 0;
+    -fx-min-height: 0;
+    -fx-pref-height: 0;
+}
+
+/* 큰 글자 모드에서는 다시 키운다. 좁힌 것은 기본 크기에서만이다. */
+.large-text .large-chart-toolbar .button,
+.large-text .large-chart-toolbar .toggle-button { -fx-min-height: 40; -fx-pref-height: -1; }
+.large-text .large-chart-content .tab-pane > .tab-header-area > .headers-region > .tab {
+    -fx-padding: 6 16;
+    -fx-min-height: 40;
+}
+.large-text .large-chart-content .tab-pane > .tab-header-area > .headers-region > .tab .tab-label {
+    -fx-font-size: 17px;
+}
+
+/* ==================================================================
+   관심종목 별
+   글자 두 마디가 별 하나로 줄었다. 그만큼 좁혀야 한 줄에 들어가지만, 누르는
+   자리까지 좁히지는 않는다. 정사각형으로 두어 손이 닿을 넓이를 남긴다.
+   ================================================================== */
+.watchlist-toggle {
+    -fx-font-size: 19px;
+    -fx-min-width: 38;
+    -fx-pref-width: 38;
+    -fx-padding: 0;
+    -fx-text-fill: #f59e0b;
+}
+.watchlist-toggle:hover { -fx-text-fill: #d97706; }
+.large-text .watchlist-toggle {
+    -fx-font-size: 26px;
+    -fx-min-width: 50;
+    -fx-pref-width: 50;
+}
+.high-contrast .watchlist-toggle { -fx-text-fill: #ffff00; }
+
+/* ==================================================================
+   고대비 — 남아 있던 구멍 메우기
+   기본 테마(.figma-neutral-theme)는 고대비를 켜도 함께 걸려 있다. 그래서 밝은
+   배경이나 짙은 색 글자를 정한 규칙이 그대로 살아남아, 고대비의 흰 글자와
+   겹치면 글자가 사라진다. 실제로 홈의 선택된 기능 카드가 그랬다 — 배경
+   #f8fbff 에 흰 글자였다.
+   같은 선택자 깊이면 뒤에 온 규칙이 이긴다. 그래서 파일 끝에 모아 둔다.
+   깊이가 모자라면 이기지 못하므로, 원래 규칙만큼 깊게 적는다.
+
+   색으로만 구분하던 것은 색을 빼고 테두리와 글자로 옮긴다. 등락·경고는 이미
+   글에 "상승"·"경고" 가 적혀 있어 색이 없어도 뜻이 남는다.
+   ================================================================== */
+
+/* --- 뿌리와 껍데기: 밝은 판이 남아 있으면 그 위 글자가 전부 사라진다 --- */
+/* 바탕만 검게 한다. 여기에 -fx-border-color 까지 얹으면 안 된다 — JavaFX 는
+   테두리 색만 줘도 굵기 1 로 그리므로, 원래 테두리가 없던 껍데기마다 흰 상자가
+   생긴다. 검색칸 바깥에 이중 상자가 생긴 것이 그것이었다. */
+.high-contrast.app-root,
+.high-contrast .workspace,
+.high-contrast .settings-screen,
+.high-contrast .anomaly-screen,
+.high-contrast .trading-screen,
+.high-contrast .trading-order-area,
+.high-contrast .order-book-panel,
+.high-contrast .global-search-shell,
+.high-contrast .search-suggestion-popup,
+.high-contrast .sidebar-scroll,
+.high-contrast .stock-detail-summary {
+    -fx-background-color: #000000;
+    -fx-border-color: transparent;
+}
+
+/* 이쪽은 내용을 담는 상자다. 검은 바탕에서는 테두리가 없으면 어디서 시작하고
+   끝나는지 알 수 없으므로 흰 테두리를 남긴다. */
+.high-contrast .anomaly-shell,
+.high-contrast .sonification-chart,
+.high-contrast .estimate-box,
+.high-contrast .safety-note,
+.high-contrast .keyboard-help,
+.high-contrast .app-dialog,
+.high-contrast .header-panel,
+.high-contrast .stock-detail-summary .mini-metric,
+.high-contrast .ai-caveat-section,
+.high-contrast .ai-insight-card,
+.high-contrast .large-chart-toolbar,
+.high-contrast .status-bar {
+    -fx-background-color: #000000;
+    -fx-border-color: #ffffff;
+}
+
+/* --- 짙은 색 글자: 검은 바탕에서는 읽히지 않는다 --- */
+.high-contrast .stock-price,
+.high-contrast .muted-text,
+.high-contrast .feature-detail,
+.high-contrast .placeholder-copy,
+.high-contrast .placeholder,
+.high-contrast .card-title,
+.high-contrast .compact-value,
+.high-contrast .mini-value,
+.high-contrast .information-label,
+.high-contrast .app-dialog-title,
+.high-contrast .stock-detail-symbol,
+.high-contrast .search-popup-title,
+.high-contrast .search-popup-help,
+.high-contrast .search-suggestion-name,
+.high-contrast .search-suggestion-detail,
+.high-contrast .sidebar-product-name,
+.high-contrast .sonification-axis-label,
+.high-contrast .positive-text,
+.high-contrast .negative-text,
+.high-contrast .status-ok,
+.high-contrast .tone-positive .metric-detail,
+.high-contrast .tone-negative .metric-detail {
+    -fx-text-fill: #ffffff;
+}
+
+/* --- 색으로 뜻을 전하던 칩과 배지 ---
+   빨강·파랑 바탕을 검게 되돌리고, 뜻은 노란 테두리와 흰 글자로 남긴다.
+   글자에 이미 "상승"·"하락"·"경고" 가 적혀 있어 색이 빠져도 잃는 것이 없다. */
+.high-contrast .market-up,
+.high-contrast .market-down,
+.high-contrast .market-flat,
+.high-contrast .badge-price-up,
+.high-contrast .badge-price-down,
+.high-contrast .badge-volume,
+.high-contrast .state-success,
+.high-contrast .state-warning,
+.high-contrast .state-error,
+.high-contrast .state-info,
+.high-contrast .dashboard-tone-positive,
+.high-contrast .dashboard-tone-negative,
+.high-contrast .dashboard-tone-connection,
+.high-contrast .ai-status-normal,
+.high-contrast .ai-status-alert,
+.high-contrast .ai-status-unavailable,
+.high-contrast .ai-confidence-ok,
+.high-contrast .ai-confidence-warning,
+.high-contrast .ai-company-badge,
+.high-contrast .anomaly-high,
+.high-contrast .anomaly-status-normal,
+.high-contrast .anomaly-status-alert,
+.high-contrast .anomaly-signal-card,
+.high-contrast .rank-badge,
+.high-contrast .chat-suggestion-chip,
+.high-contrast .chat-pending,
+.high-contrast .status-mock {
+    -fx-background-color: #000000;
+    -fx-border-color: #ffff00;
+    -fx-text-fill: #ffffff;
+}
+.high-contrast .market-up .label,
+.high-contrast .market-down .label,
+.high-contrast .market-flat .label,
+.high-contrast .dashboard-tone-positive .dashboard-card-value,
+.high-contrast .dashboard-tone-negative .dashboard-card-value,
+.high-contrast .dashboard-tone-connection .dashboard-card-value,
+.high-contrast .ai-status-normal .label,
+.high-contrast .ai-status-alert .label,
+.high-contrast .anomaly-signal-card .label {
+    -fx-text-fill: #ffffff;
+}
+
+/* --- 아이콘: 파란 채움이 검은 바탕에 얹혀 거의 안 보였다 ---
+   원래 규칙이 세 겹이라 .high-contrast .nav-rail-icon 으로는 이기지 못한다. */
+.high-contrast .dashboard-feature-card .nav-rail-icon,
+.high-contrast .dashboard-feature-icon .nav-rail-icon,
+.high-contrast .nav-rail-button:hover .nav-rail-icon,
+.high-contrast .nav-rail-button:selected .nav-rail-icon {
+    -fx-fill: #ffff00;
+}
+.high-contrast .dashboard-feature-icon,
+.high-contrast .anomaly-title-icon { -fx-background-color: #000000; }
+.high-contrast .anomaly-status-icon,
+.high-contrast .anomaly-title-icon { -fx-text-fill: #ffff00; }
+.high-contrast .sonification-bar { -fx-background-color: #ffffff; }
+.high-contrast .sonification-bar:hover,
+.high-contrast .sonification-bar:selected { -fx-background-color: #ffff00; }
+
+/* --- 고른 자리·머문 자리 ---
+   밝게 칠해 알리던 방식은 검은 바탕에서 통째로 뒤집힌다. 바탕은 검게 두고
+   노란 테두리로 알린다. 색만으로 알리지 않으므로 여기서도 규칙이 같다. */
+.high-contrast .dashboard-feature-card:hover,
+.high-contrast .dashboard-feature-card:focused,
+.high-contrast .nav-rail-button:hover,
+.high-contrast .nav-rail-button:selected,
+.high-contrast .clickable-card:hover,
+.high-contrast .clickable-card:focused,
+.high-contrast .search-history-remove:hover,
+.high-contrast .chat-suggestion-chip:hover {
+    -fx-background-color: #000000;
+    -fx-border-color: #ffff00;
+    -fx-text-fill: #ffff00;
+}
+
+/* --- 단추: 색으로 위험을 알리던 것들 --- */
+.high-contrast .link-button,
+.high-contrast .search-history-remove,
+.high-contrast .button.search-history-remove,
+.high-contrast .chat-listen-button,
+.high-contrast .chat-answer-listen {
+    -fx-background-color: #000000;
+    -fx-border-color: #ffffff;
+    -fx-text-fill: #ffffff;
+}
+/* 매도와 되돌릴 수 없는 동작은 남과 달라야 한다. 색을 못 쓰니 테두리를 굵힌다. */
+.high-contrast .sell-button,
+.high-contrast .danger-button,
+.high-contrast .danger-outline-button,
+.high-contrast .danger-outline-button:hover {
+    -fx-background-color: #000000;
+    -fx-border-color: #ffff00;
+    -fx-border-width: 2;
+    -fx-text-fill: #ffff00;
+}
+
+/* --- 선과 칸막이: 회색 선은 검은 바탕에서 사라진다 ---
+   칸 전체를 칠하는 것과 밑줄 한 가닥을 긋는 것을 갈라 놓는다. 한데 묶었더니
+   설정 화면의 줄들이 통째로 흰 판이 되어, 그 위 흰 글자가 사라졌다.
+   진짜 칸막이만 배경을 칠하고, 밑줄로 나누는 칸은 테두리만 바꾼다. */
+.high-contrast .split-pane-divider,
+.high-contrast .trading-order-area > .split-pane-divider,
+.high-contrast .nav-rail-separator .line {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #ffffff;
+}
+/* 이 줄들은 밑줄 한 가닥으로 칸을 나눈다. 사방에 흰 테두리를 두르면 초점을 받은
+   칸과 그렇지 않은 칸이 똑같아 보인다 — 어디에 있는지가 안 읽힌다.
+   나누는 선만 남기고, 사방을 두르는 것은 초점 표시에게 넘긴다. */
+.high-contrast .information-row,
+.high-contrast .setting-toggle,
+.high-contrast .ai-insight-header,
+.high-contrast .sonification-axis {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent transparent #808080 transparent;
+}
+.high-contrast .progress-bar > .track { -fx-background-color: #000000; -fx-border-color: #ffffff; }
+.high-contrast .progress-bar > .bar { -fx-background-color: #ffff00; }
+/* 스위치는 칠해지는 것이 .box 다. 껍데기를 칠하면 원래 규칙이 그대로 이긴다. */
+.high-contrast .settings-switch > .box { -fx-background-color: #000000; -fx-border-color: #ffffff; }
+.high-contrast .settings-switch:selected > .box { -fx-background-color: #ffff00; -fx-border-color: #ffff00; }
+.high-contrast .settings-switch:selected > .box > .mark { -fx-background-color: #000000; }
+
+/* --- 노랑 위의 흰 글자 ---
+   고른 줄을 노랗게 칠하면서 글자색은 셀에만 걸어 두었다. 셀 안의 Label 은
+   .high-contrast .label 에서 흰색을 따로 받아 가, 노랑 위에 흰 글자가 됐다.
+   대비 1.07 대 1 — 사실상 안 보인다. 자식까지 검게 내린다. */
+.high-contrast .table-row-cell:filled:selected .label,
+.high-contrast .table-row-cell:filled:selected .text,
+.high-contrast .combo-box-popup > .list-view > .virtual-flow .list-cell:filled:selected .label,
+.high-contrast .combo-box-popup > .list-view > .virtual-flow .list-cell:filled:hover .label {
+    -fx-text-fill: #000000;
+}
+/* 노란 바탕 위의 막대도 마찬가지다. 흰 막대는 노랑에 묻힌다. */
+.high-contrast .table-row-cell:filled:selected .ladder-bar-track {
+    -fx-background-color: #ffff00;
+    -fx-border-color: #000000;
+}
+.high-contrast .table-row-cell:filled:selected .ladder-bar-ask,
+.high-contrast .table-row-cell:filled:selected .ladder-bar-bid {
+    -fx-background-color: #000000;
+}
+
+/* --- 왼쪽 이동 칸 ---
+   .button.nav-button.nav-rail-button 이 세 겹이라 .high-contrast .button 을
+   이긴다. 그래서 이 단추들만 밝은 테마의 색을 그대로 쓰고 있었다.
+   같은 깊이로 적어야 넘어온다. */
+.high-contrast .button.nav-button.nav-rail-button,
+.high-contrast .nav-rail-button {
+    -fx-background-color: #000000;
+    -fx-border-color: transparent;
+    -fx-text-fill: #ffffff;
+}
+.high-contrast .button.nav-button.nav-rail-button:hover,
+.high-contrast .button.nav-button.nav-rail-button:selected {
+    -fx-background-color: #000000;
+    -fx-text-fill: #ffff00;
+    -fx-border-color: #ffff00;
+    -fx-border-width: 0 0 0 3;
+}
+.high-contrast .nav-rail-icon-box,
+.high-contrast .nav-group-children { -fx-background-color: transparent; }
+.high-contrast .nav-button:hover { -fx-background-color: #333300; -fx-text-fill: #ffffff; }
+.high-contrast .nav-group-button:hover,
+.high-contrast .nav-group-button:expanded { -fx-background-color: #333300; }
+.high-contrast .sidebar-title,
+.high-contrast .sidebar-product-name { -fx-text-fill: #ffffff; }
+
+/* --- 대화상자 ---
+   확인·경고 창은 선택자가 자식 결합자까지 써서 더 깊다. 같은 깊이로 적어야
+   이긴다. 오류 창의 붉은 머리띠는 검게 되돌리고, 경고라는 사실은 노란
+   테두리와 글로 남긴다 — 색만으로 위험을 알리지 않는다. */
+.high-contrast .app-dialog > .content.label { -fx-text-fill: #ffffff; }
+.high-contrast .app-dialog > .button-bar { -fx-background-color: #000000; }
+.high-contrast .app-dialog > .button-bar .button {
+    -fx-background-color: #000000;
+    -fx-border-color: #ffffff;
+    -fx-text-fill: #ffffff;
+}
+.high-contrast .app-dialog.dialog-error > .header-panel,
+.high-contrast .app-dialog.dialog-information > .header-panel {
+    -fx-background-color: #000000;
+    -fx-border-color: #ffff00;
+}
+.high-contrast .app-dialog.dialog-error > .header-panel .label { -fx-text-fill: #ffff00; }
+.high-contrast .app-dialog.dialog-information > .header-panel .label { -fx-text-fill: #ffffff; }
+
+/* ==================================================================
+   질문 고르개
+   곁들이던 칩이 이제 이 화면의 유일한 조작 수단이다. 입력창이 사라진 자리를
+   대신하는 만큼, 곁다리처럼 작게 두면 무엇을 해야 할 화면인지 읽히지 않는다.
+   누르는 자리를 넉넉히 하고 글자도 본문 크기로 올린다.
+   ================================================================== */
+.chat-suggestion-label { -fx-font-size: 14px; -fx-text-fill: #4e5968; }
+.chat-suggestion-chip {
+    -fx-font-size: 15px;
+    -fx-padding: 10 18;
+    -fx-min-height: 40;
+    -fx-cursor: hand;
+}
+.large-text .chat-suggestion-label { -fx-font-size: 18px; }
+.large-text .chat-suggestion-chip { -fx-font-size: 19px; -fx-min-height: 52; -fx-padding: 12 22; }
+
+/* 기록은 하나로 이어지는데 답은 그때 고른 종목의 것이다. 그 경계를 눈에도 남긴다. */
+.chat-stock-marker {
+    -fx-font-size: 13px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #4e5968;
+    -fx-background-color: #f2f5f9;
+    -fx-background-radius: 999;
+    -fx-padding: 5 14;
+}
+.large-text .chat-stock-marker { -fx-font-size: 17px; -fx-padding: 7 18; }
+.high-contrast .chat-stock-marker {
+    -fx-background-color: #000000;
+    -fx-border-color: #ffff00;
+    -fx-border-radius: 999;
+    -fx-text-fill: #ffff00;
+}
+.high-contrast .chat-suggestion-label { -fx-text-fill: #ffffff; }
+
+/* ==================================================================
+   고대비 — 표와 목록의 줄
+   여기가 통째로 비어 있었다. 기본 테마가 흰 줄(#ffffff)과 옅은 줄무늬
+   (#fbfcfd), 밝은 머리글(#f1f4f8)을 칠하는데 고대비에는 맞받는 규칙이
+   없었다. 글자만 희게 바뀌니 흰 판에 흰 글자가 되어 줄이 통째로 사라졌다.
+   알림·검색·관심종목·보유종목이 전부 이 한 가지 때문이었다.
+
+   머리글은 테두리만 바꾸고 있었다. 배경을 안 건드려 밝은 채로 남았다.
+
+   줄무늬는 없애지 않고 어두운 쪽에서 나눈다. 줄이 어디서 끊기는지 보이는
+   것은 여러 칸을 가로질러 읽을 때 실제로 쓸모가 있다. 검정과 #1c1c1c 는
+   흰 글자에 각각 21대 1, 17대 1 로 둘 다 넉넉하다.
+   ================================================================== */
+.high-contrast .table-row-cell,
+.high-contrast .list-view > .virtual-flow .list-cell {
+    -fx-background-color: #000000;
+    -fx-text-background-color: #ffffff;
+    -fx-border-color: transparent transparent #4d4d4d transparent;
+}
+.high-contrast .table-row-cell:odd,
+.high-contrast .list-view > .virtual-flow .list-cell:odd {
+    -fx-background-color: #1c1c1c;
+}
+.high-contrast .table-row-cell:empty,
+.high-contrast .list-view > .virtual-flow .list-cell:empty {
+    -fx-background-color: #000000;
+    -fx-border-color: transparent;
+}
+/* 칸 안의 Label 은 줄에서 색을 물려받지 않고 따로 받아 간다. */
+.high-contrast .table-row-cell .label,
+.high-contrast .table-row-cell .text,
+.high-contrast .list-view > .virtual-flow .list-cell .label {
+    -fx-text-fill: #ffffff;
+}
+
+/* 머리글: 테두리만 바꾸던 자리에 배경까지 넣는다. */
+.high-contrast .table-view .column-header-background,
+.high-contrast .table-view .column-header,
+.high-contrast .table-view .column-header .filler,
+.high-contrast .table-view > .column-header-background > .filler {
+    -fx-background-color: #000000;
+}
+.high-contrast .table-view .column-header-background {
+    -fx-border-color: transparent transparent #ffffff transparent;
+}
+.high-contrast .table-view .column-header {
+    -fx-border-color: transparent #4d4d4d transparent transparent;
+}
+
+/* --- 고대비: 밝게 칠하던 나머지 상태들 ---
+   기본 테마는 "머문 자리"와 "초점 받은 칸"을 밝게 칠해서 알린다. 검은 바탕에서는
+   그 방식이 통째로 뒤집힌다 — 흰 판에 흰 글자가 되어, 초점을 받은 칸은 지금
+   무엇을 치고 있는지조차 보이지 않는다. 바탕은 검게 두고 노란 테두리로 알린다. */
+.high-contrast .button:hover,
+.high-contrast .toggle-button:hover {
+    -fx-background-color: #333300;
+    -fx-text-fill: #ffffff;
+}
+.high-contrast .text-field:focused,
+.high-contrast .text-area:focused,
+.high-contrast .combo-box:focused,
+.high-contrast .spinner:focused,
+.high-contrast .date-picker,
+.high-contrast .date-picker:focused,
+.high-contrast .tree-view {
+    -fx-background-color: #000000;
+    -fx-text-fill: #ffffff;
+}
+.high-contrast .list-cell {
+    -fx-background-color: #000000;
+    -fx-text-fill: #ffffff;
+    -fx-text-background-color: #ffffff;
+}
+.high-contrast .list-cell:odd { -fx-background-color: #1c1c1c; }
+
+/* 고른 줄을 노랗게 칠하고 글자를 검게 뒤집는 방식은 한 줄짜리 표에서만 쓴다.
+   표의 칸은 글자 하나뿐이라 함께 뒤집으면 끝난다.
+
+   목록은 다르다. 이 앱의 목록 칸에는 종목·배지·문장·시각이 함께 들어 있어,
+   뒤집으려면 그 안의 모든 Label 을 빠짐없이 따라가야 한다. 더 구체적인 규칙을
+   덧대 보았지만 안쪽 글자가 검게 남아 칸이 통째로 빈 상자로 보였다.
+   덧대는 대신 아예 뒤집지 않는다 — 목록은 노란 테두리로만 고른 자리를 알린다.
+   안에 무엇이 몇 개 들어오든 깨지지 않는 방식이다. */
+.high-contrast .table-row-cell:selected {
+    -fx-background-color: #ffff00;
+    -fx-text-fill: #000000;
+    -fx-text-background-color: #000000;
+}
+.high-contrast .table-row-cell:selected .label { -fx-text-fill: #000000; }
+.high-contrast .list-cell:selected,
+.high-contrast .list-view > .virtual-flow .list-cell:filled:selected {
+    -fx-background-color: #000000;
+    -fx-text-fill: #ffffff;
+    -fx-text-background-color: #ffffff;
+    -fx-border-color: #ffff00;
+    -fx-border-width: 3;
+}
+.high-contrast .list-cell:selected .label { -fx-text-fill: #ffffff; }
+.high-contrast .nav-button:selected {
+    -fx-background-color: #000000;
+    -fx-text-fill: #ffff00;
+    -fx-border-color: #ffff00;
+}
+
+/* ==================================================================
+   고대비 — 미끄럼대(음량)
+   규칙이 하나도 없어 기본 스킨을 그대로 썼다. 고대비는 -fx-base 를 검정으로
+   바꾸는데, 그러면 홈이 검정 위 검정이 되어 사라진다. 손잡이만 파랗게 남아
+   어디까지가 0이고 어디까지가 100인지 알 수 없었다.
+   채워진 쪽을 노랗게 두어 지금 값이 어디인지 색으로도 읽히게 한다.
+   ================================================================== */
+.volume-slider > .track {
+    -fx-pref-height: 4;
+    -fx-min-height: 4;
+    -fx-max-height: 4;
+    /* JavaFX는 지나치게 큰 반경을 트랙의 선호 폭에 반영한다. 999를 쓰면 큰
+       글자에서 4px 트랙이 약 2400px로 늘어나므로 실제 높이에 맞춘다. */
+    -fx-background-radius: 4;
+}
+.settings-volume-control {
+    -fx-alignment: center-left;
+    -fx-padding: 6 2;
+    -fx-min-height: 38;
+}
+.settings-volume-control .volume-slider {
+    -fx-min-width: 0;
+    -fx-pref-width: 400;
+    -fx-max-width: 420;
+    -fx-min-height: 26;
+    -fx-pref-height: 26;
+}
+.volume-value {
+    -fx-min-width: 60;
+    -fx-pref-width: 60;
+    -fx-max-width: 60;
+    -fx-alignment: center-right;
+    -fx-font-weight: 800;
+}
+.high-contrast .slider > .track {
+    -fx-background-color: #000000;
+    -fx-background-insets: 0;
+    -fx-background-radius: 4;
+    -fx-border-color: #ffffff;
+    -fx-border-width: 1.5;
+    -fx-border-radius: 4;
+}
+.high-contrast .slider > .thumb {
+    -fx-background-color: #ffff00;
+    -fx-background-insets: 0;
+    -fx-background-radius: 999;
+    -fx-border-color: #000000;
+    -fx-border-width: 2;
+    -fx-border-radius: 999;
+    -fx-pref-width: 18;
+    -fx-pref-height: 18;
+}
+.high-contrast .slider:focused > .track {
+    -fx-border-color: #ffff00;
+    -fx-border-width: 2;
+}
+.high-contrast .slider:focused > .thumb { -fx-border-color: #ffffff; }
+.high-contrast .volume-value { -fx-text-fill: #ffff00; }
+.high-contrast .slider .axis,
+.high-contrast .slider .axis-tick-mark,
+.high-contrast .slider .axis-minor-tick-mark { -fx-stroke: #ffffff; }
+.high-contrast .slider .axis .text,
+.high-contrast .slider .axis-label,
+.high-contrast .slider .tick-label { -fx-fill: #ffffff; -fx-text-fill: #ffffff; }
+
+/* 설정 화면의 탭 아래를 갈라 둔다. 여백 없이 붙어 있어 스크롤로 반쯤 지나간
+   줄이 "잘린 것" 처럼 보였다. 선이 있으면 그 아래로 흘러가는 것으로 읽힌다. */
+.settings-tabs > .tab-content-area { -fx-padding: 6 0 0 0; }
+.high-contrast .settings-tabs > .tab-content-area {
+    -fx-border-color: #ffffff transparent transparent transparent;
+    -fx-border-width: 1 0 0 0;
+}
+
+/* ==================================================================
+   고대비 — 초점 표시
+   색만 노랑으로 바꾸고 굵기와 여백은 정하지 않아, 초점을 받은 칸이 다른
+   테마처럼 또렷한 상자로 보이지 않았다. 초점이 어디 있는지는 키보드만 쓰는
+   사용자에게 화면의 위치 감각 전부다. 고대비는 그것이 가장 필요한 모드다.
+
+   다른 테마와 같은 굵기(3)와 같은 여백(-2)을 그대로 쓴다. 모드를 바꿨다고
+   초점 상자의 모양까지 달라지면, 같은 화면을 오갈 때 눈이 매번 다시 찾는다.
+   ================================================================== */
+.high-contrast .button:focused,
+.high-contrast .toggle-button:focused,
+.high-contrast .text-field:focused,
+.high-contrast .text-area:focused,
+.high-contrast .combo-box:focused,
+.high-contrast .combo-box-base:focused,
+.high-contrast .spinner:focused,
+.high-contrast .table-view:focused,
+.high-contrast .list-view:focused,
+.high-contrast .check-box:focused,
+.high-contrast .radio-button:focused,
+.high-contrast .setting-toggle:focused,
+.high-contrast .settings-switch:focused,
+.high-contrast .clickable-card:focused,
+.high-contrast .dashboard-feature-card:focused,
+.high-contrast .chat-suggestion-chip:focused,
+.high-contrast .watchlist-toggle:focused {
+    -fx-border-color: #ffff00;
+    -fx-border-width: 3;
+    -fx-border-insets: -2;
+    -fx-border-radius: 4;
+}
+/* 표와 목록은 줄 하나가 초점을 받는다. 컨트롤 테두리로는 그 줄이 짚이지 않는다. */
+.high-contrast .table-row-cell:focused,
+.high-contrast .list-view > .virtual-flow .list-cell:focused {
+    -fx-border-color: #ffff00;
+    -fx-border-width: 2;
+}
+
+/* 주요 단추의 머문 자리와 콤보 목록의 초점 자리. 다른 테마에만 있고 고대비에는
+   빠져 있었다. #1747b0 과 #e8efff 는 검은 바탕에서 각각 너무 어둡고 너무 밝다. */
+.high-contrast .button.primary-button:hover,
+.high-contrast .primary-button:hover {
+    -fx-background-color: #ffff00;
+    -fx-text-fill: #000000;
+}
+.high-contrast .combo-box-popup .list-cell:filled:focused {
+    -fx-background-color: #ffff00;
+    -fx-text-fill: #000000;
+}
+
+/* ==================================================================
+   고대비 — 여러 줄짜리 카드의 선택 표시
+   한 줄짜리 표에서는 줄을 노랗게 칠하고 글자를 검게 뒤집는 방식이 통한다.
+   그런데 이상 신호 카드는 제목·시각·본문·배지가 한 칸에 들어 있어, 뒤집으려면
+   그 안의 모든 것을 함께 뒤집어야 한다. 하나라도 놓치면 검정 위 검정이 된다.
+   실제로 그렇게 됐다 — 고른 카드가 글자 없는 빈 상자로 보였다.
+
+   그래서 이런 칸은 색을 뒤집지 않는다. 바탕과 글자는 그대로 두고 노란 테두리를
+   굵혀 알린다. 안쪽에 무엇이 몇 개 들어오든 깨지지 않는 방식이다.
+   ================================================================== */
+.high-contrast .anomaly-signal-list .list-cell:selected,
+.high-contrast .anomaly-signal-list .list-cell:focused:selected {
+    -fx-background-color: #000000;
+    -fx-border-color: #ffff00;
+    -fx-border-width: 3;
+    -fx-border-radius: 8;
+}
+.high-contrast .anomaly-signal-list .list-cell:selected .label,
+.high-contrast .anomaly-signal-list .list-cell:focused:selected .label,
+.high-contrast .anomaly-signal-list .list-cell:selected .anomaly-signal-name,
+.high-contrast .anomaly-signal-list .list-cell:selected .anomaly-signal-time,
+.high-contrast .anomaly-signal-list .list-cell:selected .anomaly-signal-message {
+    -fx-text-fill: #ffffff;
+}
+.high-contrast .anomaly-signal-list .list-cell:selected .anomaly-signal-badge {
+    -fx-background-color: #000000;
+    -fx-border-color: #ffff00;
+    -fx-text-fill: #ffff00;
+}
+/* 같은 이유로 검색 제안과 채팅 기록의 여러 줄 칸도 색을 뒤집지 않는다. */
+.high-contrast .search-suggestion-panel .list-cell:selected,
+.high-contrast .search-suggestion-panel .list-cell:filled:hover {
+    -fx-background-color: #000000;
+    -fx-border-color: #ffff00;
+    -fx-border-width: 2;
+}
+.high-contrast .search-suggestion-panel .list-cell:selected .label,
+.high-contrast .search-suggestion-panel .list-cell:filled:hover .label {
+    -fx-text-fill: #ffffff;
+}
+
+/* 한 줄로 줄인 이상 신호. 문장만 줄어들고 종목·배지·시각은 제자리를 지킨다.
+   큰 글자에서도 한 줄이 유지되도록 글자 크기 차이를 조금 좁힌다. */
+.anomaly-signal-message { -fx-text-overrun: ellipsis; }
+.large-text .anomaly-signal-name { -fx-font-size: 19px; }
+.large-text .anomaly-signal-message { -fx-font-size: 17px; }
+.large-text .anomaly-signal-time { -fx-font-size: 15px; }
+
+
+
+/* ==================================================================
+   고대비 — 테두리는 카드에만
+   앞쪽 규칙이 화면 껍데기와 스크롤 칸까지 흰 테두리를 준다. 컨테이너가 겹치는
+   만큼 액자가 겹쳐 그려져, 내용이 없는 큰 상자가 화면마다 남는다. 특히 아직
+   불러오는 중인 화면은 빈 액자만 크게 보인다.
+
+   테두리가 필요한 것은 검은 바탕에서 "여기까지가 한 덩어리" 를 알려야 하는
+   카드다. 화면 전체를 감싸는 껍데기와 스크롤 칸은 그럴 일이 없다 — 그 경계는
+   창 자체가 이미 알려 준다.
+
+   탭 칸(.tab-pane)은 빼지 않는다. 밝은 테마에서 테두리를 가진 상자이고, 계좌·종목
+   상세·주문 상태가 그 상자로 내용을 묶는다. 여기만 지우면 같은 화면이 테마에 따라
+   다른 구조로 보인다.
+
+   글자와 배경의 대비는 그대로다. 지우는 것은 선뿐이다.
+   ================================================================== */
+.high-contrast .screen-content,
+.high-contrast .workspace-scroll,
+.high-contrast .workspace-scroll > .viewport,
+.high-contrast .settings-tab-scroll,
+.high-contrast .settings-tab-scroll > .viewport,
+.high-contrast .settings-shell,
+.high-contrast .settings-tab-content,
+.high-contrast .chat-screen,
+/* 대화 기록은 노드가 세 겹이다 — 스크롤 칸, 뷰포트, 메시지 묶음. 셋 다 테두리를
+   받으면 안쪽 묶음의 아래 모서리가 메시지가 끝나는 자리에 선으로 나타난다.
+   상자는 가장 바깥(.chat-log-scroll) 하나면 된다. */
+.high-contrast .chat-log,
+.high-contrast .chat-log-scroll > .viewport,
+.high-contrast .dashboard-screen,
+.high-contrast .dashboard-shell,
+.high-contrast .anomaly-shell,
+.high-contrast .sidebar {
+    -fx-border-color: transparent;
+}

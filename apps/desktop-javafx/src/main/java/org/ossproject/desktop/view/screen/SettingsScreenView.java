@@ -9,14 +9,19 @@ import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.Control;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Slider;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.ColumnConstraints;
 import javafx.scene.layout.GridPane;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.util.StringConverter;
@@ -108,6 +113,7 @@ public final class SettingsScreenView {
         // 탭 묶음에 이름이 없으면 스크린리더가 "탭 목록" 이라고만 읽는다. 무엇에 대한
         // 탭인지 알 수 없다.
         tabs.setAccessibleText("설정 탭");
+        tabs.setAccessibleHelp("Control+Tab 다음 설정 탭, Control+Shift+Tab 이전 설정 탭");
 
         Label description = new Label("음성, 화면, 연결과 거래 안전 설정을 관리합니다.");
         description.getStyleClass().add("muted-text");
@@ -122,6 +128,17 @@ public final class SettingsScreenView {
         body.getStyleClass().addAll("screen-content", "settings-screen");
         body.setPadding(new Insets(12));
         body.setMinSize(0, 0);
+        body.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
+            if (event.isControlDown() && event.getCode() == KeyCode.TAB) {
+                int count = tabs.getTabs().size();
+                int current = Math.max(0, tabs.getSelectionModel().getSelectedIndex());
+                int next = event.isShiftDown()
+                        ? (current - 1 + count) % count
+                        : (current + 1) % count;
+                tabs.getSelectionModel().select(next);
+                event.consume();
+            }
+        });
         VBox.setVgrow(centered, Priority.ALWAYS);
         return body;
     }
@@ -133,8 +150,13 @@ public final class SettingsScreenView {
     }
 
     private VBox accessibilityTab() {
-        CheckBox speech = setting("화면 읽기(TTS)", preferences.speechEnabled(),
+        // "화면 읽기(TTS)" 라고 적혀 있었다. 그런데 이것을 꺼도 "듣기" 단추는 그대로
+        // 읽어 준다 — 부른 것과 부르지 않아도 읽어 주는 것은 다른 일이라서다.
+        // 이름이 실제로 하는 일과 어긋나면 사용자는 끄기를 주저한다.
+        CheckBox speech = setting("자동으로 읽어 주기", preferences.speechEnabled(),
                 value -> change(current.withSpeechEnabled(value)));
+        speech.setAccessibleHelp("화면이 바뀌거나 목록을 옮길 때 스스로 읽어 줍니다. "
+                + "꺼도 '듣기' 단추를 누르면 읽어 줍니다.");
         CheckBox keyboard = setting("키보드 탐색 안내", preferences.keyboardGuidanceEnabled(),
                 value -> change(current.withKeyboardGuidanceEnabled(value)));
         CheckBox reducedMotion = setting("그림자·시각 효과 줄이기", preferences.reducedMotionEnabled(),
@@ -153,11 +175,28 @@ public final class SettingsScreenView {
         GridPane voiceSettings = new GridPane();
         voiceSettings.setHgap(16);
         voiceSettings.setVgap(10);
-        addField(voiceSettings, 0, "음성", voice);
-        addField(voiceSettings, 1, "속도", speed);
-        addField(voiceSettings, 2, "음량", volume);
-        addField(voiceSettings, 3, "마이크", microphoneBox());
-        voiceSettings.getColumnConstraints().addAll(equalColumn(), equalColumn());
+        addBoundedSettingField(voiceSettings, 0, "음성", voice);
+        addBoundedSettingField(voiceSettings, 1, "속도", speed);
+        Label volumeTitle = new Label("음량");
+        volumeTitle.setLabelFor(volume);
+        Label volumeValue = new Label(Math.round(volume.getValue()) + "%");
+        volumeValue.getStyleClass().add("volume-value");
+        volume.valueProperty().addListener((observable, old, value) ->
+                volumeValue.setText(Math.round(value.doubleValue()) + "%"));
+        HBox volumeControl = new HBox(12, volume, volumeValue);
+        volumeControl.setAlignment(Pos.CENTER_LEFT);
+        // 큰 글자와 고대비를 함께 켜면 GridPane 이 남은 폭을 이 행에 모두 내주기도
+        // 한다. 슬라이더까지 무한히 자라게 두면 막대가 왼쪽 제목 칸을 가로질러
+        // 카드 끝까지 그려진다. 음량 조절에 충분한 폭만 명시적으로 사용한다.
+        volumeControl.setMinWidth(0);
+        volumeControl.setPrefWidth(520);
+        volumeControl.setMaxWidth(520);
+        volumeControl.getStyleClass().add("settings-volume-control");
+        HBox.setHgrow(volume, Priority.ALWAYS);
+        addBoundedSettingField(voiceSettings, 2, volumeTitle, volumeControl);
+        addBoundedSettingField(voiceSettings, 3, "마이크", microphoneBox());
+        voiceSettings.getColumnConstraints().addAll(
+                expandingSettingLabelColumn(), boundedSettingControlColumn());
 
         Button preview = new Button("설정 미리 듣기");
         preview.setOnAction(event -> actions.onPreview().accept(
@@ -266,8 +305,15 @@ public final class SettingsScreenView {
 
     private Slider volumeSlider() {
         Slider slider = new Slider(0, 100, preferences.speechVolume());
-        slider.setShowTickLabels(true);
-        slider.setMajorTickUnit(25);
+        slider.getStyleClass().add("volume-slider");
+        slider.setMinWidth(0);
+        slider.setPrefWidth(400);
+        slider.setMaxWidth(420);
+        // 숫자 눈금은 슬라이더의 실제 높이보다 크게 잡혀 고대비 초점 테두리와 다음 행을
+        // 침범했다. 현재 값은 오른쪽의 퍼센트 글자로 보여 주고, 막대 자체는 한 줄로 둔다.
+        slider.setShowTickLabels(false);
+        slider.setShowTickMarks(false);
+        slider.setBlockIncrement(5);
         // 옆 라벨을 labelFor 로 걸어도 슬라이더 자신에게는 이름이 남지 않는다. 초점이
         // 들어왔을 때 "슬라이더 40" 만 들리면 무엇의 40인지 알 수 없다.
         slider.setAccessibleText("음성 음량");
@@ -369,13 +415,49 @@ public final class SettingsScreenView {
         scroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
         scroll.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
         scroll.getStyleClass().add("settings-tab-scroll");
+        useBrowserLikeScrolling(scroll);
         return tab(title, scroll);
     }
 
-    private static ColumnConstraints equalColumn() {
+    private static void addBoundedSettingField(GridPane form, int row,
+                                               String labelText, Control control) {
+        Label label = new Label(labelText);
+        label.setLabelFor(control);
+        addBoundedSettingField(form, row, label, control);
+    }
+
+    private static void addBoundedSettingField(GridPane form, int row,
+                                               Label label, Region control) {
+        control.setMinWidth(0);
+        control.setPrefWidth(520);
+        control.setMaxWidth(520);
+        form.add(label, 0, row);
+        form.add(control, 1, row);
+        GridPane.setHgrow(control, Priority.NEVER);
+        GridPane.setFillWidth(control, true);
+    }
+
+    /**
+     * 왼쪽 제목 열만 남는 폭을 흡수한다. 긴 장치 이름이 있는 오른쪽 열을 비율 열로
+     * 만들면 큰 글자에서 그리드의 계산 폭이 화면보다 커지고 슬라이더 트랙도 함께
+     * 늘어나므로, 제어 열은 명시적으로 제한한다.
+     */
+    private static ColumnConstraints expandingSettingLabelColumn() {
         ColumnConstraints column = new ColumnConstraints();
-        column.setPercentWidth(50);
+        column.setMinWidth(120);
+        column.setPrefWidth(160);
+        column.setMaxWidth(Double.MAX_VALUE);
         column.setHgrow(Priority.ALWAYS);
+        column.setFillWidth(true);
+        return column;
+    }
+
+    private static ColumnConstraints boundedSettingControlColumn() {
+        ColumnConstraints column = new ColumnConstraints();
+        column.setMinWidth(0);
+        column.setPrefWidth(520);
+        column.setMaxWidth(520);
+        column.setHgrow(Priority.NEVER);
         column.setFillWidth(true);
         return column;
     }

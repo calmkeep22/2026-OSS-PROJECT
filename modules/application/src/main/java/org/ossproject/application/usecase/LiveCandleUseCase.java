@@ -12,6 +12,8 @@ import org.ossproject.finance.model.market.Quote;
 import java.time.Clock;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
@@ -36,6 +38,9 @@ public final class LiveCandleUseCase implements QuoteListener, AutoCloseable {
     private final CandleAggregator aggregator;
     private final Clock clock;
     private final List<CandleListener> listeners = new CopyOnWriteArrayList<>();
+    // 스트림은 화면 전체가 함께 쓴다. 관심 없는 종목의 체결까지 집계하면 남의 가격이
+    // 이 차트의 마지막 봉으로 섞여 들어간다.
+    private final Set<String> tracked = ConcurrentHashMap.newKeySet();
 
     public LiveCandleUseCase(CandleQueryPort candles, MarketDataStreamPort stream,
                              CandleInterval interval, Clock clock) {
@@ -85,12 +90,14 @@ public final class LiveCandleUseCase implements QuoteListener, AutoCloseable {
         if (history != null && !history.isEmpty()) {
             aggregator.prime(symbol, history.get(history.size() - 1), clock.instant());
         }
+        tracked.add(symbol);
         stream.subscribe(List.of(symbol));
     }
 
     /** 구독을 멈추고 쌓아 둔 상태를 비운다. */
     public void stop(String symbol) {
         requireSymbol(symbol);
+        tracked.remove(symbol);
         stream.unsubscribe(List.of(symbol));
         aggregator.forget(symbol);
     }
@@ -112,6 +119,9 @@ public final class LiveCandleUseCase implements QuoteListener, AutoCloseable {
 
     @Override
     public void onQuote(Quote quote) {
+        if (quote == null || !tracked.contains(quote.symbol())) {
+            return;
+        }
         aggregator.onQuote(quote).ifPresent(result -> {
             result.completed().ifPresent(this::notifyCompleted);
             notifyUpdated(result.candle());
@@ -149,6 +159,7 @@ public final class LiveCandleUseCase implements QuoteListener, AutoCloseable {
     public void close() {
         stream.removeQuoteListener(this);
         listeners.clear();
+        tracked.clear();
     }
 
     private static void requireSymbol(String symbol) {

@@ -30,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.ossproject.desktop.chart.AccessibleChartController.ListeningPeriod;
 
 class AccessibleChartControllerTest {
     private static final SecurityId SECURITY = new SecurityId("005930", Exchange.KRX);
@@ -46,9 +47,41 @@ class AccessibleChartControllerTest {
                 controller.samples().stream().map(sample -> sample.value()).toList());
         assertEquals(List.of(START, START.plus(Duration.ofDays(1)), START.plus(Duration.ofDays(2))),
                 controller.samples().stream().map(sample -> sample.timestamp()).toList());
-        assertEquals("일봉 3개 종가", controller.seriesDescription());
+        assertEquals("1개월 · 일봉 3개 종가 · 약 12초", controller.seriesDescription());
         assertEquals(0, market.candleQueries);
 
+        controller.close();
+    }
+
+    @Test
+    void defaultsToOneMonthAndLoadsTheStandardIntervalOnlyOncePerPeriod() {
+        CapturingMarket market = new CapturingMarket();
+        RecordingSonificationPort audio = new RecordingSonificationPort();
+        List<Candle> history = new ArrayList<>();
+        for (int day = 0; day < 100; day++) {
+            Instant timestamp = START.plus(Duration.ofDays(day));
+            history.add(candle(timestamp, "70000", "71000", "69000",
+                    Integer.toString(70_000 + day)));
+        }
+        AccessibleChartController controller = new AccessibleChartController(
+                SECURITY, stock(), history, "일봉", market, audio,
+                (text, key) -> { }, ignored -> { }, Runnable::run);
+
+        assertEquals(ListeningPeriod.MONTH, controller.listeningPeriod());
+        assertEquals(32, controller.samples().size());
+        assertTrue(controller.seriesDescription().startsWith("1개월 · 일봉 32개"));
+
+        controller.setListeningPeriod(ListeningPeriod.WEEK).toCompletableFuture().join();
+
+        assertEquals(3, controller.samples().size());
+        assertEquals(1, market.candleQueries);
+        assertEquals(CandleInterval.MINUTE_60, market.lastCandleInterval);
+        assertEquals(35, market.lastCandleCount);
+        assertTrue(controller.seriesDescription().startsWith("1주 · 60분봉 3개"));
+
+        controller.setListeningPeriod(ListeningPeriod.MONTH).toCompletableFuture().join();
+        controller.setListeningPeriod(ListeningPeriod.WEEK).toCompletableFuture().join();
+        assertEquals(1, market.candleQueries, "이미 받은 기간은 다시 조회하지 않는다");
         controller.close();
     }
 
@@ -125,7 +158,7 @@ class AccessibleChartControllerTest {
             CapturingMarket market, RecordingSonificationPort audio
     ) {
         return new AccessibleChartController(
-                SECURITY, stock(), candles(), "일봉 3개 종가", market, audio,
+                SECURITY, stock(), candles(), "일봉", market, audio,
                 (text, key) -> { }, ignored -> { }, Runnable::run);
     }
 
@@ -156,6 +189,8 @@ class AccessibleChartControllerTest {
         private int subscriptionCloses;
         private int closeCalls;
         private int candleQueries;
+        private CandleInterval lastCandleInterval;
+        private int lastCandleCount;
 
         @Override public CompletionStage<List<SecuritySummary>> search(String query, int limit) {
             return CompletableFuture.completedFuture(List.of());
@@ -169,6 +204,8 @@ class AccessibleChartControllerTest {
                 SecurityId security, CandleInterval interval, int count
         ) {
             candleQueries++;
+            lastCandleInterval = interval;
+            lastCandleCount = count;
             return CompletableFuture.completedFuture(candles());
         }
 

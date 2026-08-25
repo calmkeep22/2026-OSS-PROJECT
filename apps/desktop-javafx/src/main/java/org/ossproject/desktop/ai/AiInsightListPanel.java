@@ -46,12 +46,14 @@ public final class AiInsightListPanel {
 
     public AiInsightListPanel(Consumer<String> onListen) {
         this.onListen = Objects.requireNonNull(onListen, "onListen");
-        headline.getStyleClass().add("card-title");
+        root.getStyleClass().add("ai-insight-list");
+        headline.getStyleClass().addAll("card-title", "ai-insight-list-title");
         headline.setWrapText(true);
         headline.setMinHeight(Region.USE_PREF_SIZE);
         spinner.setPrefSize(20, 20);
         HBox header = new HBox(10, headline, spinner);
         header.setAlignment(Pos.CENTER_LEFT);
+        header.getStyleClass().add("ai-insight-list-header");
         root.getChildren().addAll(header, cards);
         waiting();
     }

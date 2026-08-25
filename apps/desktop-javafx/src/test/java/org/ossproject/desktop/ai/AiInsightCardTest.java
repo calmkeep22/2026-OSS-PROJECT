@@ -1,14 +1,26 @@
 package org.ossproject.desktop.ai;
 
 import javafx.scene.Scene;
+import javafx.scene.Node;
+import javafx.scene.Parent;
 import javafx.scene.control.Label;
+import javafx.scene.control.Labeled;
 import javafx.scene.layout.StackPane;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.ossproject.ai.AiInsight;
+import org.ossproject.ai.AnomalySignal;
 import org.ossproject.ai.Confidence;
+import org.ossproject.ai.Forecast;
 import org.ossproject.desktop.testsupport.JavaFxToolkit;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -97,5 +109,47 @@ class AiInsightCardTest {
             assertTrue(narration.getHeight() > 30,
                     "눌려서 한 줄만 남으면 안 됩니다. 높이 " + narration.getHeight());
         });
+    }
+
+    @Test
+    @DisplayName("긴 문장보다 먼저 상태와 핵심 수치를 구조화해 보여 준다")
+    void presentsTheKeyFactsAsScannableMetrics() {
+        JavaFxToolkit.onFxThread(() -> {
+            LocalDate target = LocalDate.of(2026, 8, 25);
+            AnomalySignal anomaly = new AnomalySignal(false, "정상", "하락",
+                    LocalDate.of(2026, 8, 24), new BigDecimal("-8.7"), "높음",
+                    "변동이 큰 편입니다. 분할 매수를 권합니다.");
+            Forecast volatility = new Forecast("변동성", "크게움직임",
+                    new BigDecimal("47"), target, false, true);
+            Forecast direction = new Forecast("방향", "상승", new BigDecimal("62.8"),
+                    target, false, false);
+            AiInsight insight = new AiInsight("005930", "삼성전자", LONG_NARRATION,
+                    Confidence.HIGH, true, Optional.of(volatility), Optional.of(direction),
+                    Optional.of(anomaly), List.of(), Optional.empty(), Map.of());
+
+            AiInsightCard card = new AiInsightCard("삼성전자", text -> { });
+            card.show(insight);
+
+            List<String> texts = textsOf(card.root());
+            assertTrue(texts.contains("정상 범위"), texts.toString());
+            assertTrue(texts.contains("신뢰도 높음"), texts.toString());
+            assertTrue(texts.contains("-8.7%"), texts.toString());
+            assertTrue(texts.contains("큰 움직임"), texts.toString());
+            assertTrue(texts.contains("상승"), texts.toString());
+            assertTrue(texts.contains("높음"), texts.toString());
+            assertTrue(texts.contains("분석 해설"), texts.toString());
+            assertTrue(texts.contains("반드시 확인하세요"), texts.toString());
+        });
+    }
+
+    private static List<String> textsOf(Node node) {
+        List<String> texts = new ArrayList<>();
+        if (node instanceof Labeled labeled && labeled.getText() != null) {
+            texts.add(labeled.getText());
+        }
+        if (node instanceof Parent parent) {
+            parent.getChildrenUnmodifiable().forEach(child -> texts.addAll(textsOf(child)));
+        }
+        return texts;
     }
 }

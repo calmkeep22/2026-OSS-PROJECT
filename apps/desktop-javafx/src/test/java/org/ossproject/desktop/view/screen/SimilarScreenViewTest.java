@@ -4,6 +4,8 @@ import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -164,6 +166,46 @@ class SimilarScreenViewTest {
             List<String> texts = textsOf(root);
             assertTrue(texts.contains("AI 서비스에 연결하지 못했습니다."), texts.toString());
             assertTrue(texts.contains("다시 시도"), texts.toString());
+        });
+    }
+
+    @Test
+    @DisplayName("Control+R로 닮은 차트를 다시 조회한다")
+    void retriesWithControlR() {
+        JavaFxToolkit.onFxThread(() -> {
+            AtomicReference<Boolean> retried = new AtomicReference<>(false);
+            SimilarScreenView view = new SimilarScreenView("A전자", (text, channel) -> { },
+                    (symbol, name) -> new javafx.scene.control.Button("관심종목 추가"),
+                    (symbol, name) -> { }, loading -> {
+                        retried.set(true);
+                        loading.run();
+                    });
+            Node root = view.create();
+
+            root.fireEvent(new KeyEvent(KeyEvent.KEY_PRESSED, "", "", KeyCode.R,
+                    false, true, false, false));
+
+            assertTrue(retried.get());
+        });
+    }
+
+    @Test
+    @DisplayName("결과 카드는 탭 한 번과 방향키로 이동한다")
+    void movesBetweenResultCardsWithArrowKeys() {
+        JavaFxToolkit.onFxThread(() -> {
+            SimilarScreenView view = view(new AtomicReference<>());
+            Node root = view.create();
+            view.show(insight(Optional.empty(),
+                    new SimilarStock("000660", "B종목", new BigDecimal("91")),
+                    new SimilarStock("035420", "C종목", new BigDecimal("88"))));
+            List<javafx.scene.layout.VBox> cards = new ArrayList<>();
+            collectCards(root, cards);
+
+            assertEquals(1, cards.stream().filter(Node::isFocusTraversable).count());
+            cards.get(0).fireEvent(new KeyEvent(KeyEvent.KEY_PRESSED, "", "", KeyCode.DOWN,
+                    false, false, false, false));
+            assertTrue(cards.get(1).isFocusTraversable());
+            assertFalse(cards.get(0).isFocusTraversable());
         });
     }
 

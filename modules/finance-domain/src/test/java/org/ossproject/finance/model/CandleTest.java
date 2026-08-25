@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -31,6 +32,19 @@ class CandleTest {
 
         assertEquals(CandleInterval.DAY, candle.interval());
         assertEquals(point, candle.toPricePoint(SEOUL));
+    }
+
+    @Test
+    @DisplayName("분봉을 화면 값으로 바꿀 때 거래소 현지 시각을 보존한다")
+    void preservesLocalTimeForIntradayCandle() {
+        Candle candle = new Candle(Instant.parse("2026-08-24T00:05:00Z"), CandleInterval.MINUTE_5,
+                new BigDecimal("70000"), new BigDecimal("70500"),
+                new BigDecimal("69800"), new BigDecimal("70200"), 1_000L);
+
+        PricePoint point = candle.toPricePoint(SEOUL);
+
+        assertEquals(LocalDate.of(2026, 8, 24), point.date());
+        assertEquals(LocalDateTime.of(2026, 8, 24, 9, 5), point.timestamp());
     }
 
     @Test

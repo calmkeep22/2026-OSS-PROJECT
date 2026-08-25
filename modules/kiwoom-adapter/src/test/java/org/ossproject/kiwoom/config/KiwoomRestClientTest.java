@@ -329,6 +329,66 @@ class KiwoomRestClientTest {
         assertEquals(0, new BigDecimal("3").compareTo(candles.get(1).close()));
     }
 
+    @Test
+    @DisplayName("한 페이지로 부족하면 연속조회로 이어 받는다")
+    void continuesUntilEnoughCandlesAreCollected() {
+        transport.enqueueJson(TOKEN_BODY);
+        // 첫 페이지. 더 있다고 알려 준다.
+        transport.enqueue(new HttpTextResponse(200, Map.of("cont-yn", "Y", "next-key", "KEY-2"), """
+                {"stk_dt_pole_chart_qry":[
+                  {"cur_prc":"5","dt":"20250905"},
+                  {"cur_prc":"4","dt":"20250904"}
+                ],"return_code":0}"""));
+        // 두 번째 페이지. 더 과거 구간이며 여기서 끝난다.
+        transport.enqueue(new HttpTextResponse(200, Map.of("cont-yn", "N"), """
+                {"stk_dt_pole_chart_qry":[
+                  {"cur_prc":"3","dt":"20250903"},
+                  {"cur_prc":"2","dt":"20250902"}
+                ],"return_code":0}"""));
+
+        List<Candle> candles = client.fetchCandles("005930", CandleInterval.DAY, 4);
+
+        assertEquals(4, candles.size());
+        // 페이지를 이어 붙여도 오래된 것부터 정렬되어야 한다.
+        assertEquals(0, new BigDecimal("2").compareTo(candles.get(0).close()));
+        assertEquals(0, new BigDecimal("5").compareTo(candles.get(3).close()));
+        // 두 번째 요청에 연속조회 헤더가 실린다.
+        assertEquals("Y", transport.requests.get(2).headers().get("cont-yn"));
+        assertEquals("KEY-2", transport.requests.get(2).headers().get("next-key"));
+    }
+
+    @Test
+    @DisplayName("필요한 개수를 채우면 더 요청하지 않는다")
+    void stopsRequestingOnceEnoughCandlesArrive() {
+        transport.enqueueJson(TOKEN_BODY);
+        transport.enqueue(new HttpTextResponse(200, Map.of("cont-yn", "Y", "next-key", "KEY-2"), """
+                {"stk_dt_pole_chart_qry":[
+                  {"cur_prc":"2","dt":"20250902"},
+                  {"cur_prc":"1","dt":"20250901"}
+                ],"return_code":0}"""));
+
+        List<Candle> candles = client.fetchCandles("005930", CandleInterval.DAY, 2);
+
+        assertEquals(2, candles.size());
+        // 토큰 1회 + 봉 1회. 더 있다고 했어도 필요한 만큼 모였으면 멈춘다.
+        assertEquals(2, transport.requests.size());
+    }
+
+    @Test
+    @DisplayName("첫 페이지가 마지막이면 연속조회 헤더를 보내지 않는다")
+    void doesNotContinueWhenServerReportsNoMorePages() {
+        transport.enqueueJson(TOKEN_BODY);
+        transport.enqueue(new HttpTextResponse(200, Map.of("cont-yn", "N"), """
+                {"stk_dt_pole_chart_qry":[{"cur_prc":"1","dt":"20250901"}],"return_code":0}"""));
+
+        List<Candle> candles = client.fetchCandles("005930", CandleInterval.DAY, 100);
+
+        assertEquals(1, candles.size());
+        assertEquals(2, transport.requests.size());
+        assertFalse(transport.requests.get(1).headers().containsKey("cont-yn"),
+                "첫 요청에는 연속조회 헤더가 없어야 합니다");
+    }
+
     // ------------------------------------------------------------------
     // 계좌
     // ------------------------------------------------------------------

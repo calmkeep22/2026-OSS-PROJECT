@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from datetime import date
@@ -37,6 +38,9 @@ _SWEEP_INTERVAL_SECONDS = 6 * 60 * 60
 # 들고 있는 분석을 얼마나 믿을지. 장중에도 한 종목에 10분 안에 새 기사가 여러 건
 # 쏟아지는 일은 드물고, 그보다 짧게 잡으면 화면을 열 때마다 11초를 다시 기다린다.
 _DIGEST_TTL_SECONDS = 10 * 60
+# 앱에서 처음 만난 종목은 이 기간을 한 번 소급한다. RSS 최근 7일 한계와 달리
+# after/before 구간 검색을 사용한다. 운영 환경에서 0으로 끄거나 최대 3650일까지 조정한다.
+_DEFAULT_BACKFILL_DAYS = 180
 
 
 #: 들고 있는 것이 없다는 표시. `None` 은 "기사가 없다" 라는 뜻이라 그 자리에 쓸 수 없다.
@@ -51,15 +55,25 @@ class NewsCache:
     종목을 전부 받는 것은 구글에도 우리에게도 무리다.
     """
 
-    def __init__(self, news_module=None) -> None:
+    def __init__(self, news_module=None, backfill_days: int | None = None) -> None:
         # 뉴스 모듈을 밖에서 넣을 수 있게 둔다. 안 넣으면 처음 쓸 때 진짜를 불러온다.
         # 기동할 때 바로 부르지 않는 이유는 무거워서다 — 서버가 뜨는 데 그만큼 늦어진다.
         self._news = news_module
         self._lock = threading.Lock()
         self._names: list[str] = []
         self._swept_on: date | None = None
+        self._swept_names: dict[str, date] = {}
+        self._backfilled: set[str] = set()
+        configured_days = (os.getenv("OPENSTOCK_NEWS_BACKFILL_DAYS", "")
+                           if backfill_days is None else str(backfill_days))
+        try:
+            parsed_days = int(configured_days) if configured_days else _DEFAULT_BACKFILL_DAYS
+        except ValueError:
+            parsed_days = _DEFAULT_BACKFILL_DAYS
+        self._backfill_days = max(0, min(parsed_days, 3650))
         self._last_result: dict = {"상태": "아직 돌지 않음"}
         self._thread: threading.Thread | None = None
+        self._wake = threading.Event()
         # 종목명 -> (받은 시각, 분석 결과). 같은 종목을 두 화면이 함께 물어도 한 번만 받는다.
         self._digests: dict[str, tuple[float, dict | None]] = {}
         # 종목별 자물쇠. 없으면 두 요청이 같은 종목을 동시에 받아 RSS 를 두 번 두드린다.
@@ -125,12 +139,16 @@ class NewsCache:
                     added += 1
             tracked = len(self._names)
         self._ensure_worker()
+        if added:
+            # 이미 일꾼이 여섯 시간 대기 중이어도 새 종목은 바로 처리한다.
+            self._wake.set()
         return {"추가": added, "추적중": tracked}
 
     def status(self) -> dict:
         with self._lock:
             return {
                 "추적중": len(self._names),
+                "자동소급일": self._backfill_days,
                 "마지막수집일": str(self._swept_on) if self._swept_on else None,
                 "마지막결과": dict(self._last_result),
             }
@@ -151,20 +169,28 @@ class NewsCache:
                 LOG.warning("뉴스 수집 실패: %s", error)
                 with self._lock:
                     self._last_result = {"상태": "실패", "사유": f"{type(error).__name__}: {error}"}
-            time.sleep(_SWEEP_INTERVAL_SECONDS)
+            self._wake.wait(_SWEEP_INTERVAL_SECONDS)
+            self._wake.clear()
 
     def _sweep_once(self) -> None:
         news = self._news_api()
 
         with self._lock:
             names = list(self._names)
-            already = self._swept_on == date.today()
-        if not names or already:
+            pending = [name for name in names
+                       if self._swept_names.get(name) != date.today()
+                       or (self._backfill_days and name not in self._backfilled)]
+        if not pending:
             return
 
-        collected, failed = 0, []
-        for name in names:
+        collected, backfilled, failed = 0, 0, []
+        for name in pending:
             try:
+                if self._backfill_days and name not in self._backfilled:
+                    added = news.backfill(name, days_back=self._backfill_days, verbose=False)
+                    backfilled += added
+                    with self._lock:
+                        self._backfilled.add(name)
                 collected += news.archive_append(news.collect(name, days=7))
                 # 적립하는 김에 분석까지 만들어 둔다. 어차피 같은 기사를 방금 받았다.
                 # 이걸 안 해 두면 사용자가 화면을 열 때 11초를 혼자 기다린다.
@@ -175,16 +201,19 @@ class NewsCache:
                     self._analyze(name)
             except Exception as error:
                 failed.append(f"{name}({type(error).__name__})")
+            finally:
+                with self._lock:
+                    self._swept_names[name] = date.today()
             # 마지막 종목 뒤에는 쉬지 않는다. 끝났는데 기다릴 이유가 없다.
-            if name != names[-1]:
+            if name != pending[-1]:
                 time.sleep(_REQUEST_GAP_SECONDS)
 
         with self._lock:
             self._swept_on = date.today()
-            self._last_result = {"상태": "완료", "신규": collected,
-                                 "종목": len(names), "실패": failed}
-        LOG.info("뉴스 아카이브 적립: 신규 %d건 · 종목 %d개 · 실패 %d개",
-                 collected, len(names), len(failed))
+            self._last_result = {"상태": "완료", "소급신규": backfilled,
+                                 "일일신규": collected, "종목": len(pending), "실패": failed}
+        LOG.info("뉴스 아카이브 적립: 소급 신규 %d건 · 일일 신규 %d건 · 종목 %d개 · 실패 %d개",
+                 backfilled, collected, len(pending), len(failed))
 
 
 CACHE = NewsCache()

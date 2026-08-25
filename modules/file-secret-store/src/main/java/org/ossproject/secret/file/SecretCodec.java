@@ -3,7 +3,7 @@ package org.ossproject.secret.file;
 import org.ossproject.secret.SecretProtectionLevel;
 
 /** Encryption boundary used by the file-backed secret store. */
-public interface SecretCodec {
+public interface SecretCodec extends AutoCloseable {
     /**
      * Returns a newly allocated protected buffer. The implementation must not retain the input.
      * The caller owns and clears both the input and returned buffers.
@@ -19,4 +19,10 @@ public interface SecretCodec {
     SecretProtectionLevel protectionLevel();
 
     String description();
+
+    /** Clears codec-owned key material when the backing store is closed. */
+    @Override
+    default void close() {
+        // Most operating-system codecs do not own key material in this process.
+    }
 }

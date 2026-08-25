@@ -32,6 +32,8 @@ public final class NavigationIcons {
         PATHS.put(Screen.SIMILAR, "M3 15c3-6 6-6 9 0s6 6 9 0v3c-3 6-6 6-9 0s-6-6-9 0zm0-8c3-6 6-6 9 0s6 6 9 0v3c-3 6-6 6-9 0s-6-6-9 0z");
         // 접힌 신문.
         PATHS.put(Screen.NEWS, "M4 4h13v16H4zm2 3v2h9V7zm0 4v2h9v-2zm0 4v2h6v-2zm13-8h3v11a2 2 0 0 1-4 0V7z");
+        // 말풍선 안의 반짝임. 일반 대화가 아니라 분석 근거를 쓰는 AI 질의응답이다.
+        PATHS.put(Screen.CHAT, "M3 4h18v13H9l-5 4v-4H3zm4 4h2v2H7zm4 0h2v2h-2zm4 0h2v2h-2zm-8 4h10v2H7z");
         PATHS.put(Screen.ANOMALY, "M12 2 1 21h22zm0 5.2-6.2 11.3h12.4zM11 10h2v4h-2zm0 5.5h2v2h-2z");
         PATHS.put(Screen.NOTIFICATIONS, "M12 22a2.5 2.5 0 0 0 2.4-2h-4.8A2.5 2.5 0 0 0 12 22zM20 17H4l2-2v-5a6 6 0 0 1 5-5.9V2h2v2.1A6 6 0 0 1 18 10v5z");
         PATHS.put(Screen.RADIO, "M9 4v12.2a3 3 0 1 0 2 2.8V8h7V4zm-3 16a1 1 0 1 1 0-2 1 1 0 0 1 0 2zm9-2a1 1 0 1 1 0-2 1 1 0 0 1 0 2z");
