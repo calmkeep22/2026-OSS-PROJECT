@@ -34,6 +34,7 @@ class PropertiesAccessibilityPreferencesRepositoryTest {
         AccessibilityPreferences loaded = new PropertiesAccessibilityPreferencesRepository(file).load();
 
         assertEquals(AccessibilityPreferences.DEFAULT.speechEnabled(), loaded.speechEnabled());
+        assertFalse(loaded.largeTextEnabled(), "큰 글자는 사용자가 선택하기 전에는 꺼져 있어야 한다");
         assertEquals(2.0, loaded.speechRate());
         assertEquals(0, loaded.speechVolume());
         assertEquals("표준", loaded.informationDensity());

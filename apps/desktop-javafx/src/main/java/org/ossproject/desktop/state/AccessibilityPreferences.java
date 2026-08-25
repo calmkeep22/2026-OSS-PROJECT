@@ -15,7 +15,7 @@ public record AccessibilityPreferences(
         int speechVolume
 ) {
     public static final AccessibilityPreferences DEFAULT = new AccessibilityPreferences(
-            false, true, true, true, true, false, "표준", "", "", 1.0, 100);
+            false, true, true, true, false, false, "표준", "", "", 1.0, 100);
 
     public AccessibilityPreferences {
         informationDensity = switch (informationDensity == null ? "" : informationDensity.trim()) {

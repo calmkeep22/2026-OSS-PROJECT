@@ -42,7 +42,8 @@ class SidebarNavigationModelTest {
                 Screen.SEARCH,
                 Screen.WATCHLIST,
                 Screen.SIMILAR,
-                Screen.NEWS
+                Screen.NEWS,
+                Screen.CHAT
         ), model.children(Screen.NavigationGroup.MARKET_EXPLORATION));
         assertFalse(model.children(Screen.NavigationGroup.MARKET_EXPLORATION)
                 .contains(Screen.STOCK_DETAIL));
