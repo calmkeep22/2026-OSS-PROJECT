@@ -1,0 +1,152 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #2457e6; } a:hover { color: #1747b0; }
+  </style>
+</helmet>
+
+<div style="width: 1180px; height: 780px; display: flex; flex-direction: column; font-family: 'Noto Sans KR', 'Malgun Gothic', sans-serif; font-size: 15px; background: #f5f7fa; color: #191f28;">
+
+  <div style="display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #ffffff; border-bottom: 1px solid #dfe3e8;">
+    <div style="width: 38px; height: 38px; border-radius: 8px; border: 1px solid #dfe3e8; display: flex; align-items: center; justify-content: center;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#56616f" stroke-width="2"><path d="M15 6l-6 6 6 6"/></svg>
+    </div>
+    <div style="color: #6b7684; font-size: 15px; white-space: nowrap;">주문 · 삼성화재</div>
+    <div style="flex-grow: 1; background: #f3f5f7; border: 1px solid #d8dde3; border-radius: 18px; padding: 11px 16px; color: #8b95a1;">종목명 또는 종목코드 검색</div>
+    <div style="min-height: 38px; padding: 8px 13px; background: #ffffff; border: 1px solid #dfe3e8; border-radius: 8px; display: flex; align-items: center;">검색</div>
+    <div style="padding: 7px 10px; border-radius: 999px; background: #fff7e0; color: #6b4b00; font-weight: 700;">시세 공급원 · 키움 모의투자</div>
+    <div style="min-height: 38px; padding: 8px 13px; background: #ffffff; border: 1px solid #dfe3e8; border-radius: 8px; display: flex; align-items: center;">알림 0</div>
+    <div style="min-height: 38px; padding: 8px 13px; background: #ffffff; border: 1px solid #dfe3e8; border-radius: 8px; display: flex; align-items: center;">계좌</div>
+    <div style="padding: 8px 13px; border-radius: 8px; background: #e8efff; color: #1747b0; font-weight: 700;">키움 실시간 · 연결됨</div>
+  </div>
+
+  <div style="display: flex; flex-grow: 1; min-height: 0;">
+    <div style="width: 62px; background: #ffffff; border-right: 1px solid #dfe3e8; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 0;">
+      <div style="width: 38px; height: 38px; border-radius: 12px; background: #2457e6; color: #ffffff; font-weight: 800; font-size: 13px; display: flex; align-items: center; justify-content: center;">OS</div>
+      <sc-for list="{{rail}}" as="item" hint-placeholder-count="6">
+        <div style="width: 40px; height: 38px; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: {{item.bg}};">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="{{item.fill}}"><path d="{{item.path}}"/></svg>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="flex-grow: 1; min-width: 0; padding: 12px; display: flex; flex-direction: column; gap: 10px;">
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <div style="font-size: 30px; font-weight: 700;">주문</div>
+        <div style="flex-grow: 1;"></div>
+        <div style="max-width: 720px; padding: 7px 10px; font-size: 13px; background: #e7f1ff; border-left: 4px solid #0d6efd;">확인하면 키움 모의투자 서버로 주문이 전송됩니다. 실제 현금이 오가는 실전 주문은 지원하지 않습니다.</div>
+      </div>
+
+      <div style="display: flex; gap: 10px; flex-grow: 1; min-height: 0;">
+        <div style="width: 46%; background: #ffffff; border: 1px solid #dfe3e8; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; gap: 14px; border-bottom: 1px solid #dfe3e8; padding-bottom: 7px;">
+            <div style="font-weight: 700; color: #2457e6; border-bottom: 2px solid #2457e6; padding-bottom: 6px;">호가 표</div>
+            <div style="color: #6b7684;">누적 깊이 그래프</div>
+          </div>
+          <div style="font-size: 13px; color: #4e5968;">호가 중간가 661,000원. 표시 범위 666,000원부터 656,000원까지, 11단계.</div>
+          <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); background: #f5f7fa; border-bottom: 1px solid #dfe3e8; padding: 7px 0; font-weight: 600; font-size: 13px; text-align: center;">
+            <div>매도 잔량</div><div>가격</div><div>매수 잔량</div>
+          </div>
+          <sc-for list="{{ladder}}" as="row" hint-placeholder-count="7">
+            <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: center; height: 34px; border-bottom: 1px solid #edf0f3; background: {{row.bg}};">
+              <div style="display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding-right: 8px;">
+                <div style="height: 15px; width: {{row.askBar}}; background: #d94b45;"></div>
+                <div style="font-size: 14px;">{{row.ask}}</div>
+              </div>
+              <div style="text-align: center; font-size: 14px;">{{row.price}}</div>
+              <div style="display: flex; align-items: center; gap: 6px; padding-left: 8px;">
+                <div style="font-size: 14px;">{{row.bid}}</div>
+                <div style="height: 15px; width: {{row.bidBar}}; background: #2f6fe0;"></div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="flex-grow: 1; min-width: 0; background: #ffffff; border: 1px solid #dfe3e8; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+          <div style="font-size: 20px; font-weight: 700;">모의주문 준비</div>
+          <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 8px; align-items: center;">
+            <div style="font-size: 14px;">종목 코드</div>
+            <div style="min-height: 34px; border: 1px solid #dfe3e8; border-radius: 8px; padding: 7px 9px; background: #ffffff;">000810</div>
+            <div style="font-size: 14px;">종목명</div>
+            <div style="min-height: 34px; border: 1px solid #dfe3e8; border-radius: 8px; padding: 7px 9px; background: #ffffff;">삼성화재</div>
+            <div style="font-size: 14px;">매수 / 매도</div>
+            <div style="min-height: 38px; border: 1px solid #dfe3e8; border-radius: 8px; padding: 9px; display: flex; justify-content: space-between; align-items: center;"><span>매수</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7684" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></div>
+            <div style="font-size: 14px;">주문 유형</div>
+            <div style="min-height: 38px; border: 1px solid #dfe3e8; border-radius: 8px; padding: 9px; display: flex; justify-content: space-between; align-items: center;"><span>지정가</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7684" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></div>
+            <div style="font-size: 14px;">가격</div>
+            <div style="min-height: 34px; border: 1px solid #dfe3e8; border-radius: 8px; padding: 7px 9px;">661000</div>
+            <div style="font-size: 14px;">수량</div>
+            <div style="min-height: 34px; border: 1px solid #dfe3e8; border-radius: 8px; padding: 7px 9px;">1</div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div style="font-size: 14px;">주문 비율</div>
+            <div style="display: flex; gap: 8px;">
+              <sc-for list="{{ratios}}" as="r" hint-placeholder-count="4">
+                <div style="min-height: 32px; padding: 5px 10px; border: 1px solid #dfe3e8; border-radius: 8px; background: #ffffff;">{{r}}</div>
+              </sc-for>
+            </div>
+          </div>
+          <div style="background: #f7f9fc; border: 1px solid #dfe3e8; border-radius: 8px; padding: 8px; display: flex; flex-direction: column;">
+            <div style="display: flex; justify-content: space-between; padding: 4px 2px; border-bottom: 1px solid #edf0f3;"><span>주문 예상금액</span><span style="font-weight: 700;">661,000원</span></div>
+            <div style="display: flex; justify-content: space-between; padding: 4px 2px;"><span>주문 가능금액</span><span style="font-weight: 700;">9,778,730원</span></div>
+          </div>
+          <div style="align-self: flex-start; background: #2457e6; color: #ffffff; font-weight: 700; padding: 10px 18px; border-radius: 8px;">주문 내용 검토</div>
+          <div style="flex-grow: 1;"></div>
+          <div style="display: flex; gap: 8px; align-items: center; border-top: 1px dashed #dfe3e8; padding-top: 10px;">
+            <div style="background: #2457e6; color: #ffffff; font-weight: 700; padding: 8px 16px; border-radius: 8px;">매수</div>
+            <div style="background: #246bfd; color: #ffffff; font-weight: 700; padding: 8px 16px; border-radius: 8px;">매도</div>
+            <div style="font-size: 13px; color: #b42318; font-weight: 700;">← 두 색이 거의 같습니다 (#2457e6 / #246bfd)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":1180,"height":780}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const icons = [
+      'M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3z',
+      'M10 3a7 7 0 1 0 4.9 12l5.6 5.5 1.5-1.5-5.5-5.6A7 7 0 0 0 10 3zm0 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10z',
+      'M12 2.5l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3-5.8 3 1.1-6.5-4.7-4.6 6.5-.9z',
+      'M4 5h11a3 3 0 0 1 3 3v1h-3a3 3 0 0 0 0 6h3v1a3 3 0 0 1-3 3H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zm11 6h6v3h-6a1.5 1.5 0 0 1 0-3z',
+      'M4 4h16v16H4zm3 4v2h10V8zm0 4v2h10v-2zm0 4v2h6v-2z',
+      'M12 2 1 21h22zm0 5.2-6.2 11.3h12.4zM11 10h2v4h-2zm0 5.5h2v2h-2z'
+    ];
+    const rail = icons.map((path, i) => ({
+      path,
+      fill: i === 3 ? '#2457e6' : '#56616f',
+      bg: i === 3 ? '#eef2f7' : 'transparent'
+    }));
+    const rows = [
+      ['1,238', '666,000원', '', 62, 0, '#ffffff'],
+      ['1,287', '665,000원', '', 64, 0, '#ffffff'],
+      ['771', '664,000원', '', 39, 0, '#ffffff'],
+      ['589', '663,000원', '', 30, 0, '#ffffff'],
+      ['1,960', '662,000원', '', 98, 0, '#ffffff'],
+      ['627', '661,000원  중간가', '', 31, 0, '#fffbea'],
+      ['', '660,000원', '23', 0, 12, '#ffffff']
+    ];
+    return {
+      rail,
+      ratios: ['10%', '25%', '50%', '100%'],
+      ladder: rows.map(([ask, price, bid, a, b, bg]) => ({
+        ask, price, bid, bg, askBar: a + 'px', bidBar: b + 'px'
+      }))
+    };
+  }
+}
+</script>
+</body>
+</html>

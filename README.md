@@ -156,10 +156,11 @@ try (SecretStore secrets = SecretStoreFactory.create(secretDirectory)) {
 
 ### AI 분석 사용
 
-AI 기능은 **켜 두면 앱이 알아서 띄웁니다.** 저장소 안에서 `ai-service` 를 찾아 서버를
-자식 프로세스로 시작하고, 앱을 닫을 때 함께 내립니다. 터미널을 따로 열 일이 없습니다.
+AI 기능은 **켜 두면 앱이 알아서 띄웁니다.** 배포본에는 Python 런타임·AI 의존성·저장
+모델·Whisper base 모델이 함께 들어 있고, 앱을 닫을 때 AI 서버도 함께 내립니다.
+배포본 사용자는 Python이나 pip를 설치하거나 터미널을 열 필요가 없습니다.
 
-한 번만 준비하면 됩니다.
+아래 준비는 저장소에서 직접 개발 실행할 때만 필요합니다.
 
 ```powershell
 cd ai-service
@@ -198,6 +199,16 @@ Windows 휴대용 앱 이미지:
 ./gradlew.bat :apps:desktop-javafx:packagePortable
 ```
 
+사용자에게 전달할 포터블 ZIP:
+
+```powershell
+./gradlew.bat :apps:desktop-javafx:packagePortableZip
+```
+
+결과 파일은
+`apps/desktop-javafx/build/package/release/OpenStockAccess-0.1.0-windows-x64-portable.zip`
+입니다. 사용자는 압축을 풀고 `OpenStockAccess.exe`만 실행하면 됩니다.
+
 위 배포 작업은 Java 런타임뿐 아니라 Python AI 서버와 모델도 함께 묶습니다. 빌드하는
 컴퓨터에는 JDK 17과 Python 3.12가 필요하지만, 생성된 앱을 사용하는 사람은 Java나
 Python을 따로 설치할 필요가 없습니다. 첫 빌드는 AI 의존성을 받기 때문에 인터넷 연결과
@@ -231,8 +242,9 @@ Windows 설치 프로그램(EXE, WiX Toolset 필요):
 골라 붙입니다. 다만 매수·매도·종목명은 붙이는 기준을 빡빡하게 잡았습니다 — "매수" 와
 "매도" 는 한 글자 차이라, 헐겁게 붙이면 팔라는 말이 사라는 말이 됩니다.
 
-인식은 `ai-service` 안에서 돕니다. **AI 분석과 같은 서버**라 따로 준비할 것이 없고,
-`faster-whisper` 가 없으면 음성만 꺼지고 나머지는 그대로 돌아갑니다.
+인식은 `ai-service` 안에서 돕니다. **AI 분석과 같은 서버**라 따로 준비할 것이 없습니다.
+공식 배포본은 Whisper base 모델까지 포함하므로 최초 음성 사용 때도 모델을 내려받지
+않습니다. 저장소에서 직접 실행하는 개발 환경은 로컬 캐시가 없으면 한 번 내려받습니다.
 
 ### 마이크가 안 잡힐 때
 

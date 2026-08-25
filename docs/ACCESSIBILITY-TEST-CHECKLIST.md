@@ -33,12 +33,14 @@ Monocle 로 표시 장치 없이 JavaFX 툴킷을 띄우므로 CI 에서도 그�
 
 ## 필수 키보드 경로
 
-- `Alt+D`: 홈
+- `Alt+1`: 홈
 - `Alt+S`: 통합 검색
 - `Alt+O`: 주문
-- `Alt+A`: 계좌
-- `Alt+R`: 청각 차트
-- `Ctrl+,`: 설정
+- `Alt+6`: 계좌
+- `Alt+9`: AI 챗봇
+- `Alt+Shift+3`: 청각 차트
+- `Alt+Shift+4`: 설정
+- `F1`: 전체 단축키 도움말
 - 관심종목: `Enter`, `Delete`, `Ctrl+위/아래`
 
 ## 실패 기록
