@@ -5,9 +5,9 @@
 
 각 패키지에 포함된 원문 라이선스와 저작권 고지가 이 문서보다 우선합니다.
 
-## 먼저 볼 것 — 조건이 붙은 셋
+## 먼저 볼 것 — 조건이 붙은 넷
 
-대부분은 MIT·Apache-2.0·BSD 계열이라 재배포에 제약이 없습니다. 아래 셋만 다릅니다.
+대부분은 MIT·Apache-2.0·BSD 계열이라 재배포에 제약이 없습니다. 아래 넷만 다릅니다.
 
 **OpenJDK 런타임 · OpenJFX** — `GPL-2.0 with Classpath Exception`
 GPL 이지만 **Classpath Exception** 이 붙어 있어, 이것과 링크한다는 이유로 우리 코드를
@@ -16,6 +16,13 @@ GPL 이지만 **Classpath Exception** 이 붙어 있어, 이것과 링크한다�
 **PyInstaller 부트로더** — `GPL-2.0-or-later with Bootloader Exception`
 배포물에 들어가는 것은 부트로더뿐이고, 여기에도 예외 조항이 있어 우리 앱을 GPL 로
 만들지 않습니다.
+
+**Pretendard 글꼴** — `SIL OFL 1.1`
+글꼴 파일 두 벌(`Pretendard-Regular.otf`, `Pretendard-Bold.otf`)을 저장소에 동봉하고
+앱에서 직접 읽습니다. OFL 은 번들과 재배포를 허용하지만 **글꼴을 단독 상품으로 판매하는
+것은 금지**하고, **저작권 고지를 함께 배포**할 것을 요구합니다. 글꼴 파일을 고쳐 쓸
+경우에는 이름에 "Pretendard" 를 쓸 수 없습니다. 지금은 원본을 그대로 씁니다.
+저작권: Copyright (c) 2021 Kil Hyung-jin, with Reserved Font Name Pretendard.
 
 **yfinance** — 소프트웨어는 `Apache-2.0`, **데이터는 별개**
 Yahoo 금융 데이터의 이용 조건은 라이브러리 라이선스와 다릅니다. 개인·연구 목적이며
@@ -31,6 +38,7 @@ Yahoo 금융 데이터의 이용 조건은 라이브러리 라이선스와 다�
 | Jackson Databind | 2.18.2 | Apache-2.0 | https://github.com/FasterXML/jackson-databind | AI·음성 서비스 JSON |
 | JNA (jna-platform) | 5.15.0 | Apache-2.0 또는 LGPL-2.1-or-later | https://github.com/java-native-access/jna | Windows DPAPI 비밀 저장 |
 | Xerial SQLite JDBC | 3.47.1.0 | Apache-2.0 (번들 SQLite 는 Public Domain) | https://github.com/xerial/sqlite-jdbc | 주문·이상 감지 이력 |
+| Pretendard | 1.3.9 | SIL OFL 1.1 | https://github.com/orioncactus/pretendard | 화면 글꼴 (Regular·Bold 를 저장소에 동봉) |
 
 검사에만 쓰는 것 (배포물에 들어가지 않음)
 
@@ -69,14 +77,17 @@ Yahoo 금융 데이터의 이용 조건은 라이브러리 라이선스와 다�
 
 ## 음성 인식 모델
 
-`faster-whisper` 가 쓰는 가중치는 **저장소에 넣지 않습니다.** 처음 인식할 때
-HuggingFace 에서 받아 사용자 컴퓨터에 캐시됩니다.
+`faster-whisper` 가 쓰는 가중치는 **소스 저장소에 넣지 않습니다.** 공식 배포 빌드가
+HuggingFace의 고정 리비전을 받아 배포본에 포함합니다. 따라서 배포본 사용자의 첫 음성
+인식에서도 네트워크 다운로드가 일어나지 않습니다. 모델 카드와 MIT 라이선스 사본도
+배포물의 `app/ai-service/legal/`에 함께 둡니다.
 
 | 모델 | 라이선스 | 출처 |
 |---|---|---|
-| `Systran/faster-whisper-base` | MIT | https://huggingface.co/Systran/faster-whisper-base |
+| `Systran/faster-whisper-base` (`ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66`) | MIT | https://huggingface.co/Systran/faster-whisper-base |
 
-원본 Whisper(OpenAI)도 MIT 입니다. 없어도 앱은 그대로 돌아가고 음성 기능만 꺼집니다.
+원본 Whisper(OpenAI)도 MIT 입니다. 모델 파일이 손상되거나 빠져도 앱은 그대로 돌아가고
+음성 기능만 명시적으로 꺼집니다. 배포본에서 조용히 인터넷 다운로드로 우회하지 않습니다.
 
 ## AI 분석 모델과 학습 데이터
 
