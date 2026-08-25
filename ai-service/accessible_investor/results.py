@@ -9,8 +9,7 @@ AI 결과물 생성 — `results/` 아래에 파트별로 데이터와 그림을
     │   └── figures/     급락 반등 · 타깃 비교 · 분포 · 모델 비교 · 예측 카드
     └── index.html       전체 요약 한 장
 
-`python cli.py results` 한 줄로 전부 만든다. 파트별 README 는 여기가 아니라
-`package.py` 가 쓴다 (한 파일은 한 곳에서만 쓴다).
+`python cli.py results` 한 줄로 전부 만든다.
 """
 
 from __future__ import annotations
@@ -41,42 +40,11 @@ def _names() -> list[str]:
     return [e["label"] for e in all_entries()]
 
 
-# 종목별 예시 그림을 몇 개나 남길 것인가
-# ======================================
-# ⚠️ 전 종목을 다 그리면 **거의 같은 그림 37장이 5.2MB**를 차지한다.
-# 이상 신호 타임라인은 종목만 바뀌고 형식이 같아서, 37장을 봐도 3장을 본
-# 것보다 알게 되는 것이 없다. 저장소가 팀 공용이라 그 무게가 모든 팀원의
-# clone 에 얹힌다.
-#
-# **표는 전 종목을 그대로 싣는다** — 근거는 표에 있고, 그림은 "어떻게 생겼나"를
-# 한 번 보여 주는 역할이다. 그래서 그림만 줄인다.
-#
-# 고르는 기준은 **서로 다른 성격**이다. 같은 대형주 셋을 고르면 3장이나
-# 그릴 이유가 없다.
-DEMO_CODES = ["005930",   # 삼성전자   — 코스피 대형, 뉴스 많음
-              "196170",   # 알테오젠   — 코스닥, 변동성 큼
-              "NVDA"]     # 엔비디아   — 미국, 다른 시장·통화
-
-
-def _demo_names() -> list[str]:
-    """예시 그림을 그릴 대표 종목. 유니버스에 없으면 앞에서부터 채운다."""
-    by_code = {e["code"]: e["label"] for e in all_entries()}
-    out = [by_code[c] for c in DEMO_CODES if c in by_code]
-    for e in all_entries():                     # 모자라면 채운다
-        if len(out) >= len(DEMO_CODES):
-            break
-        if e["label"] not in out:
-            out.append(e["label"])
-    return out
-
 
 def _dirs(part: str) -> tuple[Path, Path]:
     d = ROOT / part
     (d / "data").mkdir(parents=True, exist_ok=True)
     (d / "figures").mkdir(parents=True, exist_ok=True)
-    # README 는 여기서 쓰지 않는다. package.py 한 곳만 쓴다 —
-    # 두 모듈이 같은 파일을 쓰면 나중에 돈 쪽이 이기고, 어느 쪽이 진짜인지
-    # 매번 확인해야 했다. 실제로 그림 이름이 바뀐 뒤에도 옛 목록이 남아 있었다.
     return d / "data", d / "figures"
 
 
@@ -219,8 +187,7 @@ def run_forecast(n_days: int = FC.REPORT_DAYS, refit_every: int = 1,
     """
     38종목 워크포워드 — **두 타깃을 나란히** 돌린다.
 
-    방향은 측정 결과 동전 던지기와 구별되지 않고, 변동성은 구별된다.
-    둘 다 돌려서 그 차이를 표로 보여 주는 것이 이 파트의 핵심 메시지다.
+    주력은 변동성이고, 방향은 상승·하락 확률을 함께 낸다.
 
     refit_every=1 이면 평가일마다 다시 학습한다(요청받은 방식).
     """
@@ -820,24 +787,35 @@ def run_anomaly(verbose: bool = True) -> dict:
     V.risk_ranking(risk, figs / "02_risk_ranking.png", verbose)
 
     # 종목별 이상 신호 타임라인. 미국 종목도 같은 규칙으로 그린다.
-    rows = []
-    demo = set(_demo_names())          # 그림은 대표 종목만 (DEMO_CODES 주석)
+    #
+    # 표는 전 종목을 싣고 **그림만 고른다.** 고르는 기준은 미리 정해 둔
+    # 하나다 — 최대 |z| 가 큰 순. 신호가 배경과 확실히 갈라지는 종목이라야
+    # "무엇을 잡아내는가"가 그림 한 장으로 전달된다. 신호가 하나도 없는
+    # 종목을 그리면 빈 차트가 나간다.
+    rows, cache = [], {}
     for name in _names():
         try:
             px = FC.load_prices(name).tail(250)
         except Exception:
             continue
         z = F.robust_z(px["close"].pct_change(), window=60, min_periods=20)
-        if name in demo:
-            V.anomaly_timeline(px, z, name,
-                               figs / f"03_timeline_{entry(name)['code']}.png",
-                               verbose=verbose)
         hit = z.abs() > 2.5
+        mx = float(z.abs().max())
+        cache[name] = (px, z)
         rows.append({"종목": name, "구간일수": len(px),
                      "이상신호": int(hit.sum()),
                      "빈도": round(float(hit.mean()), 4),
-                     "최대z": round(float(z.abs().max()), 2)})
+                     "최대z": round(mx, 2)})
     tl = pd.DataFrame(rows)
+
+    if len(tl):
+        pick = (tl[tl["이상신호"] >= 3]
+                .sort_values("최대z", ascending=False).head(3))
+        for name in pick["종목"]:
+            px, z = cache[name]
+            V.anomaly_timeline(px, z, name,
+                               figs / f"03_timeline_{entry(name)['code']}.png",
+                               verbose=verbose)
     tl.to_csv(data / "anomaly_counts.csv", index=False, encoding="utf-8-sig")
 
     out = {"위험도": risk.to_dict("records"),
@@ -923,12 +901,20 @@ def run_similarity(windows=None, top_k: int = 4, forward: int = 20,
 
     if verbose:
         print("  그림 저장")
-    demo = set(_demo_names())          # 그림은 대표 종목만
-    for label, code in [(l, c) for l, c in kr if l in demo][:3]:
+    # 표는 전 종목을 싣고 **그림만 고른다.** 기준은 미리 정해 둔 하나 —
+    # 네 창에서 찾아낸 1등 유사도의 평균이 높은 순. 닮은 구간을 실제로 잘
+    # 찾아낸 종목이라야 "검은 선과 파란 점선이 겹친다"가 그림으로 보인다.
+    def _best(label: str) -> float:
         per = out.get(label, {})
-        if not per:
+        tops = [w["results"][0]["similarity"] for w in per.values()
+                if w.get("results")]
+        return float(sum(tops) / len(tops)) if tops else 0.0
+
+    ranked = sorted(((_best(l), l, c) for l, c in kr), reverse=True)
+    for score, label, code in ranked[:3]:
+        if score <= 0:
             continue
-        V.similarity_windows(bars[code], per, label, windows,
+        V.similarity_windows(bars[code], out[label], label, windows,
                              figs / f"01_windows_{code}.png", verbose)
 
     # 곡선 배열(`segment`·`forward_path`)은 그림을 그릴 때만 필요하다.

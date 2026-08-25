@@ -1,5 +1,5 @@
 """
-종목 레지스트리 — **코스피·코스닥 전 종목**을 코드로 찾는다.
+종목 레지스트리 — **코스피·코스닥·나스닥·S&P500 전 종목**을 코드로 찾는다.
 
 왜 따로 만드나
 ==============
@@ -13,14 +13,14 @@
 이 파일이 그 경로다. 둘은 서로를 건드리지 않는다.
 
     universe.py   38종목   "성능을 이 표본에서 쟀다"      — 리포트가 쓴다
-    registry.py   국내 전체 "아무 국내 종목이나 찾는다"  — 서비스가 쓴다
+    registry.py   6,900+   "아무 종목이나 찾는다"        — 서비스가 쓴다
 
 무엇을 담나
 -----------
-    code          005930
-    name          삼성전자
-    market        KR
-    index         KOSPI / KOSDAQ
+    code          005930 / NVDA
+    name          삼성전자 / NVIDIA Corp
+    market        KR / US          — 뉴스 언어·감성사전·장 마감 시각이 갈린다
+    index         KOSPI / KOSDAQ / NASDAQ / S&P500
     sector        전기전자 / Information Technology
     industry      반도체와반도체장비 …
     listing_date  상장일 (국내만 제공)
@@ -31,7 +31,7 @@
 
 출처
 ----
-전부 FinanceDataReader 한 곳이다. 조회가 느려서
+전부 FinanceDataReader 한 곳이다. 조회가 느려서(나스닥 3,975종목에 8초)
 **한 번 받아 `models/registry.parquet` 로 저장**하고 그 뒤로는 파일을 읽는다.
 저장소에 같이 올라가므로 팀원은 네트워크 없이 바로 쓸 수 있다.
 """
@@ -50,6 +50,8 @@ REGISTRY = MODEL_DIR / "registry.parquet"
 SOURCES = {
     "KOSPI":  ("KR", "KRX-DESC"),
     "KOSDAQ": ("KR", "KRX-DESC"),
+    "NASDAQ": ("US", "NASDAQ"),
+    "S&P500": ("US", "S&P500"),
 }
 
 # ── 거래 대상이 아닌 것을 뺀다 ───────────────────────────────────────────
@@ -61,7 +63,13 @@ SOURCES = {
 # ⚠️ 전부 **비포획 그룹**`(?:...)` 으로 쓴다. 포획 그룹이 있으면 pandas 의
 # `str.contains` 가 "이건 extract 하려던 것 아니냐"는 UserWarning 을 매번 뱉는다.
 KR_DROP = re.compile(r"(?:우B?|[0-9]우B?|스팩[0-9]*호?|리츠)$")
+US_DROP = re.compile(
+    r"\bright(?:s)?\b|\bwarrant(?:s)?\b|\bunit(?:s)?\b|depositary|"
+    r"preferred|acquisition corp|senior note|notes due|debenture|"
+    r"\bbond(?:s)?\b|% note|\bETF\b|\bfund\b|\btrust\b", re.I)
+US_DROP_TICKER = re.compile(r"^[A-Z]{4}[WRU]$")
 KR_CODE = re.compile(r"^\d{6}$")
+US_TICKER = re.compile(r"^[A-Z][A-Z.\-]{0,5}$")
 
 COLUMNS = ["code", "name", "market", "index", "sector", "industry",
            "listing_date", "size"]
@@ -131,10 +139,47 @@ def _krx() -> pd.DataFrame:
     return df[COLUMNS]
 
 
-def refresh(verbose: bool = True) -> pd.DataFrame:
-    """코스피·코스닥 전체를 다시 받아 저장한다."""
+def _us() -> pd.DataFrame:
+    """
+    나스닥 + S&P500.
+
+    두 목록은 겹친다(NVDA 는 양쪽에 있다). **S&P500 을 먼저 놓고** 중복을
+    지운다 — S&P500 목록에만 `Sector` 가 있어서 그쪽을 남겨야 섹터가 산다.
+    """
+    import FinanceDataReader as fdr
+
     parts = []
-    for fn, label in ((_krx, "국내(KOSPI+KOSDAQ)"),):
+
+    sp = fdr.StockListing("S&P500")
+    sp = sp.rename(columns={"Symbol": "code", "Name": "name",
+                            "Sector": "sector", "Industry": "industry"})
+    sp["index"] = "S&P500"
+    parts.append(sp)
+
+    nq = fdr.StockListing("NASDAQ")
+    nq = nq.rename(columns={"Symbol": "code", "Name": "name",
+                            "Industry": "industry"})
+    nq["sector"] = nq.get("industry")     # 나스닥 목록엔 섹터가 없다
+    nq["index"] = "NASDAQ"
+    parts.append(nq)
+
+    df = pd.concat(parts, ignore_index=True)
+    df["market"] = "US"
+    df["code"] = df["code"].astype(str).str.strip().str.upper()
+    df = df[df["code"].str.match(US_TICKER, na=False)]
+    df = df[~df["name"].astype(str).str.contains(US_DROP, na=False)]
+    df = df[~df["code"].str.match(US_DROP_TICKER, na=False)]
+    df = df.drop_duplicates(subset=["code"], keep="first")
+    for c in COLUMNS:
+        if c not in df.columns:
+            df[c] = pd.NA
+    return df[COLUMNS]
+
+
+def refresh(verbose: bool = True) -> pd.DataFrame:
+    """네 지수 전체를 다시 받아 저장한다. 몇 분 걸린다."""
+    parts = []
+    for fn, label in ((_krx, "국내(KOSPI+KOSDAQ)"), (_us, "미국(NASDAQ+S&P500)")):
         try:
             d = fn()
             parts.append(d)
@@ -175,14 +220,13 @@ def table(refresh_if_missing: bool = True) -> pd.DataFrame:
         raise FileNotFoundError(
             f"{REGISTRY} 가 없습니다. `python cli.py registry --refresh` 를 "
             "먼저 실행하세요.")
-    _CACHE = _CACHE[_CACHE["market"] == "KR"].copy()
-    _CACHE["code"] = _CACHE["code"].astype(str).str.zfill(6)
+    _CACHE["code"] = _CACHE["code"].astype(str)
     return _CACHE
 
 
 def resolve(query: str) -> dict:
     """
-    '005930' · '삼성전자' → 종목 정보.
+    '005930' · '삼성전자' · 'NVDA' · 'NVIDIA' → 종목 정보.
 
     찾는 순서를 **정확 일치 먼저**로 둔다. 부분 일치를 먼저 보면 'LG' 가
     'LG생활건강'을 먼저 잡는 식으로 엉뚱한 종목이 나온다.
@@ -192,8 +236,8 @@ def resolve(query: str) -> dict:
         raise UnknownSymbol("빈 값입니다.")
     df = table()
 
-    # ① 코드 정확 일치 — 국내 코드는 6자리로 0을 채운다.
-    for cand in (q.zfill(6) if q.isdigit() else None, q):
+    # ① 코드 정확 일치 — 국내는 6자리 0채움, 미국은 대문자
+    for cand in (q.zfill(6) if q.isdigit() else None, q.upper(), q):
         if cand is None:
             continue
         hit = df[df["code"] == cand]
@@ -213,7 +257,7 @@ def resolve(query: str) -> dict:
         return _row(hit.loc[hit["name"].astype(str).str.len().idxmin()])
 
     raise UnknownSymbol(
-        f"'{query}' 를 코스피·코스닥에서 찾지 못했습니다.")
+        f"'{query}' 를 코스피·코스닥·나스닥·S&P500 에서 찾지 못했습니다.")
 
 
 def _row(r: pd.Series) -> dict:
@@ -243,20 +287,40 @@ def exists(query: str) -> bool:
 
 
 def yahoo_ticker(code: str, index: str) -> str:
-    """국내 시장에 맞는 야후 파이낸스 접미사를 붙인다."""
+    """미국은 티커 그대로, 국내는 시장에 따라 접미사가 붙는다."""
     return yahoo_candidates(code, index)[0]
 
 
 def yahoo_candidates(code: str, index: str) -> list[str]:
     """
-    야후에 물어볼 국내 종목 티커 후보.
+    야후에 물어볼 티커 후보들. **순서대로 시도한다.**
+
+    ⚠️ 이중 클래스 주식의 표기가 출처마다 다르다.
+    FinanceDataReader 의 S&P500 목록은 버크셔 B 를 `BRKB`, 브라운포맨 B 를
+    `BFB` 로 주는데 **야후는 `BRK-B` · `BF-B`** 다. 그대로 물으면
+    "possibly delisted" 로 빈 응답이 오고, 조회가 통째로 실패한다.
+
+    실측: 스트레스 검사에서 이 둘이 세 기능 모두 RuntimeError 로 죽었다.
+    버크셔는 관심종목에 확실히 담길 종목이라 그냥 둘 수 없다.
+
+    하드코딩 목록 대신 **규칙**으로 푼다 — 끝 한 글자 앞에 하이픈을 넣어
+    본다(BRKB → BRK-B, BFB → BF-B). 목록으로 막으면 다음에 편입되는
+    클래스주에서 같은 일이 반복된다.
+
+    GOOGL·FOXA·NWSA 처럼 야후가 그대로 받는 티커는 첫 후보에서 끝나므로
+    추가 비용이 없다.
     """
     if index == "KOSPI":
         return [f"{code}.KS"]
     if index == "KOSDAQ":
         return [f"{code}.KQ"]
 
-    raise ValueError(f"지원하지 않는 국내 지수입니다: {index}")
+    out = [code]
+    if len(code) >= 3 and code[-1].isalpha() and code.isalpha():
+        alt = f"{code[:-1]}-{code[-1]}"
+        if alt not in out:
+            out.append(alt)
+    return out
 
 
 def codes(index: str | None = None, market: str | None = None) -> list[str]:
