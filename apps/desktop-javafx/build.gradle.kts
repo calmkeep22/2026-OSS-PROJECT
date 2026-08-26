@@ -9,7 +9,10 @@ javafx {
 }
 
 application {
-    mainClass = "org.ossproject.desktop.DesktopApplication"
+    // DesktopApplication 을 직접 가리키면 설치본이 켜지지 않는다. 실행 클래스가
+    // Application 을 상속하면 JVM 이 JavaFX 를 모듈 경로에서 먼저 찾는데, jpackage 는
+    // jar 를 클래스패스에만 올리기 때문이다. 자세한 사연은 Launcher 주석에 있다.
+    mainClass = "org.ossproject.desktop.Launcher"
 }
 
 // 화면 계층을 검증하려면 JavaFX 툴킷이 필요하다. 표시 장치 없이 띄운다.
@@ -157,6 +160,36 @@ fun copyAiBundleIntoApplication() {
     }
 }
 
+/**
+ * 앱 아이콘.
+ *
+ * <p>주지 않으면 jpackage 가 기본 자바 아이콘을 붙인다. 작업표시줄과 시작 메뉴에서
+ * 우리 앱을 못 알아본다.
+ *
+ * <p>흰 타일 위에 짙은 남색 마크다. 투명 배경으로 두면 어두운 작업표시줄에서 대비가
+ * 1.1대 1까지 떨어져 사실상 보이지 않는다 — 저대비 때문에 못 찾는 일을 없애려는
+ * 앱에서 아이콘부터 그러면 안 된다.
+ */
+val appIcon = layout.projectDirectory.file("branding/OpenStockAccess.ico")
+
+/**
+ * 배포본 버전. `-PappVersion=0.1.1` 로 덮어쓸 수 있다.
+ *
+ * <p>MSI 는 같은 제품의 같은 버전을 다시 설치하려 하면 아무 일도 하지 않는다. 고치고
+ * 다시 구운 설치본이 "이미 설치됨" 으로 조용히 끝나, 옛 버전이 그대로 남는다. 실제로
+ * 그렇게 안 켜지는 옛 버전을 계속 실행하고 있었다.
+ */
+val appVersion: String = (project.findProperty("appVersion") as String?) ?: "0.1.0"
+
+/**
+ * 업그레이드 식별자. <b>절대 바꾸지 않는다.</b>
+ *
+ * <p>MSI 는 이 값으로 "같은 제품의 다른 버전" 을 알아본다. 없으면 jpackage 가 매번
+ * 새로 만들어, 새 설치본이 이전 것을 갈아끼우지 못하고 따로 깔리거나 멈춘다.
+ * 값을 바꾸면 그 순간부터 이전 설치본과 남남이 된다.
+ */
+val windowsUpgradeUuid = "8f3a1d62-5c47-4e0b-9a21-6d8f4b2e7c93"
+
 fun jpackageExecutable(): File {
     val javaExecutable = desktopJava.get().executablePath.asFile
     return javaExecutable.parentFile.resolve(if (System.getProperty("os.name").startsWith("Windows")) "jpackage.exe" else "jpackage")
@@ -174,12 +207,13 @@ tasks.register<Exec>("packagePortable") {
             jpackageExecutable(),
             "--type", "app-image",
             "--name", "OpenStockAccess",
-            "--app-version", "0.1.0",
+            "--app-version", appVersion,
             "--vendor", "OpenStock Access OSS",
             "--description", "Accessible open-source mock-trading desktop application",
             "--input", layout.buildDirectory.dir("install/desktop-javafx/lib").get().asFile,
             "--main-jar", tasks.named<Jar>("jar").get().archiveFileName.get(),
             "--main-class", application.mainClass.get(),
+            "--icon", appIcon.asFile,
             "--dest", destination
         )
     }
@@ -197,13 +231,19 @@ tasks.register<Exec>("packageWindowsInstaller") {
             jpackageExecutable(),
             "--type", "exe",
             "--name", "OpenStockAccess",
-            "--app-version", "0.1.0",
+            "--app-version", appVersion,
             "--vendor", "OpenStock Access OSS",
             "--description", "Accessible open-source mock-trading desktop application",
             "--input", layout.buildDirectory.dir("install/desktop-javafx/lib").get().asFile,
             "--main-jar", tasks.named<Jar>("jar").get().archiveFileName.get(),
             "--main-class", application.mainClass.get(),
+            "--icon", appIcon.asFile,
             "--dest", destination,
+            "--win-upgrade-uuid", windowsUpgradeUuid,
+            // 사용자 계정 폴더에 깐다. Program Files 로 가면 관리자 권한이 필요한데,
+            // 심사위원이나 일반 사용자가 그 권한을 못 쓰면 설치 자체를 못 한다.
+            // 실제로 권한 승인을 기다리다 창도 없이 멈춰 있던 적이 있다.
+            "--win-per-user-install",
             "--win-menu", "--win-shortcut", "--win-dir-chooser"
         )
     }
@@ -217,7 +257,7 @@ tasks.register<Zip>("packagePortableZip") {
         into("OpenStockAccess")
     }
     destinationDirectory = layout.buildDirectory.dir("package/release")
-    archiveFileName = "OpenStockAccess-0.1.0-windows-x64-portable.zip"
+    archiveFileName = "OpenStockAccess-$appVersion-windows-x64-portable.zip"
 }
 
 dependencies {
