@@ -13,6 +13,31 @@ import java.util.List;
 public interface AudioCapturePort extends AutoCloseable {
 
     /**
+     * 이 크기를 넘어야 말로 친다.
+     *
+     * <p>마이크 확인 화면과 실제 말 판정이 같은 값을 써야 한다. 따로 두면 "막대가 문턱을
+     * 넘는데 인식은 안 되는" 상태가 생기고, 사용자는 무엇을 믿어야 할지 알 수 없다.
+     */
+    double SPEECH_FLOOR = 0.012;
+
+    /**
+     * 마이크로 들어오는 소리 크기를 계속 알려준다.
+     *
+     * <p>{@link #recordUtterance(Duration)} 로는 이걸 할 수 없다. 다 녹음한 다음에야
+     * 돌려주기 때문에, 말하는 동안 잡히고 있는지를 볼 수 없다.
+     *
+     * <p>크기는 0에서 1 사이다. {@link #SPEECH_FLOOR} 를 넘으면 말로 친다.
+     *
+     * <p>{@code onLevel} 은 <b>오디오 스레드에서</b> 불린다. 화면을 건드리려면 부르는
+     * 쪽이 화면 스레드로 옮겨야 한다.
+     *
+     * @return 닫으면 멈춘다. 반드시 닫아야 한다 — 안 닫으면 마이크를 계속 붙들고 있다
+     */
+    default AutoCloseable monitorLevel(java.util.function.DoubleConsumer onLevel) {
+        return () -> { };
+    }
+
+    /**
      * 한마디를 녹음한다. 말이 끝나면 {@code limit} 을 기다리지 않고 바로 돌아온다.
      *
      * <p>정해진 시간을 꽉 채워 녹음하면 명령 하나에 녹음 대기까지 얹혀 느려진다.

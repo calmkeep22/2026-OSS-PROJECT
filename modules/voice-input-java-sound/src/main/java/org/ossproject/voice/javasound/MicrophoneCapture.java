@@ -116,6 +116,46 @@ public final class MicrophoneCapture implements AudioCapturePort {
         return AudioSystem.getTargetDataLine(FORMAT);
     }
 
+    /**
+     * 소리 크기를 계속 흘려보낸다.
+     *
+     * <p>마이크가 잡히는지 사람이 눈과 귀로 확인하는 자리에 쓴다. 판정은 하지 않는다 —
+     * 말이 시작됐는지 끝났는지는 {@link UtteranceDetector} 가 볼 일이고, 여기서는 지금
+     * 얼마나 들어오는지만 알린다.
+     *
+     * <p>따로 스레드에서 돈다. 화면 스레드에서 마이크를 읽으면 그동안 화면이 멈춘다.
+     * 데몬 스레드라 앱을 내릴 때 이것 때문에 붙들리지 않는다.
+     */
+    @Override
+    public AutoCloseable monitorLevel(java.util.function.DoubleConsumer onLevel) {
+        java.util.Objects.requireNonNull(onLevel, "onLevel");
+        String reason = unavailableReason();
+        if (!reason.isEmpty()) throw new IllegalStateException(reason);
+
+        java.util.concurrent.atomic.AtomicBoolean running =
+                new java.util.concurrent.atomic.AtomicBoolean(true);
+        Thread reader = new Thread(() -> {
+            try (TargetDataLine open = openLine()) {
+                open.open(FORMAT, CHUNK_BYTES * 8);
+                open.start();
+                byte[] chunk = new byte[CHUNK_BYTES];
+                while (running.get() && !closed) {
+                    int read = open.read(chunk, 0, chunk.length);
+                    if (read <= 0) break;
+                    onLevel.accept(loudness(chunk, read));
+                }
+                open.stop();
+            } catch (LineUnavailableException | RuntimeException failure) {
+                // 확인용 기능이다. 여기서 앱을 세우지 않는다. 값이 안 오면 화면이
+                // "소리가 들어오지 않습니다" 로 읽는데, 그것이 사용자가 알아야 할 전부다.
+                running.set(false);
+            }
+        }, "mic-level");
+        reader.setDaemon(true);
+        reader.start();
+        return () -> running.set(false);
+    }
+
     @Override
     public byte[] recordUtterance(Duration limit) {
         String reason = unavailableReason();

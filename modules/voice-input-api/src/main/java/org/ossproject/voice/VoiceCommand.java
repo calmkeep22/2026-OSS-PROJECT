@@ -114,7 +114,12 @@ public record VoiceCommand(Intent intent, Optional<KnownStock> stock,
         StringBuilder said = new StringBuilder("\"").append(shortHeard()).append("\" 로 들었습니다. ");
         stock.ifPresent(target -> said.append(target.name()).append(" "));
         quantity.ifPresent(count -> said.append(count).append("주 "));
-        said.append(intent.label());
-        return said.append(requiresConfirmation() ? " 하시겠습니까?" : " 합니다.").toString();
+        // 되묻는 명령은 이름 뒤에 "하시겠습니까?" 를 붙인다 — "삼성전자 10주 매수
+        // 하시겠습니까?". 나머지는 문장을 그대로 쓴다. 이름에 "합니다" 를 붙이면
+        // "계좌 합니다", "뒤로 가기 합니다" 처럼 말이 되지 않았다.
+        if (requiresConfirmation()) {
+            return said.append(intent.label()).append(" 하시겠습니까?").toString();
+        }
+        return said.append(intent.spoken()).append(".").toString();
     }
 }
