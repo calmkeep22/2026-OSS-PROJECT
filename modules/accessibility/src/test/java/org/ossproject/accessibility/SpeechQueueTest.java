@@ -188,4 +188,63 @@ class SpeechQueueTest {
         }
         @Override public void stop() {}
     }
+
+    /**
+     * 사이드바를 빠르게 오갈 때.
+     *
+     * <p>화면 이동 안내는 같은 열쇠에 REPLACE_PENDING 이 걸려 있다. 대기 중인 것만
+     * 버리고 읽던 것을 끝까지 두면, 사용자는 첫 칸 이름을 다 들을 때까지 두세 초를
+     * 기다렸다가 현재 위치를 듣는다. 그동안 들리는 것은 이미 지나간 화면 이름이다.
+     */
+    @Test
+    void replacePendingAlsoCutsTheStaleSpeechInProgress() throws Exception {
+        BlockingSpeechPort port = new BlockingSpeechPort();
+        try (SpeechQueue queue = new SpeechQueue(port)) {
+            queue.announce(new SpeechRequest("홈 화면", SpeechPriority.INFORMATION,
+                    "screen-change", SpeechMergePolicy.REPLACE_PENDING));
+            assertTrue(port.started.await(2, TimeUnit.SECONDS));
+
+            queue.announce(new SpeechRequest("계좌 화면", SpeechPriority.INFORMATION,
+                    "screen-change", SpeechMergePolicy.REPLACE_PENDING));
+
+            assertTrue(port.stopped.await(2, TimeUnit.SECONDS),
+                    "낡은 화면 이름을 끝까지 읽고 있으면 안 됩니다.");
+        }
+    }
+
+    /** 되돌릴 수 없는 일을 알리는 문장은 중간에 끊기면 안 된다. */
+    @Test
+    void neverCutsAnOrderAnnouncement() throws Exception {
+        BlockingSpeechPort port = new BlockingSpeechPort();
+        try (SpeechQueue queue = new SpeechQueue(port)) {
+            queue.announce(new SpeechRequest("삼성전자 10주 매수 접수", SpeechPriority.ORDER,
+                    "order", SpeechMergePolicy.REPLACE_PENDING));
+            assertTrue(port.started.await(2, TimeUnit.SECONDS));
+
+            queue.announce(new SpeechRequest("삼성전자 10주 매수 접수", SpeechPriority.ORDER,
+                    "order", SpeechMergePolicy.REPLACE_PENDING));
+
+            assertFalse(port.stopped.await(600, TimeUnit.MILLISECONDS),
+                    "주문 안내가 끊겼습니다.");
+            port.release.countDown();
+        }
+    }
+
+    /** 열쇠가 다르면 남남이다. 검색 결과를 읽는 중에 목록 선택 안내가 끊어서는 안 된다. */
+    @Test
+    void leavesADifferentKeyAlone() throws Exception {
+        BlockingSpeechPort port = new BlockingSpeechPort();
+        try (SpeechQueue queue = new SpeechQueue(port)) {
+            queue.announce(new SpeechRequest("검색 결과 3건", SpeechPriority.INFORMATION,
+                    "search-outcome", SpeechMergePolicy.REPLACE_PENDING));
+            assertTrue(port.started.await(2, TimeUnit.SECONDS));
+
+            queue.announce(new SpeechRequest("삼성전자", SpeechPriority.INFORMATION,
+                    "list-selection", SpeechMergePolicy.REPLACE_PENDING));
+
+            assertFalse(port.stopped.await(600, TimeUnit.MILLISECONDS),
+                    "다른 열쇠의 안내를 끊었습니다.");
+            port.release.countDown();
+        }
+    }
 }
