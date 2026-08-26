@@ -330,17 +330,37 @@ public final class AccessibleChartView {
             if (event.isAltDown() || event.isMetaDown() || event.isShortcutDown() && !event.isControlDown()) {
                 return;
             }
-            if (root.getScene() == null || claimedByControl(event.getTarget(), event.getCode())) {
+            if (root.getScene() == null
+                    || claimedByControl(event.getTarget(), event.getCode())) {
                 return;
             }
             handleNavigationKey(event);
         };
+        // 한글 모드에서는 KEY_PRESSED 에 코드도 글자도 남지 않는다(실측). 자모가
+        // KEY_TYPED 로는 오는지 여기서 받아 본다. 오면 그것으로 R·S 를 되짚는다.
+        javafx.event.EventHandler<KeyEvent> typedHandler = event -> {
+            if (event.isAltDown() || event.isControlDown() || event.isMetaDown()) return;
+            if (root.getScene() == null
+                    || claimedByControl(event.getTarget(), KeyCode.UNDEFINED)) {
+                return;
+            }
+            KeyCode mapped = hangulShortcut(event.getCharacter());
+            if (mapped == KeyCode.R) {
+                controller.replay();
+                event.consume();
+            } else if (mapped == KeyCode.S) {
+                controller.announceSummary();
+                event.consume();
+            }
+        };
         root.sceneProperty().addListener((observed, oldScene, scene) -> {
             if (oldScene != null) {
                 oldScene.removeEventFilter(KeyEvent.KEY_PRESSED, handler);
+                oldScene.removeEventFilter(KeyEvent.KEY_TYPED, typedHandler);
             }
             if (scene != null) {
                 scene.addEventFilter(KeyEvent.KEY_PRESSED, handler);
+                scene.addEventFilter(KeyEvent.KEY_TYPED, typedHandler);
             }
         });
     }
@@ -465,6 +485,30 @@ public final class AccessibleChartView {
         for (javafx.scene.layout.Region region : regions) {
             region.setMinWidth(javafx.scene.layout.Region.USE_PREF_SIZE);
         }
+    }
+
+    /**
+     * 한글 자판에서 친 글자를 원래 단축키로 되짚는다.
+     *
+     * <p><b>이 길이 없으면 한글 상태에서 R·S 가 통째로 죽는다.</b> 입력기가 글자 키를
+     * 삼켜서 {@code KEY_PRESSED} 에는 코드도 글자도 남지 않는다(실측: 코드 UNDEFINED,
+     * 글자 빈 문자열). 자모는 {@code KEY_TYPED} 로만 온다.
+     *
+     * <p>"영문으로 바꾸고 쓰세요" 는 답이 될 수 없다. 이 화면은 종목을 한글로 찾다가
+     * 바로 들어오는 자리이고, 소리로 그래프를 읽는 것이 여기 온 이유다.
+     *
+     * <p>두벌식에서 R 자리는 ㄱ, S 자리는 ㄴ이다. Space·Enter·방향키는 입력기가
+     * 가로채지 않으므로 여기서 다룰 것이 없다.
+     */
+    static KeyCode hangulShortcut(String typed) {
+        if (typed == null) {
+            return KeyCode.UNDEFINED;
+        }
+        return switch (typed) {
+            case "ㄱ" -> KeyCode.R;
+            case "ㄴ" -> KeyCode.S;
+            default -> KeyCode.UNDEFINED;
+        };
     }
 
     private void handleNavigationKey(KeyEvent event) {

@@ -104,6 +104,9 @@ public final class SpeechQueue implements AutoCloseable {
                         && request.priority().weight() > currentSpeech.request.priority().weight()) {
                     currentSpeech.interrupted.set(true);
                     preempted = currentSpeech;
+                } else if (replacesCurrent(request)) {
+                    currentSpeech.interrupted.set(true);
+                    preempted = currentSpeech;
                 }
                 accepted = true;
             }
@@ -112,6 +115,24 @@ public final class SpeechQueue implements AutoCloseable {
                 notifyListeners(listener -> listener.onInterrupted(item.request)));
         if (preempted != null) speechPort.stop();
         return accepted;
+    }
+
+    /**
+     * 지금 읽고 있는 안내가 이미 낡았는가.
+     *
+     * <p>같은 열쇠에 {@link SpeechMergePolicy#REPLACE_PENDING} 이 걸린 안내는 "같은 자리를
+     * 다시 알리는 말" 이다. 사이드바를 빠르게 오가면 첫 칸 이름을 다 읽을 때까지 두세 초를
+     * 기다렸다가 현재 위치를 듣게 되는데, 그동안 들리는 것은 이미 지나간 화면 이름이다.
+     * 대기 중인 것만 버리고 읽던 것을 끝까지 두면 그 어긋남이 남는다.
+     *
+     * <p>주문 등급은 건드리지 않는다. 되돌릴 수 없는 일을 알리는 문장이 중간에 끊기면
+     * 사용자는 무엇을 확인했는지 모른 채 다음 안내를 듣는다.
+     */
+    private boolean replacesCurrent(SpeechRequest request) {
+        return request.mergePolicy() == SpeechMergePolicy.REPLACE_PENDING
+                && currentSpeech != null
+                && currentSpeech.request.deduplicationKey().equals(request.deduplicationKey())
+                && currentSpeech.request.priority().weight() < PROTECTED_PRIORITY;
     }
 
     private boolean applyMergePolicy(SpeechRequest request, List<QueuedSpeech> interruptedPending) {

@@ -101,6 +101,7 @@ public final class AccountScreenView {
                         signedWon(position.profitLoss()),
                         position.profitLossRate().toPlainString() + "%")).toList(),
                 "종목", "수량", "평균단가", "현재가", "평가금액", "손익", "수익률");
+        holdings.getStyleClass().add("holdings-table");
         holdings.setPrefHeight(300);
         holdings.setOnMouseClicked(event -> { if (event.getClickCount() == 2) openStock.accept(holdings); });
         holdings.setAccessibleHelp(
@@ -201,7 +202,6 @@ public final class AccountScreenView {
         });
         return page;
     }
-
 
     /**
      * 미수 발생 경고.

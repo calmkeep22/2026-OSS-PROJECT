@@ -73,6 +73,7 @@ public final class ScannerScreenView {
         table.getColumns().add(column("거래량", item -> String.format("%,d", item.volume())));
         table.getColumns().add(column("거래대금", item -> String.format("%,d백만원", item.tradingValueMillion())));
         table.getColumns().add(column("신호", ScannerItem::signal));
+        org.ossproject.desktop.view.UiKit.alignByContent(table);
         Runnable openSelected = () -> {
             ScannerItem selected = table.getSelectionModel().getSelectedItem();
             if (selected == null) {

@@ -41,7 +41,8 @@ public final class UtteranceDetector {
     private static final int MIN_SPEECH_MILLIS = 400;
 
     /** 아주 조용한 방에서 배경이 0에 가까울 때 쓰는 바닥값. */
-    private static final double FLOOR = 0.012;
+    /** 마이크 확인 화면과 같은 값을 쓴다. 갈라지면 막대는 넘는데 인식은 안 된다. */
+    private static final double FLOOR = org.ossproject.voice.AudioCapturePort.SPEECH_FLOOR;
 
     /**
      * 말이 그친 뒤 이만큼 조용하면 끝난 것으로 본다.

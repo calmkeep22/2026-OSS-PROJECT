@@ -303,7 +303,10 @@ class ScreenAccessibilityTest {
                 java.util.List::of,
                 java.util.List::of);
         SettingsScreenView.Actions actions = new SettingsScreenView.Actions(
-                onChanged, value -> { }, text -> { }, () -> { }, screen -> { }, text -> { });
+                onChanged, value -> { }, text -> { }, () -> { }, screen -> { }, text -> { },
+                // 검사에서는 마이크를 열지 않는다. CI 에는 마이크가 없고, 있더라도 화면
+                // 구성을 보는 검사가 장치를 붙들 이유가 없다.
+                level -> () -> { });
         return new SettingsScreenView(
                 org.ossproject.desktop.state.AccessibilityPreferences.DEFAULT, true, context, actions);
     }

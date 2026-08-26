@@ -1,5 +1,7 @@
 package org.ossproject.desktop.view.screen;
 
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.beans.property.ReadOnlyStringProperty;
 import javafx.collections.FXCollections;
@@ -9,6 +11,8 @@ import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.ProgressBar;
+import javafx.scene.control.ToggleButton;
 import javafx.scene.control.Control;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
@@ -24,16 +28,20 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import javafx.util.Duration;
 import javafx.util.StringConverter;
 import org.ossproject.accessibility.notification.SpeechVoice;
 import org.ossproject.desktop.navigation.Screen;
 import org.ossproject.desktop.state.AccessibilityPreferences;
+import org.ossproject.voice.AudioCapturePort;
 
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.DoubleConsumer;
 import java.util.function.Supplier;
 
 import static org.ossproject.desktop.view.UiKit.*;
@@ -76,7 +84,12 @@ public final class SettingsScreenView {
                           Consumer<String> onPreview,
                           Runnable onAudit,
                           Consumer<Screen> onNavigate,
-                          Consumer<String> onStatus) {
+                          Consumer<String> onStatus,
+                          /**
+                           * 마이크 크기를 흘려보내 달라는 부탁. 돌려받은 것을 닫으면 멈춘다.
+                           * 크기는 화면 스레드가 아닌 곳에서 오므로 화면은 옮겨서 써야 한다.
+                           */
+                          Function<DoubleConsumer, AutoCloseable> onMonitorMicrophone) {
     }
 
     private static final SpeechVoice SYSTEM_DEFAULT =
@@ -195,6 +208,8 @@ public final class SettingsScreenView {
         HBox.setHgrow(volume, Priority.ALWAYS);
         addBoundedSettingField(voiceSettings, 2, volumeTitle, volumeControl);
         addBoundedSettingField(voiceSettings, 3, "마이크", microphoneBox());
+        Label meterLabel = new Label("마이크 확인");
+        addBoundedSettingField(voiceSettings, 4, meterLabel, microphoneMeter());
         voiceSettings.getColumnConstraints().addAll(
                 expandingSettingLabelColumn(), boundedSettingControlColumn());
 
@@ -213,6 +228,118 @@ public final class SettingsScreenView {
 
     /** 기본 장치를 뜻하는 항목. 빈 문자열을 그대로 보여 주면 무엇인지 알 수 없다. */
     private static final String SYSTEM_MICROPHONE = "시스템 기본 장치";
+
+    /** 확인은 이만큼만 한다. 켜 두고 잊어도 마이크를 영영 붙들지 않는다. */
+    private static final int METER_SECONDS = 20;
+
+    private AutoCloseable microphoneMonitor;
+
+    /**
+     * 마이크가 잡히는지 눈과 귀로 확인하는 자리.
+     *
+     * <p>고르기만 있고 확인이 없으면, 소리가 안 들어올 때 사용자가 할 수 있는 일이
+     * 장치를 하나씩 바꿔 가며 음성 명령을 반복해 보는 것뿐이다. 인식 실패는 마이크
+     * 때문일 수도 있고 발음이나 서버 때문일 수도 있어서 그것으로는 가려낼 수 없다.
+     *
+     * <p><b>막대만 두지 않는다.</b> 이 기능이 정작 필요한 사람은 막대를 못 본다. 그래서
+     * 셋을 함께 낸다 — 막대, 숫자와 판정을 적은 글, 그리고 문턱을 처음 넘는 순간의 말.
+     */
+    private VBox microphoneMeter() {
+        ProgressBar bar = new ProgressBar(0);
+        bar.getStyleClass().add("mic-meter");
+        bar.setMaxWidth(Double.MAX_VALUE);
+        // 막대는 눈으로 보는 사람을 위한 것이다. 스크린리더가 매 순간 값을 읽으면
+        // 아래 글과 겹쳐 시끄럽기만 하다.
+        bar.setFocusTraversable(false);
+        bar.setAccessibleText("마이크 입력 크기 막대");
+
+        Label readout = new Label("확인을 누르고 마이크에 대고 말해 보세요.");
+        readout.getStyleClass().add("muted-text");
+        readout.setWrapText(true);
+
+        ToggleButton check = new ToggleButton("마이크 확인");
+        check.setAccessibleHelp("20초 동안 마이크에 들어오는 소리 크기를 보여 주고, "
+                + "소리가 처음 잡히면 말로 알립니다.");
+
+        double[] loudest = {0};
+        boolean[] announced = {false};
+        Timeline stopper = new Timeline(new KeyFrame(Duration.seconds(METER_SECONDS)));
+
+        check.setOnAction(event -> {
+            if (!check.isSelected()) {
+                stopMicrophoneMonitor();
+                stopper.stop();
+                readout.setText(verdict(loudest[0]));
+                actions.onPreview().accept(verdict(loudest[0]));
+                return;
+            }
+            loudest[0] = 0;
+            announced[0] = false;
+            readout.setText("듣고 있습니다. 마이크에 대고 말해 보세요.");
+            try {
+                microphoneMonitor = actions.onMonitorMicrophone().apply(level ->
+                        Platform.runLater(() -> {
+                            loudest[0] = Math.max(loudest[0], level);
+                            // 0.15 쯤이면 이미 충분히 큰 소리다. 1.0 기준으로 그리면
+                            // 보통 말소리에서 막대가 거의 안 움직인다.
+                            bar.setProgress(Math.min(1.0, level / 0.15));
+                            readout.setText(String.format("%.4f · %s", level,
+                                    level >= AudioCapturePort.SPEECH_FLOOR ? "잡힙니다" : "조용합니다"));
+                            if (!announced[0] && level >= AudioCapturePort.SPEECH_FLOOR) {
+                                announced[0] = true;
+                                actions.onPreview().accept("마이크에 소리가 들어옵니다.");
+                            }
+                        }));
+            } catch (RuntimeException failure) {
+                check.setSelected(false);
+                String reason = failure.getMessage() == null ? "마이크를 열지 못했습니다."
+                        : failure.getMessage();
+                readout.setText(reason);
+                actions.onStatus().accept(reason);
+                return;
+            }
+            stopper.setOnFinished(done -> {
+                check.setSelected(false);
+                stopMicrophoneMonitor();
+                readout.setText(verdict(loudest[0]));
+                actions.onPreview().accept(verdict(loudest[0]));
+            });
+            stopper.playFromStart();
+        });
+
+        VBox meter = new VBox(6, check, bar, readout);
+        meter.setMinWidth(0);
+        return meter;
+    }
+
+    /**
+     * 확인 결과를 사람 말로.
+     *
+     * <p>숫자만 주지 않는다. 0.0043 이 큰지 작은지는 이 값을 아는 사람만 안다.
+     */
+    private static String verdict(double loudest) {
+        if (loudest >= AudioCapturePort.SPEECH_FLOOR) {
+            return String.format("소리가 잡혔습니다. 가장 큰 소리 %.4f. 이 장치로 음성 명령을 쓸 수 있습니다.",
+                    loudest);
+        }
+        if (loudest > 0) {
+            return String.format("소리가 너무 작습니다. 가장 큰 소리 %.4f, 필요한 크기 %.4f. "
+                    + "마이크를 가까이 하거나 다른 장치를 골라 보세요.", loudest, AudioCapturePort.SPEECH_FLOOR);
+        }
+        return "소리가 전혀 들어오지 않았습니다. 다른 마이크를 고르거나 "
+                + "Windows 설정에서 마이크 권한을 확인해주세요.";
+    }
+
+    /** 열어 둔 마이크를 반드시 놓는다. 안 놓으면 다른 프로그램이 못 쓴다. */
+    private void stopMicrophoneMonitor() {
+        if (microphoneMonitor == null) return;
+        try {
+            microphoneMonitor.close();
+        } catch (Exception ignored) {
+            // 닫는 데 실패해도 사용자가 할 일은 없다.
+        }
+        microphoneMonitor = null;
+    }
 
     /**
      * 마이크 고르기.

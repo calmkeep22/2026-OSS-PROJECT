@@ -973,6 +973,58 @@
 .large-text .order-status-tabs .table-row-cell { -fx-cell-size: 56px; }
 .large-text .order-book-panel .table-row-cell { -fx-cell-size: 48px; }
 .large-text .table-cell { -fx-padding: 8 10; }
+
+/* 값 셀과 머리글에 각각 선을 긋지 않는다. JavaFX 17은 두 영역의 실제 폭을 다르게
+   계산하므로 별도 테두리는 열이 갈수록 어긋난다. UiKit의 aligned-column-divider가
+   실제 머리글 좌표에서 표 전체를 관통하는 선 하나만 그린다. */
+.table-view.aligned-data-table .column-header {
+    -fx-padding: 8;
+    -fx-border-width: 0;
+}
+/* 표를 상자로 감싼다.
+   칸선만 있고 바깥 테두리가 없으면 표가 어디서 시작해 어디서 끝나는지 경계가 흐리다.
+   특히 빈 줄이 이어지는 아래쪽에서 표와 배경이 붙어 보인다. */
+.table-view.aligned-data-table,
+.table-view.aligned-data-table:focused {
+    -fx-border-color: #cfd5dd;
+    -fx-border-width: 1;
+    -fx-border-insets: 0;
+    -fx-border-radius: 9;
+}
+.high-contrast .table-view.aligned-data-table,
+.high-contrast .table-view.aligned-data-table:focused {
+    -fx-border-color: #ffffff;
+    -fx-border-width: 1;
+    -fx-border-insets: 0;
+    -fx-border-radius: 9;
+}
+.table-view.aligned-data-table .column-header > .label {
+    -fx-alignment: CENTER;
+}
+.table-view.aligned-data-table .table-cell {
+    -fx-padding: 8;
+    -fx-alignment: CENTER;
+    -fx-border-width: 0;
+}
+.table-view.aligned-data-table .aligned-column-divider {
+    -fx-stroke: #cfd5dd;
+    -fx-stroke-width: 1;
+}
+/* 종목검색을 실행하기 전에는 큰 결과 박스는 그대로 두고 내부 표 구조만 숨긴다. */
+.table-view.search-results-table.empty-search-results .column-header-background {
+    -fx-min-height: 0;
+    -fx-pref-height: 0;
+    -fx-max-height: 0;
+    -fx-padding: 0;
+    -fx-border-width: 0;
+}
+.aligned-data-table .column-header-background {
+    -fx-border-color: transparent transparent #e3e8ef transparent;
+    -fx-border-width: 0 0 1 0;
+}
+.high-contrast .aligned-data-table .column-header-background {
+    -fx-border-color: transparent transparent #ffffff transparent;
+}
 .large-text .tab-pane > .tab-header-area .tab { -fx-min-height: 48px; -fx-padding: 8 16; }
 .large-text .text-field,
 .large-text .combo-box,
@@ -1709,6 +1761,23 @@
     -fx-border-color: transparent #4d4d4d transparent transparent;
 }
 
+/* 고대비에서도 같은 단일 선 레이어만 색을 바꾼다. */
+.high-contrast .table-view.aligned-data-table .column-header,
+.high-contrast .table-view.aligned-data-table .table-cell {
+    -fx-padding: 8;
+    -fx-border-width: 0;
+}
+.high-contrast .table-view.aligned-data-table .aligned-column-divider {
+    /* 검은 배경에 #4d4d4d 는 대비가 2:1 남짓이라 칸선이 사실상 보이지 않았다.
+       고대비 모드는 그것을 막으려고 있는 모드이고, WCAG 는 이런 구성요소에 3:1 을
+       요구한다. 같은 파일의 다른 고대비 경계선과 같은 흰색으로 맞춘다. */
+    -fx-stroke: #ffffff;
+}
+.high-contrast .table-view.aligned-data-table .column-header-background {
+    -fx-border-color: transparent transparent #ffffff transparent;
+    -fx-border-width: 0 0 1 0;
+}
+
 /* --- 고대비: 밝게 칠하던 나머지 상태들 ---
    기본 테마는 "머문 자리"와 "초점 받은 칸"을 밝게 칠해서 알린다. 검은 바탕에서는
    그 방식이 통째로 뒤집힌다 — 흰 판에 흰 글자가 되어, 초점을 받은 칸은 지금
@@ -1971,4 +2040,37 @@
 .high-contrast .anomaly-shell,
 .high-contrast .sidebar {
     -fx-border-color: transparent;
+}
+
+/* 마이크 확인 막대.
+   소리가 들어오면 초록으로 찬다. 색만으로 알리지 않는다 — 막대 아래에 숫자와 판정이
+   글로 함께 나가고, 문턱을 처음 넘는 순간에는 말로도 알린다. 고대비에서는 초록 대신
+   노랑을 쓴다. 검은 배경에서 초록은 대비가 모자란다. */
+.mic-meter { -fx-pref-height: 14; -fx-min-height: 14; }
+.mic-meter > .track { -fx-background-color: #eef1f5; -fx-background-radius: 7; }
+.mic-meter > .bar { -fx-background-color: #17a34a; -fx-background-radius: 7; -fx-padding: 0; }
+.high-contrast .mic-meter > .track { -fx-background-color: #000000; -fx-border-color: #ffffff; -fx-border-width: 1; -fx-border-radius: 7; }
+.high-contrast .mic-meter > .bar { -fx-background-color: #ffff00; }
+
+/* 숫자 열의 머리글도 값을 따라 오른쪽으로.
+   값만 오른쪽에 붙이고 머리글을 왼쪽에 두면 둘이 어긋나, 어느 열의 값인지 눈으로
+   잇기 어렵다. 셀 정렬은 UiKit 이 열에 직접 걸고, 머리글은 이 규칙이 맡는다. */
+.table-view .column-header.numeric-column > .label { -fx-alignment: CENTER-RIGHT; }
+.table-view .column-header > .label { -fx-alignment: CENTER-LEFT; }
+
+/* 일반 셀의 독립 세로선은 끈다. aligned-data-table은 위의 공통 선 레이어를 쓴다. */
+.table-view .table-cell { -fx-border-width: 0; }
+.table-view .column-header { -fx-border-width: 0; }
+.high-contrast .table-view .table-cell { -fx-border-width: 0; }
+.high-contrast .table-view .column-header { -fx-border-width: 0; }
+
+/* 호가창은 예외다. 가격을 가운데 두고 양옆에 매도·매수 막대를 세우는 구조라
+   세로 경계가 그 자체로 뜻을 가진다. */
+.order-book-panel .table-view .table-cell {
+    -fx-border-color: transparent #dfe3e8 transparent transparent;
+    -fx-border-width: 0 1 0 0;
+}
+.high-contrast .order-book-panel .table-view .table-cell {
+    -fx-border-color: transparent #ffffff transparent transparent;
+    -fx-border-width: 0 1 0 0;
 }

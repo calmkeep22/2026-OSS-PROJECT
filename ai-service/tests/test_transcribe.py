@@ -212,3 +212,50 @@ class TestNoInvention:
         """
         assert "감사합니다." in T._NOISE
         assert "시청해주셔서 감사합니다." in T._NOISE
+
+
+# --- 어휘 되뱉음 판정 -------------------------------------------------------
+#
+# 실제로 났던 고장이다. "종목찾기" 를 또렷하게 말했는데 확신도 0.94 짜리 정답이
+# 버려져 음성 명령이 통째로 먹통이 됐다. 어휘를 물려 준 이유가 그 낱말들을 잘
+# 알아듣게 하려는 것인데, 잘 알아들으면 버리는 구조였다.
+
+class _Seg:
+    def __init__(self, avg_logprob, start=0.0, end=1.0, no_speech_prob=0.0):
+        self.avg_logprob = avg_logprob
+        self.start = start
+        self.end = end
+        self.no_speech_prob = no_speech_prob
+        self.text = ""
+
+
+def test_확신할_때는_어휘와_같아도_되뱉음이_아니다():
+    from transcribe import _unsure
+    import math
+
+    # 확신도 0.9 근처 (avg_logprob = ln(0.9))
+    sure = [_Seg(math.log(0.9))]
+
+    assert _unsure(sure, 0.005) is False
+
+
+def test_자신_없으면_되뱉음으로_친다():
+    from transcribe import _unsure
+    import math
+
+    unsure = [_Seg(math.log(0.2))]
+
+    assert _unsure(unsure, 0.01) is True
+
+
+def test_무음_확률이_높으면_믿지_않는다():
+    from transcribe import _unsure
+    import math
+
+    assert _unsure([_Seg(math.log(0.95))], 0.8) is True
+
+
+def test_확신도를_모르면_믿지_않는다():
+    from transcribe import _unsure
+
+    assert _unsure([], None) is True

@@ -8,6 +8,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.ossproject.application.usecase.MarketApplicationService;
+import org.ossproject.desktop.navigation.Screen;
 import org.ossproject.desktop.viewmodel.DesktopSession;
 import org.ossproject.desktop.testsupport.JavaFxToolkit;
 import org.ossproject.desktop.viewmodel.StockSearchItem;
@@ -100,6 +101,36 @@ class SearchScreenViewTest {
     }
 
     @Test
+    @DisplayName("검색 전에는 빈 박스이고 검색한 뒤에만 내부 표가 보인다")
+    void keepsResultBoxBlankUntilSearch() {
+        JavaFxToolkit.onFxThread(() -> {
+            SearchScreenView view = new SearchScreenView(
+                    viewModel(), screen -> { }, text -> { }, text -> { });
+            Node root = view.create();
+            javafx.scene.control.TextField field = findField(root);
+            TableView<?> table = findTable(root);
+            assertNotNull(field);
+            assertNotNull(table);
+
+            assertTrue(table.isVisible() && table.isManaged(),
+                    "검색 전에도 결과 박스의 공간은 남아 있어야 합니다.");
+            assertTrue(table.getStyleClass().contains("empty-search-results"),
+                    "검색 전에는 박스 안 머리글과 구분선을 숨겨야 합니다.");
+
+            field.setText("삼성");
+            field.fireEvent(new javafx.event.ActionEvent());
+
+            assertTrue(!table.getStyleClass().contains("empty-search-results"),
+                    "검색을 마치면 박스 안 결과 표가 나타나야 합니다.");
+
+            field.clear();
+            assertTrue(table.isVisible() && table.isManaged()
+                            && table.getStyleClass().contains("empty-search-results"),
+                    "검색어를 지우면 외곽 박스만 남아야 합니다.");
+        });
+    }
+
+    @Test
     @DisplayName("결과가 없으면 검색어를 되읽어 주며 알린다")
     void speaksWhenNothingIsFound() {
         JavaFxToolkit.onFxThread(() -> {
@@ -171,6 +202,82 @@ class SearchScreenViewTest {
 
             assertEquals(3, spoken.size(), "옮긴 횟수만큼만 읽어야 합니다. 실제: " + spoken);
             assertTrue(spoken.get(2).startsWith("SK하이닉스"), spoken.toString());
+        });
+    }
+
+    /**
+     * 검색 화면은 목록을 보러 오는 자리다.
+     *
+     * <p>한동안 위쪽 통합 검색과 똑같이, 이름이 정확히 맞으면 Enter 한 번에 상세로
+     * 넘어갔다. 그러면 찾아 들어온 사람이 무엇이 더 있었는지 볼 기회가 없다. 화면을 볼
+     * 수 없는 사용자에게는 더 나쁘다 — 방금 결과 건수를 들었는데 화면이 이미 넘어가
+     * 있으면 나머지를 확인할 방법이 없다.
+     *
+     * <p>목록에서 Enter 를 한 번 더 누르면 그때 열린다. 그 길은 {@code openSelected} 가
+     * 그대로 들고 있다.
+     */
+    @Test
+    @DisplayName("검색 화면은 이름이 정확히 맞아도 바로 넘어가지 않는다")
+    void staysOnTheListEvenForAnExactName() {
+        JavaFxToolkit.onFxThread(() -> {
+            List<Screen> moved = new ArrayList<>();
+            SearchScreenView view = new SearchScreenView(
+                    viewModel(), moved::add, text -> { }, text -> { });
+            Node root = view.create();
+
+            javafx.scene.control.TextField field = findField(root);
+            assertNotNull(field, "검색어 칸을 찾지 못했습니다.");
+            field.setText("삼성전자");
+            field.fireEvent(new javafx.event.ActionEvent());
+
+            assertTrue(moved.isEmpty(),
+                    "검색 화면에서는 목록에 세워 두어야 합니다. 옮겨간 화면: " + moved);
+        });
+    }
+
+    /**
+     * 초점을 검색칸에 두기로 한 대가다. 여는 길이 없으면 목록까지 내려갔다가 다시
+     * 올라와야 한다. 같은 말로 Enter 를 한 번 더 누르면 세워 둔 종목이 열린다.
+     */
+    @Test
+    @DisplayName("같은 검색어로 Enter 를 다시 누르면 상세를 연다")
+    void secondEnterOpensTheSelectedStock() {
+        JavaFxToolkit.onFxThread(() -> {
+            List<Screen> moved = new ArrayList<>();
+            SearchScreenView view = new SearchScreenView(
+                    viewModel(), moved::add, text -> { }, text -> { });
+            Node root = view.create();
+
+            javafx.scene.control.TextField field = findField(root);
+            assertNotNull(field, "검색어 칸을 찾지 못했습니다.");
+            field.setText("삼성전자");
+            field.fireEvent(new javafx.event.ActionEvent());
+            assertTrue(moved.isEmpty(), "첫 Enter 는 찾기만 합니다.");
+
+            field.fireEvent(new javafx.event.ActionEvent());
+
+            assertEquals(List.of(Screen.STOCK_DETAIL), moved,
+                    "같은 말로 다시 누르면 열려야 합니다.");
+        });
+    }
+
+    /** 검색어를 고쳤으면 다시 "찾기" 부터다. 고친 말과 다른 종목이 열리면 안 된다. */
+    @Test
+    @DisplayName("검색어를 고치면 Enter 가 다시 찾기부터 한다")
+    void editingTheQueryStartsOver() {
+        JavaFxToolkit.onFxThread(() -> {
+            List<Screen> moved = new ArrayList<>();
+            SearchScreenView view = new SearchScreenView(
+                    viewModel(), moved::add, text -> { }, text -> { });
+            Node root = view.create();
+
+            javafx.scene.control.TextField field = findField(root);
+            field.setText("삼성전자");
+            field.fireEvent(new javafx.event.ActionEvent());
+            field.setText("삼성");
+            field.fireEvent(new javafx.event.ActionEvent());
+
+            assertTrue(moved.isEmpty(), "말을 고쳤으면 찾기부터입니다. 옮겨간 화면: " + moved);
         });
     }
 }

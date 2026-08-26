@@ -58,6 +58,13 @@ MAX_SECONDS = 30.0
 # 않은 일을 당한다.
 MAX_NO_SPEECH = 0.6
 
+#: 이 아래로 떨어지면 "어휘를 그냥 뱉은 것" 으로 의심한다.
+#:
+#: 실측 근거: 사용자가 또렷하게 말한 "종목찾기" 는 확신도 0.80~0.94, 무음확률
+#: 0.003~0.006 으로 들어왔다. 소리가 불분명해 인식기가 프롬프트를 되뱉던 경우와는
+#: 뚜렷하게 갈린다. 확신할 때는 어휘와 같아도 사용자가 그렇게 말한 것으로 본다.
+ECHO_SUSPECT_CONFIDENCE = 0.55
+
 # 앞뒤로 붙는 군말. 사용자가 말한 것이 아니라 인식기가 습관적으로 뱉는 것이다.
 _NOISE = {"", ".", "..", "...", "감사합니다.", "시청해주셔서 감사합니다.",
           "구독과 좋아요 부탁드립니다."}
@@ -237,12 +244,15 @@ class Transcriber:
             # 빠진 반복 루프다. 하나로 줄이면 대개 사용자가 실제로 한 말이 남는다.
             dropped = f"반복 {len(text)}자 -> {len(collapsed)}자"
             text = collapsed
+        # 무엇을 버렸는지 함께 남긴다. 버린 글자를 적지 않으면, 사용자가 "안 된다" 고
+        # 할 때 정답을 버린 것인지 인식기가 지어낸 것인지 가릴 방법이 없다.
+        heard = text
         if text in _NOISE:
             dropped, text = "군말", ""
         elif silence is not None and silence > MAX_NO_SPEECH:
             # 사람이 말한 것 같지 않다. 지어낸 말을 명령으로 넘기지 않는다.
             dropped, text = f"무음(무음확률 {silence:.2f})", ""
-        elif self._echoed_prompt(text):
+        elif self._echoed_prompt(text) and _unsure(collected, silence):
             dropped, text = "어휘 되뱉음", ""
 
         answer = {
@@ -258,20 +268,41 @@ class Transcriber:
         # 인식기가 틀린 것인지 마이크가 문제인지 확인할 방법이 없다. 실제로 그랬다.
         LOG.info("인식 %.1f초 소리 -> %r (확신도 %s, 무음확률 %s)%s",
                  seconds, text, answer["확신도"], silence,
-                 f" [버림: {dropped}]" if dropped else "")
+                 f" [버림: {dropped} / 들은 것 {heard!r}]" if dropped else "")
         return answer
 
     def _echoed_prompt(self, text: str) -> bool:
         """
         물려 준 어휘를 그대로 뱉은 것인가.
 
-        <p>소리가 불분명할 때 whisper 가 프롬프트 낱말 하나를 통째로 내놓는다. 사용자가
-        정말 종목명만 말했을 수도 있으므로, 어휘와 <b>완전히 같을 때만</b> 버린다.
+        <p>어휘와 완전히 같은지만 본다. 그것만으로는 버릴 수 없다 — 사용자가 낱말
+        하나로 말하는 것이 음성 명령의 가장 흔한 쓰임이고, 그때 결과는 당연히 어휘와
+        같다. 실제로 "종목찾기" 를 또렷하게 말했는데 확신도 0.94 짜리 정답이 이 검사
+        하나에 버려져, 음성 명령이 통째로 먹통이 됐다.
+
+        <p>그래서 부르는 쪽에서 {@code _unsure} 와 함께 본다. 인식기가 자신 없을
+        때만 되뱉음으로 친다.
         """
         if not text or not self._vocabulary:
             return False
         plain = text.strip().rstrip(".?!")
         return any(plain == phrase.strip() for phrase in self._vocabulary)
+
+
+def _unsure(segments, silence: float | None) -> bool:
+    """
+    인식기가 자신 없어 하는가.
+
+    <p>프롬프트를 되뱉는 것은 소리가 불분명할 때 일어난다. 또렷하게 말한 것까지 같이
+    버리지 않으려면 그 둘을 갈라야 한다.
+
+    <p>확신도를 모르면 자신 없는 것으로 친다. 모르는 것을 믿어 주면, 되뱉은 말이
+    그대로 명령이 되어 화면이 엉뚱한 곳으로 간다.
+    """
+    if silence is not None and silence > 0.3:
+        return True
+    score = _confidence(segments)
+    return score is None or score < ECHO_SUSPECT_CONFIDENCE
 
 
 def _wav_seconds(audio: bytes) -> float:

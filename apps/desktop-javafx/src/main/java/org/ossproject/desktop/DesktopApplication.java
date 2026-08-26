@@ -159,6 +159,8 @@ public final class DesktopApplication extends Application {
     /** 주문 표 한 줄과 머리글 높이. CSS 의 .order-status-tabs .table-row-cell 과 맞춘다. */
     private static final double ORDER_ROW_HEIGHT = 32;
     private static final double ORDER_HEADER_HEIGHT = 34;
+    private static final double LARGE_ORDER_ROW_HEIGHT = 56;
+    private static final double LARGE_ORDER_HEADER_HEIGHT = 52;
     private Screen lastAnnouncedScreen;
     /** 질문 화면. 단축키가 질문 목록으로 곧장 초점을 옮길 수 있게 들고 있는다. */
     private ChatScreenView chatScreenView;
@@ -386,6 +388,16 @@ public final class DesktopApplication extends Application {
 
         navigate(Screen.DASHBOARD);
         stage.setTitle("OpenStock Access - 모의투자 UI");
+        // 창과 작업표시줄 아이콘. jpackage 의 --icon 은 설치본에만 붙으므로, 소스로
+        // 실행할 때(개발·시연)는 여기서 넣지 않으면 기본 자바 아이콘이 나온다.
+        // 여러 크기를 함께 주면 운영체제가 자리에 맞는 것을 고른다.
+        for (int size : new int[]{16, 32, 48, 128, 256}) {
+            java.io.InputStream stream =
+                    getClass().getResourceAsStream("/branding/icon-" + size + ".png");
+            if (stream != null) {
+                stage.getIcons().add(new javafx.scene.image.Image(stream));
+            }
+        }
         stage.setMinWidth(Math.min(1040, visualBounds.getWidth() * 0.82));
         stage.setMinHeight(Math.min(650, visualBounds.getHeight() * 0.82));
         stage.setMaxWidth(visualBounds.getWidth());
@@ -581,6 +593,8 @@ public final class DesktopApplication extends Application {
         globalSearch.setAccessibleHelp("검색어를 입력하고 Enter 키를 누르면 종목 상세 화면을 엽니다.");
         globalSearch.setPrefWidth(360);
         globalSearch.setMinWidth(180);
+        // 거르개가 Enter 를 이미 consume 하므로 평소에는 여기까지 오지 않는다.
+        // 검사처럼 ActionEvent 를 직접 쏘는 길을 위해 남겨 둔다.
         globalSearch.setOnAction(event -> openSearchedStock());
         configureGlobalSearchMenu();
 
@@ -938,6 +952,36 @@ public final class DesktopApplication extends Application {
         globalSearchMenu.getStyleClass().add("search-suggestion-popup");
         globalSearchMenu.setAutoHide(true);
         globalSearchMenu.setOnHidden(event -> globalSearchPopupArmed = false);
+        // Enter 를 팝업에서도 받는다.
+        //
+        // 추천 목록은 ContextMenu 라서 자기 창에서 키를 처리한다. 검색칸에 걸어 둔
+        // 거르개는 그 경로에 없어서, 팝업이 떠 있는 동안 누른 Enter 는 검색칸까지
+        // 오지 않는다. 실제로 추적을 걸어 보니 글자는 들어오는데 Enter 만 한 번도
+        // 도달하지 않았고, 그래서 사용자는 팝업이 닫힐 때까지 Enter 를 여러 번 눌러야 했다.
+        //
+        // 목록 안에서 고른 것이 있으면 그것을 연다. 아직 아무것도 안 골랐으면 검색칸에
+        // 친 말로 조회한다 — 사용자가 보고 있던 것은 자기가 친 글자다.
+        globalSearchMenu.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
+            if (event.getCode() != KeyCode.ENTER) return;
+            if (globalSearchSuggestions.isFocused()) {
+                StockSearchItem picked = globalSearchSuggestions.getSelectionModel().getSelectedItem();
+                if (picked != null) {
+                    openGlobalSearchSuggestion(picked);
+                    event.consume();
+                    return;
+                }
+            }
+            if (globalRecentSearches.isFocused()) {
+                String recent = globalRecentSearches.getSelectionModel().getSelectedItem();
+                if (recent != null) {
+                    openGlobalRecentSearch(recent);
+                    event.consume();
+                    return;
+                }
+            }
+            openSearchedStock();
+            event.consume();
+        });
 
         globalSearchDelay.setOnFinished(event -> refreshGlobalSearchSuggestions());
         globalSearch.textProperty().addListener((observable, previous, query) -> {
@@ -981,6 +1025,12 @@ public final class DesktopApplication extends Application {
                     globalSearchSuggestions.getSelectionModel().selectFirst();
                     globalSearchSuggestions.requestFocus();
                 }
+                event.consume();
+            } else if (event.getCode() == KeyCode.ENTER) {
+                // Enter 는 여기서 끝낸다. 거르개(filter)는 칸의 기본 처리보다 먼저 도므로,
+                // 한글 확정이 팝업을 다시 띄우기 전에 조회가 나간다. consume 해서
+                // setOnAction 이 같은 일을 한 번 더 하지 않게 막는다.
+                openSearchedStock();
                 event.consume();
             } else if (event.getCode() == KeyCode.ESCAPE) {
                 globalSearchPopupArmed = false;
@@ -1161,6 +1211,18 @@ public final class DesktopApplication extends Application {
 
     private void openSearchedStock() {
         globalSearchMenu.hide();
+        // 깃발까지 내린다. 숨기기만 하면 곧바로 다시 뜬다 — Enter 로 한글이 확정되면서
+        // 글자가 바뀌고, 그 리스너가 showGlobalSearchMenu() 를 부르기 때문이다. 팝업이
+        // 다시 뜨면 초점이 그리로 가서, 사용자는 Enter 를 한 번 더 눌러야 움직인다.
+        globalSearchPopupArmed = false;
+        // 자동완성 타이머를 먼저 세운다. 세우지 않으면 이 조회가 나간 직후에 타이머가
+        // 터져 더 새 조회가 되고, 방금 낸 조회는 "낡은 것"으로 밀려 조용히 버려진다.
+        // 그러면 Enter 를 눌러도 아무 일도 일어나지 않는다.
+        //
+        // 한글에서 잘 난다. Enter 를 누르는 순간 마지막 음절이 확정되면서 입력 리스너가
+        // 한 번 더 돌아 220밀리초 타이머가 새로 시작되기 때문이다. "삼성화재" 를 치고
+        // Enter 를 눌렀는데 화면이 그대로였던 것이 이것이다.
+        globalSearchDelay.stop();
         if (globalSearch.getText() == null || globalSearch.getText().isBlank()) {
             stockSearchViewModel.prepare("", "전체");
             screenController.invalidate(Screen.SEARCH);
@@ -1170,8 +1232,30 @@ public final class DesktopApplication extends Application {
         String query = globalSearch.getText().trim();
         stockSearchViewModel.recordRecentQuery(query);
         status.setText(query + " 종목을 조회하고 있습니다.");
-        stockSearchViewModel.filter(query, "전체").thenAccept(result -> {
-            if (!result.applied()) return;
+        // thenAccept 를 쓰면 안 된다. 조회가 예외로 끝나면 아예 실행되지 않아, 오류도
+        // 메시지도 없이 화면이 그대로 있는다. 실제로 Enter 를 눌러도 아무 일이 일어나지
+        // 않던 것이 이것이었다 — StockSearchViewModel 은 실패를 completeExceptionally
+        // 로 알리는데, thenAccept 는 그 길을 보지 않는다.
+        //
+        // whenComplete 는 성공과 실패를 모두 받는다. 실패도 사용자에게는 결과다.
+        stockSearchViewModel.filter(query, "전체").whenComplete((result, failure) ->
+                Platform.runLater(() -> {
+            if (failure != null || result == null) {
+                String reason = failure == null ? "종목을 조회하지 못했습니다."
+                        : "종목을 조회하지 못했습니다. " + rootMessageOf(failure);
+                status.setText(reason);
+                announce(reason, SpeechPriority.USER_REQUEST, "search-failed");
+                play(SoundCue.ERROR);
+                return;
+            }
+            // 더 새 조회에 밀렸다. 그래도 사용자는 Enter 를 눌렀다 — 아무 일도 일어나지
+            // 않는 것이 제일 나쁘다. 소리로 쓰는 사용자에게는 앱이 멈춘 것과 구별되지
+            // 않는다. 고를 수 없으면 목록으로라도 데려간다.
+            if (!result.applied()) {
+                screenController.invalidate(Screen.SEARCH);
+                navigate(Screen.SEARCH);
+                return;
+            }
             if (!stockSearchViewModel.lastError().isBlank()) {
                 screenController.invalidate(Screen.SEARCH);
                 navigate(Screen.SEARCH);
@@ -1211,7 +1295,17 @@ public final class DesktopApplication extends Application {
             // 쓰는 사용자에게는 아무 일도 일어나지 않은 것처럼 보인다.
             // 결과 안내는 검색 화면이 한다. 여기서 적어 두면, 화면이 뜨면서 스스로
             // 다시 조회하고 그 결과로 상태 줄을 덮어써 사라진다.
-        });
+        }));
+    }
+
+    /** 예외 사슬에서 사용자에게 보여 줄 말을 꺼낸다. 없으면 종류 이름이라도 남긴다. */
+    private static String rootMessageOf(Throwable failure) {
+        Throwable cause = failure;
+        while (cause.getCause() != null && cause.getCause() != cause) {
+            cause = cause.getCause();
+        }
+        String message = cause.getMessage();
+        return message == null || message.isBlank() ? cause.getClass().getSimpleName() : message;
     }
 
     private void openStockByQuery(String query) {
@@ -1422,11 +1516,18 @@ public final class DesktopApplication extends Application {
      * 끌어 내려야 한다. 화면 안에 또 스크롤 칸이 생기면 어느 것을 굴리고 있는지
      * 알기 어렵다 — 이상 감지 목록에서와 같은 이유다.
      */
-    private static void sizeOrderTableToRows(TableView<ObservableList<String>> table) {
-        table.setFixedCellSize(ORDER_ROW_HEIGHT);
+    private void sizeOrderTableToRows(TableView<ObservableList<String>> table) {
+        // setFixedCellSize(32) 를 무조건 걸어 두면 큰 글자 CSS의 56px 행 높이가
+        // 무시되어 글자의 위아래가 잘린다. 현재 글자 모드와 같은 높이로 표의 실제 행과
+        // 전체 높이를 함께 계산한다.
+        double rowHeight = accessibility.largeTextEnabled()
+                ? LARGE_ORDER_ROW_HEIGHT : ORDER_ROW_HEIGHT;
+        double headerHeight = accessibility.largeTextEnabled()
+                ? LARGE_ORDER_HEADER_HEIGHT : ORDER_HEADER_HEIGHT;
+        table.setFixedCellSize(rowHeight);
         Runnable resize = () -> {
             int rows = Math.max(1, table.getItems().size());
-            double height = ORDER_HEADER_HEIGHT + rows * ORDER_ROW_HEIGHT + 2;
+            double height = headerHeight + rows * rowHeight + 2;
             table.setMinHeight(height);
             table.setPrefHeight(height);
             table.setMaxHeight(height);
@@ -2543,7 +2644,8 @@ public final class DesktopApplication extends Application {
                 this::previewSpeechSettings,
                 this::auditCurrentScreen,
                 this::navigate,
-                status::setText);
+                status::setText,
+                microphone::monitorLevel);
         return new SettingsScreenView(accessibility, preventDuplicateOrders, context, actions)
                 .create();
     }
@@ -3256,6 +3358,7 @@ public final class DesktopApplication extends Application {
      * 알려 줘야 하고, 그 판단이 화면마다 갈라진다. 전부 다시 거는 편이 싸고 어긋나지 않는다.
      */
     private void applyAccessibility(AccessibilityPreferences updated) {
+        boolean textSizeChanged = accessibility.largeTextEnabled() != updated.largeTextEnabled();
         accessibility = updated;
         if (!speechQueue.isClosed()) {
             speechQueue.setOptions(updated.speechOptions());
@@ -3270,6 +3373,12 @@ public final class DesktopApplication extends Application {
         toggleClass("high-contrast", updated.highContrastEnabled());
         applyInformationDensity(updated.informationDensity());
         scheduleStateSave();
+        // 주문 표 높이는 데이터 행 수와 글자 크기를 함께 사용한다. 음성 명령으로 주문
+        // 화면에서 큰 글자를 바로 전환한 경우에도 32px 표가 남지 않게 화면을 다시 만든다.
+        if (textSizeChanged && screenController.currentScreen().orElse(null) == Screen.TRADING) {
+            screenController.invalidate(Screen.TRADING);
+            Platform.runLater(() -> screenController.show(Screen.TRADING));
+        }
     }
 
     private void applyKeyboardGuidance(boolean enabled) {
