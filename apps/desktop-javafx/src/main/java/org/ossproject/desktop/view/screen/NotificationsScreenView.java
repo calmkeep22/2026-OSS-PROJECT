@@ -53,18 +53,36 @@ public final class NotificationsScreenView {
         this.speak = Objects.requireNonNull(speak, "speak");
     }
 
+    /** 이상 감지 신호인지. 그것은 전용 화면의 몫이라 알림 목록에 세우지 않는다. */
+    static boolean isAnomaly(String notification) {
+        return notification != null && notification.contains("· 이상 감지 ·");
+    }
+
+    /** 알림 목록에 보여 줄 항목인지. */
+    private static boolean shownHere(String notification) {
+        return !isAnomaly(notification);
+    }
+
     public ScrollPane create() {
         Label title = heading("알림");
-        ComboBox<String> filter = new ComboBox<>(FXCollections.observableArrayList("전체", "주문", "가격", "이상 감지", "연결"));
+        // "이상 감지" 를 고르개에서 뺀다. 이 화면은 이상 신호를 아예 보여 주지 않는다.
+        ComboBox<String> filter = new ComboBox<>(FXCollections.observableArrayList("전체", "주문", "가격", "연결"));
         filter.setValue("전체");
         Button allRead = new Button("모두 읽음");
         Button clearAll = new Button("전체 지우기");
         clearAll.getStyleClass().add("danger-outline-button");
         Region spacer = new Region(); HBox.setHgrow(spacer, Priority.ALWAYS);
         HBox header = new HBox(10, title, spacer, filter, allRead, clearAll); header.setAlignment(Pos.CENTER_LEFT);
-        FilteredList<String> filtered = new FilteredList<>(entries, value -> true);
+        // 이상 감지 신호는 여기 오지 않는다. 전용 화면이 따로 있고, 거기서 보유·관심
+        // 종목으로 나눠 보여 주며 듣기와 지우기까지 한다. 같은 것을 두 곳에 쌓으면
+        // 알림 목록이 이상 신호로 뒤덮여 주문·연결 알림이 묻힌다.
+        //
+        // 값은 지우지 않는다. 이상 감지 화면이 같은 목록을 읽어 쓰기 때문이다 —
+        // 여기서는 보여 주지만 않는다.
+        FilteredList<String> filtered = new FilteredList<>(entries, NotificationsScreenView::shownHere);
         filter.valueProperty().addListener((obs, old, selected) -> filtered.setPredicate(
-                value -> selected == null || selected.equals("전체") || value.contains("· " + selected + " ·")));
+                value -> shownHere(value) && (selected == null || selected.equals("전체")
+                        || value.contains("· " + selected + " ·"))));
         ListView<String> notifications = new ListView<>(filtered);
         notifications.setAccessibleText("알림 목록"); notifications.setPrefHeight(430);
         allRead.setOnAction(event -> {
@@ -74,17 +92,20 @@ public final class NotificationsScreenView {
         });
         clearAll.setAccessibleText("저장된 알림 기록 전체 지우기");
         clearAll.setOnAction(event -> {
-            if (entries.isEmpty()) {
+            // 보이지 않는 것을 지우지 않는다. 이상 감지 신호는 이 화면에 없으므로
+            // 여기서 지워지면 사용자는 무엇이 사라졌는지 알 수 없다.
+            long visible = entries.stream().filter(NotificationsScreenView::shownHere).count();
+            if (visible == 0) {
                 status.accept("지울 알림이 없습니다.");
                 return;
             }
             Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION,
-                    "저장된 알림 " + entries.size() + "건을 모두 지우시겠습니까?",
+                    "저장된 알림 " + visible + "건을 모두 지우시겠습니까?",
                     ButtonType.OK, ButtonType.CANCEL);
             confirmation.setHeaderText("알림 기록 전체 지우기");
             styleDialog(confirmation);
             confirmation.showAndWait().filter(ButtonType.OK::equals).ifPresent(result -> {
-                entries.clear();
+                entries.removeIf(NotificationsScreenView::shownHere);
                 onChanged.run();
                 status.accept("모든 알림 기록을 지웠습니다.");
             });

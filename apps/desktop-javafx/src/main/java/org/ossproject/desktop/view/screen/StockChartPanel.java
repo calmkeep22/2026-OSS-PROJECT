@@ -138,6 +138,7 @@ public final class StockChartPanel {
         table.getColumns().add(column("저가", point -> formatPrice.apply(point.low())));
         table.getColumns().add(column("종가", point -> formatPrice.apply(point.close())));
         table.getColumns().add(column("거래량", point -> Long.toString(point.volume())));
+        org.ossproject.desktop.view.UiKit.alignByContent(table);
         table.setPrefHeight(350);
         return table;
     }

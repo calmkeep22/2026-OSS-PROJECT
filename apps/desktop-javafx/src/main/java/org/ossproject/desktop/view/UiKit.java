@@ -6,11 +6,16 @@ import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
+import javafx.scene.Parent;
+import javafx.scene.control.Skin;
 import javafx.scene.control.*;
+import javafx.scene.control.skin.TableViewSkin;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.*;
+import javafx.scene.shape.Line;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -265,10 +270,11 @@ public final class UiKit {
     @SafeVarargs
     public static <T> TableView<T> typedTable(String accessibleName, ObservableList<T> items,
                                                TableColumn<T, String>... columns) {
-        TableView<T> table = new TableView<>(items);
+        TableView<T> table = alignedTable(items);
         table.setAccessibleText(accessibleName);
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
         table.getColumns().setAll(columns);
+        alignByContent(table);
         return table;
     }
 
@@ -282,7 +288,7 @@ public final class UiKit {
     public static TableView<ObservableList<String>> textTable(String accessibleName,
                                                                ObservableList<ObservableList<String>> items,
                                                                String... headers) {
-        TableView<ObservableList<String>> table = new TableView<>(items);
+        TableView<ObservableList<String>> table = alignedTable(items);
         table.setAccessibleText(accessibleName); table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
         for (int i = 0; i < headers.length; i++) {
             final int index = i;
@@ -291,7 +297,150 @@ public final class UiKit {
                     data.getValue().size() > index ? data.getValue().get(index) : ""));
             table.getColumns().add(column);
         }
+        alignByContent(table);
         return table;
+    }
+
+    /** 헤더에서 잰 하나의 구분선을 표 전체에 그리는 표. */
+    public static <T> TableView<T> alignedTable(ObservableList<T> items) {
+        TableView<T> table = new GridlinedTableView<>(items);
+        table.getStyleClass().add("aligned-data-table");
+        return table;
+    }
+
+    /**
+     * JavaFX 17은 머리글과 VirtualFlow 안의 값 셀을 서로 다른 유효 폭으로 배치한다.
+     * 셀마다 오른쪽 테두리를 두면 그 작은 차이가 열마다 누적되어 두 줄처럼 보인다.
+     * 이 표는 셀 테두리를 쓰지 않고, 실제 머리글 경계를 읽어 한 개의 선을 머리글부터
+     * 본문 끝까지 이어 그린다. 따라서 글자 크기나 창 폭이 바뀌어도 분리될 선이 없다.
+     */
+    private static final class GridlinedTableView<T> extends TableView<T> {
+        private GridlinedTableView(ObservableList<T> items) {
+            super(items);
+        }
+
+        @Override
+        protected Skin<?> createDefaultSkin() {
+            return new HeaderGridTableSkin<>(this);
+        }
+    }
+
+    private static final class HeaderGridTableSkin<T> extends TableViewSkin<T> {
+        private final Pane grid = new Pane();
+
+        private HeaderGridTableSkin(TableView<T> table) {
+            super(table);
+            grid.setManaged(false);
+            grid.setMouseTransparent(true);
+            grid.getStyleClass().add("aligned-column-grid");
+            getChildren().add(grid);
+        }
+
+        @Override
+        protected void layoutChildren(double x, double y, double width, double height) {
+            super.layoutChildren(x, y, width, height);
+            TableView<T> table = getSkinnable();
+            grid.resizeRelocate(0, 0, table.getWidth(), table.getHeight());
+            drawGridFromHeaders(table);
+            grid.toFront();
+        }
+
+        private void drawGridFromHeaders(TableView<T> table) {
+            if (table.getStyleClass().contains("empty-search-results")) {
+                grid.getChildren().clear();
+                return;
+            }
+            List<Node> headers = table.lookupAll(".column-header").stream()
+                    .filter(Node::isVisible)
+                    .filter(node -> node instanceof Parent parent
+                            && parent.getChildrenUnmodifiable().stream()
+                            .anyMatch(Label.class::isInstance))
+                    .sorted(Comparator.comparingDouble(node -> tableBounds(table, node).getMinX()))
+                    .toList();
+
+            int dividerCount = Math.max(0, Math.min(table.getColumns().size(), headers.size()) - 1);
+            while (grid.getChildren().size() < dividerCount) {
+                Line line = new Line();
+                line.setManaged(false);
+                line.setMouseTransparent(true);
+                line.setSmooth(false);
+                line.getStyleClass().add("aligned-column-divider");
+                grid.getChildren().add(line);
+            }
+            while (grid.getChildren().size() > dividerCount) {
+                grid.getChildren().remove(grid.getChildren().size() - 1);
+            }
+            if (dividerCount == 0) return;
+
+            double top = snapLine(tableBounds(table, headers.get(0)).getMinY());
+            double bottom = table.getHeight();
+            Node horizontalBar = table.lookup(".scroll-bar:horizontal");
+            if (horizontalBar != null && horizontalBar.isVisible()) {
+                bottom = Math.min(bottom, tableBounds(table, horizontalBar).getMinY());
+            }
+            bottom = snapLine(bottom);
+
+            for (int index = 0; index < dividerCount; index++) {
+                double dividerX = snapLine(tableBounds(table, headers.get(index)).getMaxX());
+                Line line = (Line) grid.getChildren().get(index);
+                line.setStartX(dividerX);
+                line.setEndX(dividerX);
+                line.setStartY(top);
+                line.setEndY(bottom);
+            }
+        }
+
+        private static javafx.geometry.Bounds tableBounds(TableView<?> table, Node node) {
+            return table.sceneToLocal(node.localToScene(node.getBoundsInLocal()));
+        }
+
+        /** 1px 선을 물리 픽셀 가운데 놓아 흐려지지 않게 한다. */
+        private static double snapLine(double value) {
+            return Math.floor(value) + 0.5;
+        }
+    }
+
+
+    /** 머리글과 모든 값을 같은 가운데 기준선에 둔다. */
+    public static void alignByContent(TableView<?> table) {
+        for (TableColumn<?, ?> column : table.getColumns()) {
+            column.setStyle("-fx-alignment: CENTER;");
+            column.getStyleClass().remove("numeric-column");
+        }
+    }
+
+    /** 지금 담긴 값의 과반이 숫자인 열인지. 표가 비어 있으면 글자 열로 둔다. */
+    private static boolean columnIsNumeric(TableView<?> table, TableColumn<?, ?> column) {
+        int rows = Math.min(table.getItems().size(), 30);
+        int seen = 0;
+        int numeric = 0;
+        for (int row = 0; row < rows; row++) {
+            Object value;
+            try {
+                value = column.getCellData(row);
+            } catch (RuntimeException unreadable) {
+                continue;
+            }
+            if (value == null) continue;
+            String text = value.toString().strip();
+            if (text.isEmpty()) continue;
+            seen++;
+            if (looksNumeric(text)) numeric++;
+        }
+        return seen > 0 && numeric * 2 > seen;
+    }
+
+    /**
+     * 숫자로 보이는 값인지.
+     *
+     * <p>정규식을 쓰지 않는다. 앞의 부호를 건너뛰고 첫 글자가 숫자인지만 본다.
+     * "5,080원", "+180원", "1.77%", "-3.2%", "2" 가 모두 숫자로 잡히고,
+     * "동화약품", "매수", "KOSPI" 는 잡히지 않는다.
+     */
+    static boolean looksNumeric(String text) {
+        int at = 0;
+        while (at < text.length() && (text.charAt(at) == '+' || text.charAt(at) == '-')) at++;
+        return at < text.length() && Character.isDigit(text.charAt(at));
     }
 
     public static Label stateBanner(String text, String tone) {
@@ -358,6 +507,7 @@ public final class UiKit {
         // 큰 글자에서 9개 열을 화면 폭에 강제로 압축하면 값이 잘린다. 각 열에 읽을 수 있는
         // 최소 폭을 주고 표 자체의 가로 스크롤로 이동하게 한다.
         table.setColumnResizePolicy(TableView.UNCONSTRAINED_RESIZE_POLICY);
+        table.getStyleClass().add("variable-width-table");
         double[] widths = {150, 125, 150, 90, 125, 85, 85, 85, 125};
         for (int index = 0; index < table.getColumns().size(); index++) {
             TableColumn<ObservableList<String>, ?> column = table.getColumns().get(index);

@@ -6,7 +6,9 @@ import javafx.collections.transformation.FilteredList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
+import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonType;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
@@ -20,6 +22,7 @@ import javafx.scene.layout.VBox;
 import org.ossproject.finance.model.account.Account;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -128,6 +131,37 @@ public final class AnomalyScreenView {
             notificationsChanged.run();
             status.accept("선택한 이상 감지 신호를 지웠습니다.");
         });
+        // 신호가 쌓이면 하나씩 지우는 것으로는 감당이 안 된다. 장 중에는 몇십 건이
+        // 금방 모이고, 화면을 볼 수 없는 사용자는 목록을 훑어 고르는 것 자체가 일이다.
+        //
+        // 되돌릴 수 없으므로 몇 건인지 세어 보여 주고 한 번 더 묻는다. 지운 뒤에는
+        // 무엇이 사라졌는지 말로도 알린다 — 목록이 비었다는 사실이 화면에만 남으면
+        // 소리로 쓰는 사용자에게는 아무 일도 일어나지 않은 것과 같다.
+        Button clearAll = new Button("신호 모두 삭제");
+        clearAll.getStyleClass().add("danger-outline-button");
+        clearAll.setAccessibleText("이상 감지 신호 전체 삭제");
+        clearAll.setOnAction(event -> {
+            List<String> everySignal = notifications.stream()
+                    .filter(value -> value.contains("· 이상 감지 ·"))
+                    .toList();
+            if (everySignal.isEmpty()) {
+                status.accept("지울 이상 감지 신호가 없습니다.");
+                speak.accept("지울 이상 감지 신호가 없습니다.", "anomaly-clear-none");
+                return;
+            }
+            Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION,
+                    "이상 감지 신호 " + everySignal.size() + "건을 모두 지우시겠습니까?",
+                    ButtonType.OK, ButtonType.CANCEL);
+            confirmation.setHeaderText("이상 감지 신호 전체 삭제");
+            confirmation.showAndWait().filter(ButtonType.OK::equals).ifPresent(ignored -> {
+                notifications.removeAll(everySignal);
+                notificationsChanged.run();
+                String done = "이상 감지 신호 " + everySignal.size() + "건을 모두 지웠습니다.";
+                status.accept(done);
+                speak.accept(done, "anomaly-clear-all");
+            });
+        });
+
         holdings.getSelectionModel().selectedItemProperty().addListener((obs, old, selected) -> {
             if (selected != null) watchlist.getSelectionModel().clearSelection();
         });
@@ -139,7 +173,7 @@ public final class AnomalyScreenView {
 
         VBox shell = new VBox(9, header, urgentHost, aiInsightPanel,
                 section("보유 종목 알림", holdings), section("관심 종목 알림", watchlist),
-                wrappingRow(8, listen, delete));
+                wrappingRow(8, listen, delete, clearAll));
         shell.getStyleClass().addAll("anomaly-shell", "settings-shell");
         shell.setMaxWidth(1040);
         StackPane centered = new StackPane(shell);

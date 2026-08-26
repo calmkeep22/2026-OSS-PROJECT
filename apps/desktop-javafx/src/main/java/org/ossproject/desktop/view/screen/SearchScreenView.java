@@ -72,14 +72,43 @@ public final class SearchScreenView {
         Label emptyState = new Label();
         emptyState.setWrapText(true);
         results.setPlaceholder(emptyState);
+        Consumer<Boolean> showResultState = visible -> {
+            resultState.setVisible(visible);
+            resultState.setManaged(visible);
+        };
+        Consumer<Boolean> showResultTable = populated -> {
+            if (populated) {
+                results.getStyleClass().remove("empty-search-results");
+            } else if (!results.getStyleClass().contains("empty-search-results")) {
+                results.getStyleClass().add("empty-search-results");
+            }
+        };
+        // 검색 전에도 결과 박스의 크기와 외곽은 유지한다. 박스 안의 머리글·구분선과
+        // 안내 문구만 감추고, 실제 검색을 실행한 뒤 표 내용을 다시 보여 준다.
+        showResultState.accept(false);
+        showResultTable.accept(false);
+        long[] displayedRequest = {0};
 
         Consumer<Boolean> filter = focusResults -> {
+            long request = ++displayedRequest[0];
             String submittedQuery = query.getText() == null ? "" : query.getText().strip();
             if (focusResults) viewModel.recordRecentQuery(submittedQuery);
-            String loading = "종목을 조회하고 있습니다.";
-            resultState.setText(loading);
-            resultState.setAccessibleText("검색 상태. " + loading);
+            boolean hasQuery = !submittedQuery.isBlank();
+            showResultState.accept(hasQuery);
+            // 이전 결과의 선을 로딩 중에 잠깐 보여 주지 않는다. 새 조회가 끝날 때까지
+            // 외곽 박스만 유지하고, 결과가 확정된 순간 표를 한 번에 연다.
+            showResultTable.accept(false);
+            if (hasQuery) {
+                String loading = "종목을 조회하고 있습니다.";
+                resultState.setText(loading);
+                resultState.setAccessibleText("검색 상태. " + loading);
+            } else {
+                resultState.setText("");
+                resultState.setAccessibleText("");
+                emptyState.setText("");
+            }
             viewModel.filter(query.getText(), market.getValue()).whenComplete((result, failure) -> {
+                if (request != displayedRequest[0]) return;
                 if (failure != null) {
                     Platform.runLater(() -> {
                         String message = "종목 검색 화면을 갱신하지 못했습니다.";
@@ -91,6 +120,7 @@ public final class SearchScreenView {
                 }
                 if (!result.applied()) return;
                 String message = result.message();
+                showResultTable.accept(hasQuery);
                 resultState.setText(message);
                 resultState.setAccessibleText("검색 상태. " + message);
                 emptyState.setText(result.count() == 0 ? message : "");
@@ -107,33 +137,53 @@ public final class SearchScreenView {
                 if (!submittedQuery.isBlank()) {
                     announceOutcome.accept(outcomeSentence(submittedQuery, result.count()));
                 }
-                // 검색칸에서 Enter 를 눌렀는데 찾는 것이 분명하면 바로 연다.
-                // 지금까지는 목록에 세워 두고 Enter 를 한 번 더 받았다. 위쪽 통합
-                // 검색은 이미 바로 열어 주는데 여기만 달라서, 같은 이름을 같은 방식으로
-                // 쳤는데 화면마다 다르게 움직였다.
-                if (focusResults) {
-                    StockSearchItem direct = result.count() == 1
-                            ? viewModel.items().get(0)
-                            : viewModel.exactMatch(submittedQuery).orElse(null);
-                    if (direct != null) {
-                        viewModel.select(direct);
-                        navigate.accept(Screen.STOCK_DETAIL);
-                        return;
-                    }
-                }
+                // 여기서는 바로 열지 않는다. 목록에 세우고 사람이 고르게 둔다.
+                //
+                // 한동안 위쪽 통합 검색과 똑같이 바로 열게 두었다. 같은 이름을 쳤는데
+                // 화면마다 다르게 움직이는 것이 이상해 보였기 때문이다. 그런데 두 자리는
+                // 들어온 뜻이 다르다. 위쪽 검색칸은 "저기로 가자" 는 명령줄이고, 이 화면은
+                // 목록을 보려고 일부러 찾아 들어온 자리다. 찾아 들어온 사람을 첫 결과로
+                // 밀어내면 무엇이 더 있었는지 볼 기회가 없다.
+                //
+                // 화면을 볼 수 없는 사용자에게는 더 나쁘다. 방금 "3건" 이라고 들었는데
+                // 화면이 이미 넘어가 있으면 나머지 둘을 확인할 방법이 없다.
                 if (focusResults && result.count() > 0) {
-                    // 검색어와 정확히 일치하는 종목이 있으면 그걸 선택해 둔다. 없으면 첫 행.
+                    // 고를 행을 미리 세워 둔다. 검색어와 정확히 일치하는 것이 있으면 그것,
+                    // 없으면 첫 행이다.
                     viewModel.preferredItem().ifPresentOrElse(
                             preferred -> results.getSelectionModel().select(preferred),
                             () -> results.getSelectionModel().selectFirst());
                     results.scrollTo(results.getSelectionModel().getSelectedIndex());
-                    Platform.runLater(results::requestFocus);
+                    // 초점은 검색칸에 둔다. 표로 옮기면 이어서 치는 글자가 검색칸이 아니라
+                    // 표로 들어가, 검색어가 지워지지도 고쳐지지도 않는다. 실제로 두 번째
+                    // 검색부터 글자가 안 들어가는 것처럼 보였다.
+                    //
+                    // 목록으로 내려가는 길은 아래 방향키다. 몇 건인지는 이미 말로 알렸다.
                 }
             });
         };
+        // 검색칸에서 아래 방향키를 누르면 목록으로 내려간다. 초점을 검색칸에 두기로 한
+        // 이상, 목록으로 갈 길이 따로 있어야 한다. 탭을 여러 번 누르게 하면 소리로 쓰는
+        // 사용자에게는 그 사이가 전부 빈 시간이다.
+        query.setOnKeyPressed(event -> {
+            if (event.getCode() != KeyCode.DOWN || results.getItems().isEmpty()) return;
+            if (results.getSelectionModel().getSelectedItem() == null) {
+                results.getSelectionModel().selectFirst();
+            }
+            results.requestFocus();
+            event.consume();
+        });
         Button search = primaryButton("검색", () -> filter.accept(true));
-        query.setOnAction(event -> filter.accept(true));
         market.valueProperty().addListener((obs, old, value) -> filter.accept(false));
+        query.textProperty().addListener((obs, old, value) -> {
+            if (value == null || value.isBlank()) {
+                displayedRequest[0]++;
+                showResultState.accept(false);
+                showResultTable.accept(false);
+                resultState.setText("");
+                emptyState.setText("");
+            }
+        });
         Button clear = new Button("검색 초기화");
         clear.setOnAction(event -> {
             query.clear();
@@ -143,8 +193,8 @@ public final class SearchScreenView {
         });
         HBox searchBar = new HBox(10, query, market, search, clear);
         searchBar.setAlignment(Pos.CENTER_LEFT); HBox.setHgrow(query, Priority.ALWAYS);
-        resultState.setText("검색 준비됨");
-        emptyState.setText("종목을 조회하고 있습니다.");
+        resultState.setText("");
+        emptyState.setText("");
 
         Runnable openSelected = () -> {
             StockSearchItem selected = results.getSelectionModel().getSelectedItem();
@@ -158,6 +208,28 @@ public final class SearchScreenView {
         };
         results.setOnMouseClicked(event -> { if (event.getClickCount() == 2) openSelected.run(); });
         results.setOnKeyPressed(event -> { if (event.getCode() == KeyCode.ENTER) openSelected.run(); });
+
+        // 검색칸의 Enter 는 두 가지 일을 한다.
+        //
+        //   같은 말로 처음 누르면  -> 찾는다
+        //   그대로 한 번 더 누르면 -> 세워 둔 종목을 연다
+        //
+        // 초점을 검색칸에 두기로 했으니 여는 길이 따로 있어야 한다. 없으면 목록까지
+        // 내려갔다가 다시 올라와야 하고, 소리로 쓰는 사용자에게는 그 사이가 전부 빈
+        // 시간이다. 검색어를 고치면 다시 "찾기" 부터 시작한다 — 고친 말과 다른 종목이
+        // 열리면 안 된다.
+        String[] lastSubmitted = {null};
+        query.setOnAction(event -> {
+            String typed = query.getText() == null ? "" : query.getText().strip();
+            boolean sameQueryAgain = typed.equals(lastSubmitted[0])
+                    && results.getSelectionModel().getSelectedItem() != null;
+            if (sameQueryAgain) {
+                openSelected.run();
+                return;
+            }
+            lastSubmitted[0] = typed;
+            filter.accept(true);
+        });
         VBox body = new VBox(10, title, searchBar, resultState, results);
         body.getStyleClass().addAll("screen-content", "search-screen");
         body.setPadding(new Insets(12));
@@ -171,7 +243,8 @@ public final class SearchScreenView {
         // 결과가 없으면 검색칸이 맞다. 훑을 것이 없는데 목록에 세워 두면 아무 데도
         // 못 간다. 검색칸은 목록에서 Shift+Tab 한 번, 또는 Alt+S 로 언제든 돌아간다.
         Platform.runLater(() -> {
-            if (viewModel.items().isEmpty()) {
+            if (results.getStyleClass().contains("empty-search-results")
+                    || viewModel.items().isEmpty()) {
                 query.requestFocus();
                 return;
             }
@@ -184,7 +257,8 @@ public final class SearchScreenView {
     }
 
     private TableView<StockSearchItem> createResultTable() {
-        TableView<StockSearchItem> table = new TableView<>(viewModel.items());
+        TableView<StockSearchItem> table = alignedTable(viewModel.items());
+        table.getStyleClass().add("search-results-table");
         table.setAccessibleText("종목 검색 결과");
         table.setAccessibleHelp("위아래 방향키로 종목을 선택하고 Enter를 누르면 상세 화면을 엽니다.");
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
@@ -194,6 +268,7 @@ public final class SearchScreenView {
         table.getColumns().add(column("거래소", StockSearchItem::exchange));
         table.getColumns().add(column("현재가", StockSearchItem::price));
         table.getColumns().add(column("등락률", StockSearchItem::changeRate));
+        org.ossproject.desktop.view.UiKit.alignByContent(table);
         table.setMinHeight(0);
         table.setMaxHeight(Double.MAX_VALUE);
         table.getSelectionModel().selectedItemProperty().addListener((observable, previous, selected) -> {
